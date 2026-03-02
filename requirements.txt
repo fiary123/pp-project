@@ -1,0 +1,13 @@
+# 依赖包列表
+fastapi
+uvicorn
+crewai
+chromadb
+pydantic
+langchain-openai
+crewai
+langchain-google-genai
+langchain-openai
+chromadb
+fastapi
+uvicorn
