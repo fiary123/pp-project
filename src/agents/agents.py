@@ -4,12 +4,34 @@ import json
 import chromadb
 from crewai import Agent, Task, Crew, Process
 from crewai.tools import tool
+from langchain_google_genai import ChatGoogleGenerativeAI
 
-# ⚠️ 注意：这里必须填入你的大模型 API Key（例如 OpenAI）
-os.environ["gemini"] = "AIzaSyCDQabIpN9Au-z8Fji9MsybM8eeLPhI4Fw"
+# ==========================================
+# 1. 环境与模型配置
+# ==========================================
+# 设置代理（请确保端口与你的科学上网工具一致）
+os.environ["http_proxy"] = "socks5h://127.0.0.1:10812"
+os.environ["https_proxy"] = "socks5h://127.0.0.1:10812"
 
-# 连接刚才生成的本地向量库
-chroma_client = chromadb.PersistentClient(path="./chroma_data")
+# 填入你的 Gemini API Key
+api_key = "AIzaSyD-jPyLAHNUGEtYjiZC_BjqVUTlyI0eFHQ"
+os.environ["GOOGLE_API_KEY"] = api_key
+
+# 初始化 Gemini 模型
+llm = ChatGoogleGenerativeAI(
+    model="gemini-1.5-flash",
+    verbose=True,
+    temperature=0.5,
+    google_api_key=api_key
+)
+
+# 连接本地向量库
+try:
+    from src.database.db_config import CHROMA_DB_PATH
+except ImportError:
+    from ..database.db_config import CHROMA_DB_PATH
+
+chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
 pet_collection = chroma_client.get_collection(name="pet_profiles")
 
 # 定义提供给智能体的检索工具
@@ -27,12 +49,13 @@ def search_pet_tool(query: str) -> str:
 def run_pet_crew(user_message: str) -> str:
     """运行多智能体工作流"""
     
-    # 1. 定义智能体
+    # 1. 定义智能体，显式传入 llm
     recommender = Agent(
         role='资深宠物匹配专家',
         goal='从知识库检索并推荐最符合用户需求的宠物。',
         backstory='你曾在顶级动物救助站工作，擅长根据用户居住空间和作息进行科学匹配。',
         tools=[search_pet_tool],
+        llm=llm,
         verbose=True,
         allow_delegation=False
     )
@@ -41,6 +64,7 @@ def run_pet_crew(user_message: str) -> str:
         role='首席宠物医疗顾问',
         goal='解答用户的宠物健康疑问。',
         backstory='你是拥有15年经验的兽医。如果用户的话语中没有提到健康问题，你可以忽略并回复"无需健康建议"。',
+        llm=llm,
         verbose=True,
         allow_delegation=False
     )
@@ -49,6 +73,7 @@ def run_pet_crew(user_message: str) -> str:
         role='首席用户沟通官',
         goal='汇总匹配结果和医疗建议，用温暖的语言回复用户。',
         backstory='你是平台的前台，语气温暖充满同理心。请直接输出面向用户的回复。',
+        llm=llm,
         verbose=True,
         allow_delegation=False
     )

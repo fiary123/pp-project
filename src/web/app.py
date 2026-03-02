@@ -1,8 +1,16 @@
 # FastAPI 后端接口服务
+import os
+import sys
+# 将项目根目录添加到 sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from agents import run_pet_crew
+try:
+    from src.agents.agents import run_pet_crew
+except ImportError:
+    from ..agents.agents import run_pet_crew
 import uvicorn
 
 app = FastAPI(title="智能宠物领养平台 API")
