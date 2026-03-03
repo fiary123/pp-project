@@ -6,14 +6,20 @@ from crewai import Agent, Task, Crew, Process
 from crewai.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+# 导入专项 Agent 构造函数
+from .audit_expert import get_audit_expert_agent
+from .medical_expert import get_medical_expert_agent
+from .navigator import get_navigator_agent
+from .pet_expert import get_pet_expert_agent
+
 # ==========================================
 # 1. 环境与模型配置
 # ==========================================
-# 设置代理（请确保端口与你的科学上网工具一致）
+# 设置代理
 os.environ["http_proxy"] = "socks5h://127.0.0.1:10812"
 os.environ["https_proxy"] = "socks5h://127.0.0.1:10812"
 
-# 填入你的 Gemini API Key
+# Gemini API Key
 api_key = "AIzaSyD-jPyLAHNUGEtYjiZC_BjqVUTlyI0eFHQ"
 os.environ["GOOGLE_API_KEY"] = api_key
 
@@ -21,7 +27,7 @@ os.environ["GOOGLE_API_KEY"] = api_key
 llm = ChatGoogleGenerativeAI(
     model="gemini-1.5-flash",
     verbose=True,
-    temperature=0.5,
+    temperature=0.3,
     google_api_key=api_key
 )
 
@@ -32,77 +38,79 @@ except ImportError:
     from ..database.db_config import CHROMA_DB_PATH
 
 chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-pet_collection = chroma_client.get_collection(name="pet_profiles")
+knowledge_collection = chroma_client.get_or_create_collection(name="pet_knowledge")
 
-# 定义提供给智能体的检索工具
-@tool("Search Pet Database")
-def search_pet_tool(query: str) -> str:
+# ==========================================
+# 2. 定义公共检索工具
+# ==========================================
+
+@tool("Search Pet Knowledge Base")
+def search_knowledge_tool(query: str) -> str:
     """
-    当需要根据用户偏好匹配宠物时调用此工具。
-    输入应为凝练的搜索关键词（如："适合小户型、安静"）。
+    当用户询问关于宠物喂养、健康、疾病护理或日常训练等百科知识时调用。
     """
-    results = pet_collection.query(query_texts=[query], n_results=2)
+    results = knowledge_collection.query(query_texts=[query], n_results=3)
     if not results['documents'][0]:
-        return "未找到匹配的宠物。"
-    return f"检索到的候选宠物档案：\n{json.dumps(results['documents'][0], ensure_ascii=False)}"
+        return "在百科手册中未找到直接相关的知识点，请根据通用常识回答。"
+    
+    combined_docs = "\n\n".join(results['documents'][0])
+    return f"从《宠物百科手册》中找到的相关参考资料：\n\n{combined_docs}"
+
+# ==========================================
+# 3. 核心运行工作流
+# ==========================================
 
 def run_pet_crew(user_message: str) -> str:
-    """运行多智能体工作流"""
+    """
+    运行宠物领养匹配工作流 (整合 Pet Expert)
+    """
+    pet_expert = get_pet_expert_agent(llm)
     
-    # 1. 定义智能体，显式传入 llm
-    recommender = Agent(
-        role='资深宠物匹配专家',
-        goal='从知识库检索并推荐最符合用户需求的宠物。',
-        backstory='你曾在顶级动物救助站工作，擅长根据用户居住空间和作息进行科学匹配。',
-        tools=[search_pet_tool],
+    task = Task(
+        description=f'分析用户需求："{user_message}"。从数据库中匹配合适的宠物并生成推荐报告。',
+        expected_output='一份专业的 Markdown 格式宠物推荐报告，包含匹配指数。',
+        agent=pet_expert
+    )
+
+    crew = Crew(agents=[pet_expert], tasks=[task], process=Process.sequential)
+    return str(crew.kickoff())
+
+def run_audit_task(applicant_info: str, pet_info: str) -> str:
+    """
+    运行领养合规性审计任务
+    """
+    audit_expert = get_audit_expert_agent(llm)
+
+    task = Task(
+        description=f'''请对以下领养申请进行合规性审计：
+        【申请人背景】: {applicant_info}
+        【意向宠物信息】: {pet_info}
+        请输出一份结构化的《AI 预审报告》。''',
+        expected_output='一份包含 [匹配分值]、[优势]、[风险警示] 和 [审核建议] 的中文报告。',
+        agent=audit_expert
+    )
+
+    crew = Crew(agents=[audit_expert], tasks=[task], process=Process.sequential)
+    return str(crew.kickoff())
+
+def run_knowledge_expert(user_query: str) -> str:
+    """
+    运行“萌宠百事通”百科专家 Agent
+    """
+    fact_finder = Agent(
+        role='宠物百科百事通',
+        goal='基于知识库为用户提供最准确、专业的宠物喂养和护理建议。',
+        backstory='你是一部活的“宠物饲养全书”，擅长从海量资料中提取关键信息并用通俗易懂的方式讲解。',
+        tools=[search_knowledge_tool],
         llm=llm,
-        verbose=True,
-        allow_delegation=False
+        verbose=True
     )
 
-    health_advisor = Agent(
-        role='首席宠物医疗顾问',
-        goal='解答用户的宠物健康疑问。',
-        backstory='你是拥有15年经验的兽医。如果用户的话语中没有提到健康问题，你可以忽略并回复"无需健康建议"。',
-        llm=llm,
-        verbose=True,
-        allow_delegation=False
+    task = Task(
+        description=f'用户提问："{user_query}"。',
+        expected_output='一段专业、详细且易于理解的养宠建议或知识解答。',
+        agent=fact_finder
     )
 
-    dialogue_officer = Agent(
-        role='首席用户沟通官',
-        goal='汇总匹配结果和医疗建议，用温暖的语言回复用户。',
-        backstory='你是平台的前台，语气温暖充满同理心。请直接输出面向用户的回复。',
-        llm=llm,
-        verbose=True,
-        allow_delegation=False
-    )
-
-    # 2. 分解任务
-    task1 = Task(
-        description=f'分析用户需求："{user_message}"。提取适合的宠物。',
-        expected_output='推荐的宠物名单。',
-        agent=recommender
-    )
-    
-    task2 = Task(
-        description=f'分析："{user_message}" 中是否包含宠物健康疾病问题。有则解答，无则跳过。',
-        expected_output='健康建议或确认无异常。',
-        agent=health_advisor
-    )
-    
-    task3 = Task(
-        description='汇总前两个任务的结论，组织一段连贯、亲切的最终回复。',
-        expected_output='发给用户的最终纯文本回复。',
-        agent=dialogue_officer
-    )
-
-    # 3. 组建团队并顺序执行
-    crew = Crew(
-        agents=[recommender, health_advisor, dialogue_officer],
-        tasks=[task1, task2, task3],
-        process=Process.sequential
-    )
-    
-    result = crew.kickoff()
-    return str(result)
+    crew = Crew(agents=[fact_finder], tasks=[task], process=Process.sequential)
+    return str(crew.kickoff())
