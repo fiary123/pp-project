@@ -1,85 +1,59 @@
-以下是针对性优化的建议和修改后的 CSS 代码块：
+用户端
 
-1. 解决“顶部白色长方形”问题
-那个白色条通常是 Streamlit 的 st.header 容器。虽然你已经设置了 display: none，但由于 Streamlit 的版本更新，选择器可能失效。
+管理端
 
-建议方案： 增加 !important 并锁定更多的容器类名。
+首页：播放宠物视频，展示公告列表，介绍流浪宠物。
 
-2. 文字对比度与可读性
-你的背景使用了 Unsplash 的图片，这种图片通常明暗不均。
+主页：展示宠物领养系统各季度注册的人数，通过柱状图、折线图和饼图显示出来。
 
-遮罩层 (Overlay)： 在背景图上覆盖一层半透明的黑色（例如 rgba(0,0,0,0.5)），这样无论背景图是什么颜色，白色文字都能清晰可见。
+宠物领养：用户搜索想要领养宠物，申请领养，查看自己领养的宠物
 
-卡片化渲染： 所有的文字内容应包裹在具有微弱背景色（如半透明白或深灰）的容器中，而不是直接浮在背景图上。
+用户管理：对注册用户的信息管理
 
-3. 字体与布局细节
-字体族： 建议使用系统默认的无衬线字体，并明确设置 line-height（行高）以增强易读性。
+流浪宠物救助：用户能够看到需要救助的流浪宠物，并能够新增新的流浪宠物信息。
 
-优化后的 CSS 代码建议
-你可以将 streamlit_app.py 中的 st.markdown(""" <style> ... </style> """) 部分替换为以下内容：
+角色管理：管理员为注册的用户分配系统菜单
 
-CSS
-<style>
-    /* 1. 强力隐藏顶部白条及装饰线 */
-    header, [data-testid="stHeader"], .stAppHeader {
-        background-color: rgba(0,0,0,0) !important;
-        background: transparent !important;
-        border: none !important;
-    }
-    
-    /* 2. 背景优化：增加深色半透明遮罩，解决文字看不清的问题 */
-    [data-testid="stAppViewContainer"] {
-        background-image: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), 
-                          url("https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?ixlib=rb-4.0.3&auto=format&fit=crop&w=2043&q=80");
-        background-attachment: fixed;
-        background-size: cover;
-        font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-        color: #FFFFFF !important;
-    }
+宠物喂养点：用户能够看到需要喂养的流浪宠物的地点，并展示出地点环境。
 
-    /* 3. 优化卡片容器：增加对比度和圆角 */
-    .main-card {
-        background: rgba(255, 255, 255, 0.1); /* 极淡的白色背景 */
-        backdrop-filter: blur(10px); /* 磨砂玻璃效果 */
-        padding: 25px;
-        border-radius: 15px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        margin-bottom: 20px;
-        color: white !important;
-    }
+菜单管理：管理员对宠物领养系统后台菜单管理
 
-    /* 4. 调整输入框和文本域的字体颜色，防止在深色背景下“消失” */
-    .stTextInput input, .stTextArea textarea {
-        color: #333 !important; /* 输入框内文字建议用深色，因为底色通常是白/浅灰 */
-        font-size: 16px !important;
-    }
+丢失宠物查看：用户能够看到其他用户丢失的宠物和失主的信息
 
-    /* 5. 针对 Markdown 生成的文字进行加固 */
-    .stMarkdown p, .stMarkdown li {
-        color: rgba(255, 255, 255, 0.9) !important;
-        line-height: 1.6;
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.5); /* 给文字加微弱阴影，极大提升可读性 */
-    }
+文件管理：管理员统一管理系统文件，并将系统文件存放于电脑磁盘中
 
-    /* 6. 按钮样式优化 */
-    .stButton>button {
-        width: 100%;
-        border-radius: 20px;
-        background-color: #ff9f43 !important;
-        color: white !important;
-        border: none;
-        transition: all 0.3s ease;
-    }
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(255, 159, 67, 0.4);
-    }
-</style>
-针对代码逻辑的改进建议
-侧边栏 (Sidebar) 控制： 如果你发现主界面文字乱，可以考虑将“功能选择”移入侧边栏 (st.sidebar.selectbox)。这样可以释放主屏幕空间，让中间的内容更聚焦。
+流浪宠物救助站：展示宠物救助站地点、负责人和联系方式
 
-HTML 注入的安全做法： 在 st.markdown 中，尽量使用 unsafe_allow_html=True 配合封装好的 div。
+流浪动物管理：管理员通过管理流浪宠物模块，发布流浪宠物的详细信息并在用户端的页面进行展示
 
-例如：st.markdown(f"<div class='main-card'>{content}</div>", unsafe_allow_html=True)。
+宠物论坛：用户能够在此页面交流宠物领养的心得，评论别人发的帖子
 
-状态反馈： 在执行 run_pet_crew 这种耗时操作时，建议使用 st.status (Streamlit 1.25+) 替代单纯的 spinner，它可以展示 Agent 的思考步骤，用户体验会好很多。
+待绝育动物管理：管理流浪动物的健康信息
+
+宠物捐赠：用户联系负责人，对流浪宠物捐赠
+
+申请领养管理：管理员处理用户领养信息
+
+科普文章：用户能够阅读宠物相关的文章
+
+评论管理：管理员对宠物论坛的用户评论管理
+
+热门活动：管理员会发布宠物相关的热门活动，宠物爱好者可以了解并参加
+
+流浪动物救助：管理员发布需要救助的流浪动物，处理已经解决的流浪动物
+
+喂养点管理：管理员管理宠物喂养点
+
+动物走失管理：管理员管理丢失的动物
+
+救助站管理：管理员管理流浪动物的救助站
+
+帖子管理：管理员管理宠物论坛的帖子
+
+捐赠管理：管理员添加捐赠人的信息。
+
+公告管理：管理员管理用户端首页公告
+
+科普文章管理：管理员管理用户端的科普文章展示
+
+活动管理：管理员管理宠物相关的活动，并发布到用户端的热门活动模块
