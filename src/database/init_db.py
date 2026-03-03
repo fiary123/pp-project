@@ -6,7 +6,7 @@ def init_database():
     conn = sqlite3.connect(SQLITE_DB_PATH)
     cursor = conn.cursor()
 
-    # 1. 创建用户表 (增加 email 唯一约束)
+    # 1. 创建用户表
     cursor.execute("DROP TABLE IF EXISTS users")
     cursor.execute('''
         CREATE TABLE users (
@@ -14,7 +14,7 @@ def init_database():
             username TEXT NOT NULL,
             email TEXT NOT NULL UNIQUE, 
             password TEXT NOT NULL,
-            role TEXT DEFAULT 'individual', -- 'individual', 'org_admin', 'root'
+            role TEXT DEFAULT 'individual', 
             occupation TEXT,
             living_env TEXT,
             preference TEXT,
@@ -22,7 +22,7 @@ def init_database():
         )
     ''')
 
-    # 2. 宠物表 (区分发布者)
+    # 2. 宠物表 (增加 image_url 字段以支持瀑布流)
     cursor.execute("DROP TABLE IF EXISTS pets")
     cursor.execute('''
         CREATE TABLE pets (
@@ -34,6 +34,7 @@ def init_database():
             is_shedding TEXT,
             energy_level TEXT,
             description TEXT,
+            image_url TEXT,
             status TEXT DEFAULT '待领养', 
             FOREIGN KEY (owner_id) REFERENCES users (id)
         )
@@ -65,15 +66,26 @@ def init_database():
     ]
     cursor.executemany("INSERT INTO users (username, email, password, role, occupation, living_env, preference, contact) VALUES (?,?,?,?,?,?,?,?)", test_users)
 
-    # 5. 插入初始宠物 (由 admin 发布)
-    cursor.execute("INSERT INTO pets (owner_id, name, species, age, is_shedding, energy_level, description) VALUES (?,?,?,?,?,?,?)",
-                   (2, '布丁', '英国短毛猫', 2, '极少', '安静', '性格温和，喜欢陪伴工作中的主人'))
-    cursor.execute("INSERT INTO pets (owner_id, name, species, age, is_shedding, energy_level, description) VALUES (?,?,?,?,?,?,?)",
-                   (2, '豆包', '比熊犬', 1, '不掉毛', '中等', '体型小，聪明，不掉毛，适合公寓'))
+    # 5. 插入丰富的高清宠物测试数据 (支持瀑布流展示)
+    pets_data = [
+        (2, '布丁', '英国短毛猫', 2, '极少', '安静', '性格温和，喜欢陪伴工作中的主人。它有一双大大的金黄色眼睛，非常治愈。', 
+         'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?q=80&w=1000&auto=format&fit=crop'),
+        (2, '豆包', '比熊犬', 1, '不掉毛', '中等', '体型小，聪明，不掉毛，适合公寓居住。非常粘人，是绝佳的伴侣犬。', 
+         'https://images.unsplash.com/photo-1516734212186-a967f81ad0d7?q=80&w=1000&auto=format&fit=crop'),
+        (2, '辛巴', '金毛寻回犬', 3, '较多', '高', '典型的大暖男，对人非常友好，适合有院子的家庭。喜欢玩水和接球。', 
+         'https://images.unsplash.com/photo-1552053831-71594a27632d?q=80&w=1000&auto=format&fit=crop'),
+        (2, '年糕', '萨摩耶', 1, '非常多', '高', '微笑天使，虽然爱掉毛，但颜值极高，性格活泼。需要主人有足够的耐心打理毛发。', 
+         'https://images.unsplash.com/photo-1529429617329-8a79e088c02c?q=80&w=1000&auto=format&fit=crop'),
+        (2, '奥利奥', '边境牧羊犬', 2, '中等', '极高', '智商天花板，能够听懂许多复杂的指令。需要大量运动和智力挑战。', 
+         'https://images.unsplash.com/photo-1503256207526-0df5d6342a00?q=80&w=1000&auto=format&fit=crop'),
+        (2, '奶油', '布偶猫', 1, '中等', '安静', '颜值超高，像洋娃娃一样。性格极好，任抱任摸。', 
+         'https://images.unsplash.com/photo-1533738363-b7f9aef128ce?q=80&w=1000&auto=format&fit=crop')
+    ]
+    cursor.executemany("INSERT INTO pets (owner_id, name, species, age, is_shedding, energy_level, description, image_url) VALUES (?,?,?,?,?,?,?,?)", pets_data)
 
     conn.commit()
     conn.close()
-    print("✅ 数据库重置成功！邮箱唯一约束已生效。")
+    print("✅ 数据库重置成功！已增加图片 URL 以支持瀑布流。")
 
 if __name__ == "__main__":
     init_database()

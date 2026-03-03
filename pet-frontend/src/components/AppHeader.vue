@@ -1,0 +1,73 @@
+<script setup lang="ts">
+import { useRouter, useRoute } from 'vue-router'
+import { PawPrint, Heart, BookOpen, Search, ShieldCheck } from 'lucide-vue-next'
+
+const router = useRouter()
+const route = useRoute()
+const emit = defineEmits(['open-command'])
+
+const navItems = [
+  { name: '智能分诊', path: '/triage', icon: Heart },
+  { name: '养宠百科', path: '/wiki', icon: BookOpen },
+  { name: '寻找领养', path: '/adopt', icon: Search },
+  { name: '管理审核', path: '/dashboard', icon: ShieldCheck },
+]
+
+const navigate = (path: string) => {
+  router.push(path)
+}
+</script>
+
+<template>
+  <nav class="fixed top-0 z-50 w-full border-b border-white/10 bg-black/20 backdrop-blur-lg">
+    <div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+      <!-- Logo 区域 -->
+      <div class="flex items-center gap-3 cursor-pointer group" @click="navigate('/')">
+        <div class="bg-orange-500 p-2 rounded-xl text-white shadow-lg shadow-orange-500/40 group-hover:scale-110 transition-transform">
+          <PawPrint :size="20" />
+        </div>
+        <h1 class="text-xl font-black tracking-tighter text-white drop-shadow-md">
+          SmartPet <span class="text-orange-400">Hub</span>
+        </h1>
+      </div>
+
+      <!-- 导航项 -->
+      <div class="hidden md:flex gap-2">
+        <button
+          v-for="item in navItems"
+          :key="item.path"
+          @click="navigate(item.path)"
+          :class="[
+            'flex items-center gap-2 px-4 py-2 text-sm font-bold transition-all duration-300 rounded-xl border',
+            route.path === item.path 
+              ? 'bg-orange-500 border-orange-400 text-white shadow-lg shadow-orange-500/30' 
+              : 'text-gray-300 border-transparent hover:bg-white/10 hover:text-white'
+          ]"
+        >
+          <component :is="item.icon" :size="16" />
+          {{ item.name }}
+        </button>
+      </div>
+
+      <!-- 右侧操作 -->
+      <div class="flex items-center gap-4">
+        <!-- 独立的 AI 搜索入口 -->
+        <button 
+          @click="emit('open-command')"
+          class="p-2 rounded-full bg-white/5 border border-white/10 text-gray-400 hover:text-orange-400 hover:bg-white/10 transition-all"
+          title="AI 智能指令中心 (Ctrl+K)"
+        >
+          <Search :size="20" />
+        </button>
+        
+        <div class="w-9 h-9 rounded-full border-2 border-white/20 overflow-hidden cursor-pointer hover:border-orange-400 transition-colors">
+          <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Lucky" alt="avatar" />
+        </div>
+      </div>
+    </div>
+  </nav>
+</template>
+
+<style scoped>
+@reference "tailwindcss";
+</style>
