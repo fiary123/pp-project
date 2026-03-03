@@ -8,7 +8,7 @@ import base64
 from io import BytesIO
 from crewai import Agent, Task, Crew, Process
 from crewai.tools import tool
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI # 修改：使用 OpenAI 适配器
 
 # 导入专项 Agent 构造函数
 from .audit_expert import get_audit_expert_agent
@@ -18,22 +18,19 @@ from .pet_expert import get_pet_expert_agent
 from .pet_persona import get_pet_persona_agent
 
 # ==========================================
-# 1. 环境与模型配置
+# 1. 环境与模型配置 (改为 OpenAI/DeepSeek 兼容模式)
 # ==========================================
-# 设置代理
-os.environ["http_proxy"] = "socks5h://127.0.0.1:10812"
-os.environ["https_proxy"] = "socks5h://127.0.0.1:10812"
 
-# Gemini API Key
-api_key = "AIzaSyD-jPyLAHNUGEtYjiZC_BjqVUTlyI0eFHQ"
-os.environ["GOOGLE_API_KEY"] = api_key
+# 从环境变量或硬编码获取（已同步 app.py 中的 Key）
+OPENAI_API_KEY = "sk-c69656763f3a49bc9650e243c5ce0542" 
+OPENAI_BASE_URL = "https://api.deepseek.com" 
 
-# 初始化 Gemini 模型
-llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
-    verbose=True,
-    temperature=0.3,
-    google_api_key=api_key
+# 初始化通用 LLM 驱动
+llm = ChatOpenAI(
+    model="deepseek-chat", 
+    openai_api_key=OPENAI_API_KEY,
+    openai_api_base=OPENAI_BASE_URL,
+    temperature=0.3
 )
 
 # 连接本地向量库

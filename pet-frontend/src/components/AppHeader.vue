@@ -60,7 +60,10 @@ const navigate = (path: string) => {
           <Search :size="20" />
         </button>
         
-        <div class="w-9 h-9 rounded-full border-2 border-white/20 overflow-hidden cursor-pointer hover:border-orange-400 transition-colors">
+        <div 
+          @click="navigate('/profile')"
+          class="w-9 h-9 rounded-full border-2 border-white/20 overflow-hidden cursor-pointer hover:border-orange-400 transition-colors shadow-lg shadow-orange-500/10"
+        >
           <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Lucky" alt="avatar" />
         </div>
       </div>
