@@ -1,59 +1,85 @@
-如果你决定参考报告中的思路，将现有的“单体架构”调整为**“分布式 Agent 架构”（即使不完全照搬 UTCP 协议的所有细节），这对于你的毕业设计来说是一个巨大的技术升级**。
+以下是针对性优化的建议和修改后的 CSS 代码块：
 
-以下是从毕设角度分析的好处、难度以及改动量：
+1. 解决“顶部白色长方形”问题
+那个白色条通常是 Streamlit 的 st.header 容器。虽然你已经设置了 display: none，但由于 Streamlit 的版本更新，选择器可能失效。
 
-一、 改为分布式架构的好处（论文加分项）
-真正的“多机协作”演示：
-你可以在两台笔记本或者虚拟机上演示：一台机器运行“医疗专家 Agent”，另一台机器运行“高德地图服务”。这种跨设备的协同在答辩时极具冲击力。
+建议方案： 增加 !important 并锁定更多的容器类名。
 
-异构技术集成（解耦）：
-目前的架构下，所有代码必须是 Python。改为分布式后，你的“医院导诊工具”可以用 Java 或 Go 编写，只要它符合通信标准。这体现了你对微服务架构的理解。
+2. 文字对比度与可读性
+你的背景使用了 Unsplash 的图片，这种图片通常明暗不均。
 
-性能与可靠性隔离：
-如果“医疗专家”因为处理长文本卡住了，不会导致整个 Streamlit 界面崩溃或影响其他 Agent 的运行。每个 Agent 拥有独立的内存空间。
+遮罩层 (Overlay)： 在背景图上覆盖一层半透明的黑色（例如 rgba(0,0,0,0.5)），这样无论背景图是什么颜色，白色文字都能清晰可见。
 
-技术深度与前瞻性：
-你在论文中可以写：“本项目不仅实现了业务逻辑，还探索了向微服务化智能体架构的范式转移，解决了单体 Agent 平台在复杂环境下的资源争用问题。”
+卡片化渲染： 所有的文字内容应包裹在具有微弱背景色（如半透明白或深灰）的容器中，而不是直接浮在背景图上。
 
-二、 难度分析：难不难？
-难度等级：中等偏上
+3. 字体与布局细节
+字体族： 建议使用系统默认的无衬线字体，并明确设置 line-height（行高）以增强易读性。
 
-难点在于“通信”与“协议”：你不再是通过 def 定义一个函数直接调用，而是要通过 HTTP 或 WebSocket 发起网络请求。
+优化后的 CSS 代码建议
+你可以将 streamlit_app.py 中的 st.markdown(""" <style> ... </style> """) 部分替换为以下内容：
 
-难点在于“服务发现”：Agent 怎么知道“导航工具”的 IP 地址在哪里？你需要一个简单的配置文件或注册机制。
+CSS
+<style>
+    /* 1. 强力隐藏顶部白条及装饰线 */
+    header, [data-testid="stHeader"], .stAppHeader {
+        background-color: rgba(0,0,0,0) !important;
+        background: transparent !important;
+        border: none !important;
+    }
+    
+    /* 2. 背景优化：增加深色半透明遮罩，解决文字看不清的问题 */
+    [data-testid="stAppViewContainer"] {
+        background-image: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), 
+                          url("https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?ixlib=rb-4.0.3&auto=format&fit=crop&w=2043&q=80");
+        background-attachment: fixed;
+        background-size: cover;
+        font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: #FFFFFF !important;
+    }
 
-难点在于“安全性”：如报告所述，分布式调用会增加 Prompt 注入风险，你可能需要编写简单的安全护栏（Guardrails）。
+    /* 3. 优化卡片容器：增加对比度和圆角 */
+    .main-card {
+        background: rgba(255, 255, 255, 0.1); /* 极淡的白色背景 */
+        backdrop-filter: blur(10px); /* 磨砂玻璃效果 */
+        padding: 25px;
+        border-radius: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        margin-bottom: 20px;
+        color: white !important;
+    }
 
-三、 需要修改的地方多不多？（改动清单）
-如果不想“推倒重来”，可以采取**“半分布式”**方案，改动量约在 30%-40% 左右：
+    /* 4. 调整输入框和文本域的字体颜色，防止在深色背景下“消失” */
+    .stTextInput input, .stTextArea textarea {
+        color: #333 !important; /* 输入框内文字建议用深色，因为底色通常是白/浅灰 */
+        font-size: 16px !important;
+    }
 
-1. 工具层（Tools）的改造（大改）
-现状：pet_db_tool 是本地的一个函数。
+    /* 5. 针对 Markdown 生成的文字进行加固 */
+    .stMarkdown p, .stMarkdown li {
+        color: rgba(255, 255, 255, 0.9) !important;
+        line-height: 1.6;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.5); /* 给文字加微弱阴影，极大提升可读性 */
+    }
 
-修改后：你需要将这个工具包装成一个独立的 Web API（使用 FastAPI）。它运行在独立端口，返回 JSON 数据。
+    /* 6. 按钮样式优化 */
+    .stButton>button {
+        width: 100%;
+        border-radius: 20px;
+        background-color: #ff9f43 !important;
+        color: white !important;
+        border: none;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(255, 159, 67, 0.4);
+    }
+</style>
+针对代码逻辑的改进建议
+侧边栏 (Sidebar) 控制： 如果你发现主界面文字乱，可以考虑将“功能选择”移入侧边栏 (st.sidebar.selectbox)。这样可以释放主屏幕空间，让中间的内容更聚焦。
 
-报告建议：仿照 UTCP 协议，给你的 API 写一个 manual（说明书），告诉 Agent 怎么调用。
+HTML 注入的安全做法： 在 st.markdown 中，尽量使用 unsafe_allow_html=True 配合封装好的 div。
 
-2. Agent 定义的修改（中改）
-现状：Agent(tools=[pet_db_tool])。
+例如：st.markdown(f"<div class='main-card'>{content}</div>", unsafe_allow_html=True)。
 
-修改后：你需要编写一个通用的 RemoteToolClient。Agent 不直接拿工具，而是通过这个 Client 去访问远程 API。
-
-3. 基础设施的增加（小增）
-增加配置文件：记录各个分布式服务的 URL。
-
-增加日志追踪：因为请求跨越了网络，你需要记录“Agent 发起请求 -> 网络传输 -> API 执行 -> 返回结果”的全过程。
-
-四、 总结与建议
-我的建议：
-如果你现在的开发时间还充裕（超过 1 个月），非常建议改为“分布式架构”。
-
-最省力的改法：
-
-保留 CrewAI 做总控：它依然是你的“指挥官”。
-
-将“地图导航”和“知识库检索”做成微服务：这两个最适合分布式化。
-
-使用 HTTP/JSON 代替 UTCP 全量实现：你可以宣称你是“参考了报告中的 UTCP 思想实现的轻量级分布式架构”，这样既有理论支撑，又降低了开发难度。
-
-这样做，你的毕设就不再是一个简单的“AI聊天室”，而是一个真正的“分布式人工智能平台原型”。你需要我帮你写一个将本地工具转化为远程 API 的代码示例吗？
+状态反馈： 在执行 run_pet_crew 这种耗时操作时，建议使用 st.status (Streamlit 1.25+) 替代单纯的 spinner，它可以展示 Agent 的思考步骤，用户体验会好很多。
