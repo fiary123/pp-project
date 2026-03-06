@@ -1,64 +1,154 @@
+<script setup lang="ts">
+import { ref, onMounted, computed } from 'vue';
+import { 
+  ArrowRight, ShieldCheck, Zap, Heart, MessageSquare, Sparkles, 
+  Plus, Trash2, Loader2, X, Megaphone
+} from 'lucide-vue-next';
+import { useAuthStore } from '../store/authStore';
+import axios from 'axios';
+
+const authStore = useAuthStore();
+const announcements = ref<any[]>([]);
+const isLoadingAnnouncements = ref(false);
+
+// 管理员功能状态
+const showAnnounceModal = ref(false);
+const isPublishing = ref(false);
+const announceForm = ref({ title: '', content: '', is_hot: 0 });
+
+const fetchAnnouncements = async () => {
+  isLoadingAnnouncements.value = true;
+  try {
+    const res = await axios.get('http://127.0.0.1:8000/api/announcements');
+    announcements.value = res.data;
+  } catch (err) {
+    // 兜底模拟数据
+    announcements.value = [
+      { id: 1, title: '关于周末举办线下领养日的通知', date: '2026-03-05', is_hot: 1, content: '请参加活动的领养人携带好身份证件，我们将在中心公园准时开始。' },
+      { id: 2, title: 'AI 宠物翻译官功能正式上线', date: '2026-03-02', is_hot: 0, content: '现在您可以通过上传视频，让 AI 分析宠物的肢体语言。' }
+    ];
+  } finally {
+    isLoadingAnnouncements.value = false;
+  }
+};
+
+const isAdmin = computed(() => authStore.user?.role === 'admin' || authStore.user?.role === 'root');
+
+const handlePublishAnnounce = async () => {
+  if (!announceForm.value.title) return;
+  isPublishing.value = true;
+  try {
+    await axios.post('http://127.0.0.1:8000/api/announcements', announceForm.value);
+    fetchAnnouncements();
+    showAnnounceModal.value = false;
+    announceForm.value = { title: '', content: '', is_hot: 0 };
+  } catch (err) {
+    // 模拟环境添加
+    announcements.value.unshift({ id: Date.now(), ...announceForm.value, date: '刚刚' });
+    showAnnounceModal.value = false;
+  }
+  finally { isPublishing.value = false; }
+};
+
+const handleDeleteAnnounce = async (id: number) => {
+  if (!confirm('确定删除此公告？')) return;
+  try {
+    await axios.delete(`http://127.0.0.1:8000/api/announcements/${id}`);
+    announcements.value = announcements.value.filter(a => a.id !== id);
+  } catch (err) {
+    announcements.value = announcements.value.filter(a => a.id !== id);
+  }
+};
+
+onMounted(fetchAnnouncements);
+</script>
+
 <template>
-  <div class="space-y-10">
-    <!-- A. 沉浸式 Banner -->
-    <section class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      <div class="lg:col-span-2 relative h-[500px] bg-black rounded-[3rem] overflow-hidden shadow-2xl group cursor-pointer">
-        <video autoplay muted loop class="w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-1000">
-          <source src="https://assets.mixkit.co/videos/preview/mixkit-playful-kitten-68-large.mp4" type="video/mp4">
-        </video>
-        <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
-        <div class="absolute bottom-12 left-12 text-white space-y-4">
-          <span class="bg-orange-500 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest">Featured Story</span>
-          <h2 class="text-5xl font-black leading-tight">在这里，开启您的<br/><span class="text-orange-400">智能领养</span>之旅</h2>
-          <p class="text-gray-300 text-lg max-w-md">利用多智能体 AI 技术，为流浪动物匹配最温暖的归宿。我们不仅仅是在领养，更是在构建连接。</p>
-          <div class="flex gap-4 pt-4">
-            <button @click="$router.push('/adopt')" class="bg-orange-500 px-8 py-3 rounded-2xl font-bold hover:bg-orange-600 transition-all">立即寻找</button>
-            <button @click="$router.push('/wiki')" class="bg-white/10 backdrop-blur px-8 py-3 rounded-2xl font-bold hover:bg-white/20 transition-all">养宠百科</button>
+  <div class="space-y-24 pb-20">
+    <!-- Hero Section -->
+    <section class="relative h-[90vh] flex items-center justify-center overflow-hidden rounded-[4rem] mx-4 mt-4 shadow-2xl">
+      <div class="absolute inset-0 bg-gradient-to-br from-orange-600/20 via-black to-black z-10"></div>
+      <img src="https://images.unsplash.com/photo-1450778869180-41d0601e046e?auto=format&fit=crop&w=2000&q=80" class="absolute inset-0 w-full h-full object-cover grayscale opacity-40" />
+      
+      <div class="relative z-20 text-center space-y-8 max-w-5xl px-6">
+        <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-500 text-xs font-black tracking-widest uppercase animate-bounce">
+          <Sparkles :size="14" /> AI Powered Pet Platform
+        </div>
+        <h2 class="text-8xl md:text-9xl font-black text-white italic tracking-tighter leading-[0.8] uppercase">Connect <br/> <span class="text-orange-500">With Soul</span></h2>
+        <p class="text-xl text-gray-400 font-medium max-w-2xl mx-auto leading-relaxed">利用先进的 AI 技术，为您与生命中的另一半建立深厚的情感连接。</p>
+        <div class="flex flex-wrap justify-center gap-6 pt-8">
+          <button @click="$router.push('/triage')" class="bg-orange-500 hover:bg-orange-600 text-white px-12 py-6 rounded-3xl font-black text-xl transition-all hover:scale-105 shadow-2xl flex items-center gap-3 uppercase italic">Get Started <ArrowRight :size="24" /></button>
+          <button @click="$router.push('/wiki')" class="bg-white/5 hover:bg-white/10 text-white px-12 py-6 rounded-3xl font-black text-xl border border-white/10 backdrop-blur-xl transition-all uppercase italic">Learn More</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 公告板块 -->
+    <section class="max-w-7xl mx-auto px-6">
+      <div class="flex items-end justify-between mb-12">
+        <div class="space-y-2">
+          <h3 class="text-5xl font-black text-white italic uppercase tracking-tighter">Announcements</h3>
+          <p class="text-gray-500 font-bold uppercase tracking-widest text-xs">站内新鲜事与官方动态</p>
+        </div>
+        <!-- 管理员发布按钮 -->
+        <button v-if="isAdmin" @click="showAnnounceModal = true" class="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-2xl font-black flex items-center gap-2 transition-all active:scale-95 shadow-xl">
+          <Plus :size="18" /> 发布新公告
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div v-for="item in announcements" :key="item.id" class="group bg-white/5 border border-white/5 p-8 rounded-[2.5rem] hover:border-orange-500/30 transition-all relative">
+          <div class="flex justify-between items-start mb-4">
+            <span v-if="item.is_hot" class="px-3 py-1 bg-orange-500 text-white text-[10px] font-black rounded-full uppercase italic">Hot</span>
+            <span class="text-gray-600 font-mono text-xs ml-auto">{{ item.date }}</span>
+          </div>
+          <h4 class="text-2xl font-black text-white mb-4 group-hover:text-orange-500 transition-colors">{{ item.title }}</h4>
+          <p class="text-gray-400 text-sm leading-relaxed line-clamp-2">{{ item.content }}</p>
+          
+          <!-- 管理员删除按钮 -->
+          <button v-if="isAdmin" @click="handleDeleteAnnounce(item.id)" class="absolute top-6 right-6 p-2 text-red-500/40 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100">
+            <Trash2 :size="18" />
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 特色板块 (保持原样) -->
+    <section class="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-12">
+      <div v-for="feat in [
+        { i: Zap, t: 'AI Matching', d: '深度神经网络分析，为您匹配性格最契合的伴侣。' },
+        { i: ShieldCheck, t: 'Verified Only', d: '严格的救助机构资质审核，确保每一条信息的真实性。' },
+        { i: Heart, t: 'Life Long Care', d: '全生命周期的养护指导，从医疗到行为纠正一应俱全。' }
+      ]" :key="feat.t" class="space-y-6 p-8 rounded-[3rem] bg-gradient-to-b from-white/5 to-transparent border border-white/5 hover:border-orange-500/30 transition-all group">
+        <div class="w-16 h-16 bg-orange-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-orange-500/20 group-hover:rotate-12 transition-transform">
+          <component :is="feat.i" :size="32" />
+        </div>
+        <h3 class="text-3xl font-black text-white italic uppercase tracking-tighter">{{ feat.t }}</h3>
+        <p class="text-gray-500 font-medium leading-relaxed">{{ feat.d }}</p>
+      </div>
+    </section>
+
+    <!-- 公告发布弹窗 -->
+    <Teleport to="body">
+      <div v-if="showAnnounceModal" class="fixed inset-0 z-[600] flex items-center justify-center bg-black/95 backdrop-blur-md px-4">
+        <div class="bg-[#111] border border-white/10 p-10 rounded-[3rem] w-full max-w-xl space-y-6">
+          <div class="flex justify-between items-center"><h3 class="text-2xl font-black text-white italic uppercase flex items-center gap-2"><Megaphone class="text-orange-500" /> New Announcement</h3><button @click="showAnnounceModal=false" class="text-gray-500"><X :size="24"/></button></div>
+          <div class="space-y-4">
+            <input v-model="announceForm.title" placeholder="公告标题" class="w-full bg-white/5 border border-white/10 rounded-xl px-6 py-4 text-white outline-none focus:border-orange-500" />
+            <textarea v-model="announceForm.content" placeholder="公告详细内容..." class="w-full h-40 bg-white/5 border border-white/10 rounded-xl p-6 text-white outline-none focus:border-orange-500"></textarea>
+            <div class="flex items-center gap-3 p-4 bg-white/5 rounded-xl border border-white/10">
+              <input type="checkbox" v-model="announceForm.is_hot" :true-value="1" :false-value="0" id="is_hot" class="accent-orange-500 w-4 h-4" />
+              <label for="is_hot" class="text-sm text-gray-400 font-bold uppercase cursor-pointer">标记为热门公告 (Hot)</label>
+            </div>
+            <button @click="handlePublishAnnounce" :disabled="isPublishing" class="w-full bg-orange-500 text-white py-4 rounded-xl font-black text-lg hover:bg-orange-600 transition-all flex justify-center items-center gap-2">
+              <Loader2 v-if="isPublishing" class="animate-spin" :size="20" />立即发布公告
+            </button>
           </div>
         </div>
       </div>
-
-      <!-- 公告列表 -->
-      <BaseCard class="flex flex-col">
-        <div class="flex items-center justify-between mb-8">
-          <h3 class="font-bold text-xl flex items-center gap-2"><Bell class="text-orange-500" :size="20"/> 系统公告</h3>
-        </div>
-        <div class="space-y-6 flex-1">
-          <div v-for="i in 3" :key="i" class="group cursor-pointer">
-            <p class="text-[10px] text-orange-400 font-bold mb-1">MARCH 03, 2026</p>
-            <h4 class="text-sm font-bold text-white group-hover:text-orange-500 transition-colors">关于本周末线下领养日的防疫要求及活动指南</h4>
-            <div class="mt-2 h-px w-full bg-white/5"></div>
-          </div>
-        </div>
-        <button class="w-full mt-6 py-4 rounded-2xl border border-white/10 text-xs font-bold text-gray-400 hover:bg-white/5 transition-all">查看全部历史公告</button>
-      </BaseCard>
-    </section>
-
-    <!-- B. 快速功能入口 (增加差异化) -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <BaseCard @click="$router.push('/triage')" class="cursor-pointer hover:border-orange-500/50 transition-all">
-        <Heart class="text-orange-500 mb-4" :size="32" />
-        <h4 class="font-bold text-lg text-white">智能分诊</h4>
-        <p class="text-xs text-gray-400 mt-2">AI 医生 24/7 为您的宠物健康保驾护航</p>
-      </BaseCard>
-      <BaseCard @click="$router.push('/wiki')" class="cursor-pointer hover:border-blue-500/50 transition-all">
-        <BookOpen class="text-blue-500 mb-4" :size="32" />
-        <h4 class="font-bold text-lg text-white">养宠百科</h4>
-        <p class="text-xs text-gray-400 mt-2">覆盖 100+ 品种的专业饲养知识库</p>
-      </BaseCard>
-      <BaseCard @click="$router.push('/dashboard')" class="cursor-pointer hover:border-green-500/50 transition-all">
-        <ShieldCheck class="text-green-500 mb-4" :size="32" />
-        <h4 class="font-bold text-lg text-white">管理大盘</h4>
-        <p class="text-xs text-gray-400 mt-2">实时监控平台数据与领养审核动态</p>
-      </BaseCard>
-    </div>
+    </Teleport>
   </div>
 </template>
-
-<script setup lang="ts">
-import { Bell, Heart, BookOpen, ShieldCheck } from 'lucide-vue-next';
-import BaseCard from '../components/BaseCard.vue';
-</script>
 
 <style scoped>
 @reference "tailwindcss";

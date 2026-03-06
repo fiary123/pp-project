@@ -4,6 +4,8 @@ import HomeView from '../views/HomeView.vue'
 import TriageView from '../views/TriageView.vue'
 import WikiView from '../views/WikiView.vue'
 import AdoptView from '../views/AdoptView.vue'
+import CommunityView from '../views/CommunityView.vue'
+import ChatView from '../views/ChatView.vue'
 import DashboardView from '../views/DashboardView.vue'
 import LoginView from '../views/LoginView.vue'
 import ProfileView from '../views/ProfileView.vue'
@@ -15,11 +17,13 @@ const routes = [
   { path: '/triage', name: 'triage', component: TriageView },
   { path: '/wiki', name: 'wiki', component: WikiView },
   { path: '/adopt', name: 'adopt', component: AdoptView },
+  { path: '/community', name: 'community', component: CommunityView },
+  { path: '/chat', name: 'chat', component: ChatView },
   { 
     path: '/dashboard', 
     name: 'dashboard', 
     component: DashboardView,
-    meta: { requiresAdmin: true } // 只有管理员可访问
+    meta: { requiresAdmin: true }
   }
 ]
 

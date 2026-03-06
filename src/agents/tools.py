@@ -37,7 +37,7 @@ def nearby_hospital_search(location_coords: str):
     根据经纬度坐标搜索附近5公里的宠物医院。
     参数 location_coords: 格式为 "经度,纬度" (例如: "116.4814,39.9904")
     """
-    AMAP_KEY = "你的高德地图Web服务KEY"  # 记得去高德控制台申请
+    AMAP_KEY = "966b3f41682127d765517a06be14953a"  # 记得去高德控制台申请
     url = f"https://restapi.amap.com/v3/place/around"
     params = {
         "key": AMAP_KEY,
