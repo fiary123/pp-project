@@ -116,3 +116,35 @@ def pet_database_search(requirement_keywords: str):
     for row in rows:
         results.append(f"名字: {row[0]}, 品种: {row[1]}, 详情: {row[2]}")
     return "\n".join(results)
+
+@tool("calc_pet_daily_energy")
+def calc_pet_daily_energy(species: str, age_months: int, weight_kg: float, neutered: bool, activity_level: str, goal: str):
+    """
+    计算宠物每日建议热量与喂食量，返回结构化摘要。
+    """
+    from .nutrition_planner import build_nutrition_plan
+    plan = build_nutrition_plan(
+        species=species,
+        age_months=age_months,
+        weight_kg=weight_kg,
+        neutered=neutered,
+        activity_level=activity_level,
+        goal=goal,
+        food_kcal_per_100g=360,
+        symptoms=[]
+    )
+    return f"daily_kcal={plan['daily_kcal']}, daily_food_g={plan['daily_food_g']}, feedings_per_day={plan['feedings_per_day']}"
+
+
+@tool("pet_food_forbidden_list")
+def pet_food_forbidden_list(species: str):
+    """
+    获取不同宠物的常见喂养禁忌食物。
+    """
+    common = ['巧克力', '洋葱', '葡萄', '木糖醇', '酒精', '高盐高油剩饭']
+    s = (species or '').lower()
+    if s == 'cat':
+        common += ['狗粮长期替代', '生鱼生肉长期单一喂食']
+    if s == 'dog':
+        common += ['熟骨头', '夏威夷果']
+    return '\n'.join(common)
