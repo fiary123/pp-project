@@ -112,7 +112,7 @@ const fetchPets = async () => {
   }
 };
 
-const isAdmin = computed(() => authStore.user?.role === 'admin' || authStore.user?.role === 'root');
+const isAdmin = computed(() => authStore.user?.role === 'org_admin' || authStore.user?.role === 'root');
 
 const startEditPet = (pet: any) => {
   editPetForm.value = { id: pet.id, name: pet.name, species: pet.species, img: pet.img, desc: pet.desc };

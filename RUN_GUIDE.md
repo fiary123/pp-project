@@ -82,3 +82,33 @@ npm run dev
 | 启动前端 | `npm run dev` | `pet-frontend` |
 | 初始化 DB | `python src/database/init_db.py` | 根目录 |
 | 同步知识库 | `python src/database/sync_data.py` | 根目录 |
+
+
+## 6. 新增功能：营养与喂养专家
+
+前端访问路径：`/nutrition`。
+
+输入：宠物类型、年龄（月）、体重（kg）、绝育状态、活动量、目标、粮食能量密度。
+
+后端接口：`POST /api/nutrition/plan`，返回结构化喂养建议：
+- 每日热量（kcal/day）
+- 每日喂食量（g/day）
+- 喂食频次与每餐克数
+- 饮水建议
+- 禁忌食物清单
+- 7日换粮计划与风险提示
+
+该功能适用于毕业设计中的“可量化智能推荐”展示。
+
+
+## 7. 前后端接口对齐说明（新增）
+
+为保证 Vue 前端页面可直接联调，后端已补齐以下接口：
+- 认证：`/api/register`, `/api/login`
+- 社区：`/api/posts`, `/api/posts/{id}/like`, `/api/posts/comment`, `/api/posts/{id}/comments`
+- 智能：`/api/chat`, `/api/triage/analyze`, `/api/pets/smart-match`, `/api/nutrition/plan`
+- 私信：`/api/messages/{user_id}`, `/api/messages/send`
+- 用户中心：`/api/user/change-password`, `/api/user/applications/{user_id}`
+- 管理端：`/api/admin/users`, `/api/admin/users/sanction`, `/api/admin/users/reactivate`, `/api/admin/applications`, `/api/admin/applications/update`, `/api/admin/moderation/logs`
+
+说明：智能接口优先尝试多智能体调用，失败时自动降级为规则/模板回复，保证系统可用性。

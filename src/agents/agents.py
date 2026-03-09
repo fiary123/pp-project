@@ -16,6 +16,8 @@ from .medical_expert import get_medical_expert_agent
 from .navigator import get_navigator_agent
 from .pet_expert import get_pet_expert_agent
 from .pet_persona import get_pet_persona_agent
+from .nutrition_expert import get_nutrition_expert_agent
+from .nutrition_planner import build_nutrition_plan, render_nutrition_markdown
 
 # ==========================================
 # 1. 环境与模型配置 (改为 OpenAI/DeepSeek 兼容模式)
@@ -109,3 +111,34 @@ def run_knowledge_expert(user_query: str) -> str:
     fact_finder = Agent(role='百科百事通', goal='提供建议', llm=llm)
     task = Task(description=f'回答：{user_query}', expected_output='养宠建议', agent=fact_finder)
     return str(Crew(agents=[fact_finder], tasks=[task]).kickoff())
+
+
+def run_nutrition_expert(profile: dict) -> dict:
+    """运行营养喂养专家并返回结构化建议。"""
+    plan = build_nutrition_plan(
+        species=profile.get('species', 'cat'),
+        age_months=int(profile.get('age_months', 12)),
+        weight_kg=float(profile.get('weight_kg', 4.0)),
+        neutered=bool(profile.get('neutered', False)),
+        activity_level=profile.get('activity_level', 'medium'),
+        goal=profile.get('goal', 'maintain'),
+        food_kcal_per_100g=float(profile.get('food_kcal_per_100g', 360)),
+        symptoms=profile.get('symptoms', [])
+    )
+    markdown = render_nutrition_markdown(profile.get('species', 'cat'), plan)
+
+    # 保留多智能体扩展位：可切换为 Crew 调度输出
+    _ = get_nutrition_expert_agent(llm)
+    return {'plan': plan, 'explanation_markdown': markdown}
+
+
+def run_triage_expert(symptom: str, location: str | None = None) -> str:
+    """运行医疗分诊专家，必要时可扩展到导航专家联动。"""
+    medical_expert = get_medical_expert_agent(llm)
+    task = Task(
+        description=f'请对以下症状做分诊并给出风险等级：{symptom}。位置信息：{location or "未知"}',
+        expected_output='结构化分诊报告（含风险等级与是否紧急就医）。',
+        agent=medical_expert
+    )
+    crew = Crew(agents=[medical_expert], tasks=[task])
+    return str(crew.kickoff())

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRouter, useRoute } from 'vue-router'
-import { PawPrint, Heart, BookOpen, Search, ShieldCheck, Users } from 'lucide-vue-next'
+import { PawPrint, Heart, BookOpen, Search, ShieldCheck, Users, Salad } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -9,6 +9,7 @@ const emit = defineEmits(['open-command'])
 const navItems = [
   { name: '智能分诊', path: '/triage', icon: Heart },
   { name: '百科指南', path: '/wiki', icon: BookOpen },
+  { name: '营养喂养', path: '/nutrition', icon: Salad },
   { name: '宠物领养', path: '/adopt', icon: Search },
   { name: '社区交流', path: '/community', icon: Users },
   { name: '管理后台', path: '/dashboard', icon: ShieldCheck },

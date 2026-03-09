@@ -9,6 +9,7 @@ import ChatView from '../views/ChatView.vue'
 import DashboardView from '../views/DashboardView.vue'
 import LoginView from '../views/LoginView.vue'
 import ProfileView from '../views/ProfileView.vue'
+import NutritionView from '../views/NutritionView.vue'
 
 const routes = [
   { path: '/login', name: 'login', component: LoginView },
@@ -16,6 +17,7 @@ const routes = [
   { path: '/', name: 'home', component: HomeView },
   { path: '/triage', name: 'triage', component: TriageView },
   { path: '/wiki', name: 'wiki', component: WikiView },
+  { path: '/nutrition', name: 'nutrition', component: NutritionView },
   { path: '/adopt', name: 'adopt', component: AdoptView },
   { path: '/community', name: 'community', component: CommunityView },
   { path: '/chat', name: 'chat', component: ChatView },
@@ -33,7 +35,7 @@ const router = createRouter({
 })
 
 // 导航守卫 (权限控制)
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from, next) => {
   const authStore = useAuthStore()
 
   // 1. 如果访问需要管理员权限的页面
