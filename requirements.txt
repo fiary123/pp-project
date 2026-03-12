@@ -5,9 +5,10 @@ crewai
 chromadb
 pydantic
 langchain-openai
-crewai
 langchain-google-genai
-langchain-openai
-chromadb
-fastapi
-uvicorn
+python-jose[cryptography]
+passlib[bcrypt]
+python-dotenv
+python-multipart
+edge-tts
+slowapi

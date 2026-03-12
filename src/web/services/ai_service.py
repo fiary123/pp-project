@@ -3,9 +3,12 @@ import sys
 import time
 import uuid
 import json
+import logging
 from typing import List, Optional, Tuple
 from src.agents.nutrition_planner import build_nutrition_plan, render_nutrition_markdown
 from src.web.services.db_service import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 def _log_agent_trace(trace_id: str, endpoint: str, agent_name: str, input_msg: str, output_msg: str, latency_ms: int, fallback: bool = False, tool_name: str = "default"):
     """记录 AI 执行日志"""
@@ -21,7 +24,7 @@ def _log_agent_trace(trace_id: str, endpoint: str, agent_name: str, input_msg: s
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"Failed to log agent trace: {e}")
+        logger.error(f"Failed to log agent trace: {e}")
 
 def get_agent_reply(user_msg: str) -> Tuple[str, str]:
     """调用知识专家 Agent 获得回复，返回 (reply, trace_id)"""
@@ -34,7 +37,7 @@ def get_agent_reply(user_msg: str) -> Tuple[str, str]:
         from src.agents.agents import run_knowledge_expert
         reply = run_knowledge_expert(user_msg)
     except Exception as e:
-        print(f"AI Service Error: {e}")
+        logger.warning(f"AI Service Error (fallback activated): {e}")
         reply = f"抱歉，我现在有点累了（{user_msg}），正在努力充电中... 请稍后再试。"
         fallback = True
     
@@ -53,7 +56,7 @@ def get_triage_reply(symptom: str) -> Tuple[str, str]:
         from src.agents.agents import run_triage_expert
         reply = run_triage_expert(symptom)
     except Exception as e:
-        print(f"Triage Service Error: {e}")
+        logger.warning(f"Triage Service Error (fallback activated): {e}")
         reply = f"医生智能系统正在诊断中，针对您的症状：{symptom}，我们建议您观察 2-4 小时。"
         fallback = True
     
@@ -62,35 +65,51 @@ def get_triage_reply(symptom: str) -> Tuple[str, str]:
     return reply, trace_id
 
 def get_smart_match(user_query: str, pet_list: List[dict]) -> List[dict]:
-    """智能宠物匹配逻辑"""
-    query = user_query.lower()
-    
-    try:
-        from src.agents.agents import run_pet_crew
-        _ = run_pet_crew(user_query)
-    except Exception:
-        pass
+    """智能宠物匹配：加权关键词匹配（物种 > 标签 > 描述 > 名字）"""
+    WEIGHTS = {"species": 3, "tags": 2, "desc": 1, "name": 1}
+    keywords = [w.strip() for w in user_query.replace('，', ',').replace(' ', ',').split(',') if w.strip()]
 
     scored = []
     for pet in pet_list:
-        text = f"{pet.get('name','') or ''} {pet.get('species','') or ''} {pet.get('desc','') or ''} {' '.join(pet.get('tags', []))}".lower()
         score = 0
-        for word in query.replace('，', ',').split(','):
-            w = word.strip()
-            if w and w in text:
-                score += 1
-        scored.append((score, pet))
+        matched_reasons = []
+
+        species_text = (pet.get('species') or '').lower()
+        for kw in keywords:
+            if kw in species_text:
+                score += WEIGHTS["species"]
+                matched_reasons.append(f"物种匹配"{kw}"")
+
+        for tag in pet.get('tags', []):
+            for kw in keywords:
+                if kw in tag.lower():
+                    score += WEIGHTS["tags"]
+                    matched_reasons.append(f"标签匹配"{kw}"")
+
+        desc_text = (pet.get('desc') or '').lower()
+        for kw in keywords:
+            if kw in desc_text:
+                score += WEIGHTS["desc"]
+                matched_reasons.append(f"描述匹配"{kw}"")
+
+        name_text = (pet.get('name') or '').lower()
+        for kw in keywords:
+            if kw in name_text:
+                score += WEIGHTS["name"]
+                matched_reasons.append(f"名字匹配"{kw}"")
+
+        reason_str = "、".join(matched_reasons[:3]) if matched_reasons else "综合推荐"
+        scored.append((score, pet, reason_str))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    matches = [
+    return [
         {
             "id": p.get("id"),
-            "reason": f"匹配度 {s}：基于您的描述，该宠物性格和特征与您的需求高度契合。",
+            "reason": f"匹配分 {s}：{r}，该宠物与您的需求高度契合。",
         }
-        for s, p in scored[:5]
+        for s, p, r in scored[:5]
         if p.get("id") is not None
     ]
-    return matches
 
 def generate_nutrition_plan(data: dict) -> Tuple[dict, str, str, int]:
     """生成初始营养方案，并存入数据库"""

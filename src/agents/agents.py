@@ -1,11 +1,14 @@
 # 多智能体 CrewAI 核心逻辑
 import os
 import json
+import logging
 import chromadb
 import asyncio
 import edge_tts
 import base64
 from io import BytesIO
+
+logger = logging.getLogger(__name__)
 from crewai import Agent, Task, Crew, Process
 from crewai.tools import tool
 from langchain_openai import ChatOpenAI # 修改：使用 OpenAI 适配器
@@ -23,9 +26,12 @@ from .nutrition_planner import build_nutrition_plan, render_nutrition_markdown
 # 1. 环境与模型配置 (改为 OpenAI/DeepSeek 兼容模式)
 # ==========================================
 
-# 从环境变量或硬编码获取（已同步 app.py 中的 Key）
-OPENAI_API_KEY = "sk-c69656763f3a49bc9650e243c5ce0542" 
-OPENAI_BASE_URL = "https://api.deepseek.com" 
+# 从环境变量读取（在项目根目录 .env 文件中配置）
+from dotenv import load_dotenv
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com")
 
 # 初始化通用 LLM 驱动
 llm = ChatOpenAI(
@@ -88,7 +94,7 @@ def run_pet_chat(user_msg: str, pet_name: str, pet_species: str, pet_desc: str):
         audio_base64 = base64.b64encode(audio_bytes).decode()
         return response_text, audio_base64
     except Exception as e:
-        print(f"语音生成失败: {e}")
+        logger.warning(f"Edge-TTS 语音生成失败: {e}")
         return response_text, None
 
 def run_pet_crew(user_message: str) -> str:

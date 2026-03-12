@@ -1,11 +1,14 @@
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from dotenv import load_dotenv
 
-# --- 关键配置 ---
-# 注意：在实际项目中应通过环境变量读取这些敏感配置
-SECRET_KEY = "PetAdoptionSystem-GraduationProject-SecretKey"
+load_dotenv()
+
+# --- 关键配置（从环境变量读取）---
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "PetAdoptionSystem-GraduationProject-SecretKey")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # Token 有效期设为 24 小时方便调试
 

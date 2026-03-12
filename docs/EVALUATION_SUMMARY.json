@@ -1,12 +1,33 @@
 {
     "Rule_System_A": {
         "avg_latency_ms": 0.0,
-        "avg_completion_rate": 100,
-        "risk_alert_coverage": "0.0%"
+        "p95_latency_ms": 0.0,
+        "avg_completion_rate": 12.0,
+        "risk_alert_coverage": "73.3%",
+        "triage_accuracy": 73.3,
+        "nutrition_field_count_avg": 1.0
     },
     "Agent_System_B": {
-        "avg_latency_ms": 9.2,
-        "avg_completion_rate": 75.0,
-        "risk_alert_coverage": "100.0%"
+        "avg_latency_ms": 1804.15,
+        "p95_latency_ms": 2193.3,
+        "avg_completion_rate": 100.0,
+        "risk_alert_coverage": "86.7%",
+        "triage_accuracy": 86.7,
+        "nutrition_field_count_avg": 8.0
+    },
+    "meta": {
+        "nutrition_test_count": 30,
+        "triage_test_count": 30,
+        "total_test_count": 60,
+        "evaluated_fields": [
+            "daily_kcal",
+            "daily_food_g",
+            "water_ml",
+            "per_meal_g",
+            "confidence_level",
+            "recheck_in_days",
+            "requires_vet",
+            "forbidden_foods"
+        ]
     }
 }

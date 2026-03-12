@@ -101,4 +101,30 @@ def ensure_tables(conn: sqlite3.Connection):
         activity_change TEXT,
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS pets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER,
+        name TEXT NOT NULL,
+        species TEXT,
+        age INTEGER DEFAULT 1,
+        is_shedding TEXT,
+        energy_level TEXT,
+        description TEXT,
+        image_url TEXT,
+        tags TEXT DEFAULT '[]',
+        status TEXT DEFAULT '待领养'
+    )''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS announcements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        is_hot INTEGER DEFAULT 0,
+        date TEXT
+    )''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS adopt_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        pet_id INTEGER,
+        adopt_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
     conn.commit()
