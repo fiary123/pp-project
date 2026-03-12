@@ -3,6 +3,7 @@ from src.web.schemas import ChangePasswordRequest, MessageCreate
 from src.web.services.db_service import get_db_connection, ensure_tables
 
 router = APIRouter(prefix="/api/user", tags=["user"])
+compat_router = APIRouter(prefix="/api", tags=["user"])
 
 @router.post("/change-password")
 async def change_password(req: ChangePasswordRequest):
@@ -69,3 +70,12 @@ async def send_message(req: MessageCreate):
     conn.commit()
     conn.close()
     return {"status": "success"}
+
+
+@compat_router.get("/messages/{user_id}")
+def get_messages_compat(user_id: int):
+    return get_messages(user_id)
+
+@compat_router.post("/messages/send")
+async def send_message_compat(req: MessageCreate):
+    return await send_message(req)

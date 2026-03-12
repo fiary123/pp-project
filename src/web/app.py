@@ -4,10 +4,6 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 
 # 全局日志配置
 logging.basicConfig(
@@ -27,12 +23,7 @@ from src.web.routers import auth, community, ai, admin, user
 from src.web.services.db_service import get_db_connection, ensure_tables
 from src.database.sync_data import sync_knowledge_to_chroma
 
-limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="智慧宠物养护与领养管理系统 API")
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
-
 # 跨域资源共享配置
 app.add_middleware(
     CORSMiddleware,
@@ -54,6 +45,7 @@ app.include_router(community.router)
 app.include_router(ai.router)
 app.include_router(admin.router)
 app.include_router(user.router)
+app.include_router(user.compat_router)
 
 @app.on_event("startup")
 async def startup_event():
