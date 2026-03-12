@@ -40,8 +40,8 @@ class AnnouncementCreate(BaseModel):
     is_hot: Optional[int] = 0
 
 class NutritionPlanRequest(BaseModel):
-    user_id: int
-    pet_name: str
+    user_id: int = 0
+    pet_name: str = ""
     species: Literal["cat", "dog"]
     age_months: int = Field(ge=0, le=400)
     weight_kg: float = Field(gt=0, le=150)

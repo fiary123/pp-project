@@ -78,25 +78,25 @@ def get_smart_match(user_query: str, pet_list: List[dict]) -> List[dict]:
         for kw in keywords:
             if kw in species_text:
                 score += WEIGHTS["species"]
-                matched_reasons.append(f"物种匹配"{kw}"")
+                matched_reasons.append(f'物种匹配"{kw}"')
 
         for tag in pet.get('tags', []):
             for kw in keywords:
                 if kw in tag.lower():
                     score += WEIGHTS["tags"]
-                    matched_reasons.append(f"标签匹配"{kw}"")
+                    matched_reasons.append(f'标签匹配"{kw}"')
 
         desc_text = (pet.get('desc') or '').lower()
         for kw in keywords:
             if kw in desc_text:
                 score += WEIGHTS["desc"]
-                matched_reasons.append(f"描述匹配"{kw}"")
+                matched_reasons.append(f'描述匹配"{kw}"')
 
         name_text = (pet.get('name') or '').lower()
         for kw in keywords:
             if kw in name_text:
                 score += WEIGHTS["name"]
-                matched_reasons.append(f"名字匹配"{kw}"")
+                matched_reasons.append(f'名字匹配"{kw}"')
 
         reason_str = "、".join(matched_reasons[:3]) if matched_reasons else "综合推荐"
         scored.append((score, pet, reason_str))

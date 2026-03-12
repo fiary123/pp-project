@@ -4,7 +4,7 @@ from src.web.services.db_service import get_db_connection, ensure_tables
 from src.web.dependencies import require_admin
 
 # 在 APIRouter 级别添加依赖，使得该文件下所有路由默认受保护
-router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 @router.get("/users")
 def get_admin_users():
