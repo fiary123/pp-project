@@ -2,31 +2,41 @@
 import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import { useAuthStore } from '../store/authStore';
-import { Send, User, ChevronLeft, Loader2, Sparkles, MessageCircle } from 'lucide-vue-next';
+import { Send, ChevronLeft, Loader2, Sparkles } from 'lucide-vue-next';
 import BaseCard from '../components/BaseCard.vue';
-import axios from 'axios';
+import api from '../api';
+
+interface Message {
+  id: number;
+  sender_id: number;
+  receiver_id: number;
+  content: string;
+  sender_name?: string;
+  create_time: string;
+}
 
 const authStore = useAuthStore();
 const route = useRoute();
 
 // 1. 状态管理
-const messages = ref<any[]>([]);
+const messages = ref<Message[]>([]);
 const userInput = ref('');
 const isInitialLoading = ref(true);
+const errorMsg = ref('');
 const scrollContainer = ref<HTMLElement | null>(null);
-let pollTimer: any = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 // 2. 加载消息 (支持静默模式)
 const fetchMessages = async (silent = false) => {
   if (!silent) isInitialLoading.value = true;
   try {
-    const res = await axios.get(`http://127.0.0.1:8000/api/messages/${authStore.user?.id || 1}`);
-    
-    // 只有当消息数量变化时才触发滚动和更新
+    const res = await api.get<Message[]>(`/api/messages/${authStore.user?.id || 1}`);
     if (res.data.length !== messages.value.length) {
       messages.value = res.data;
       scrollToBottom();
     }
+  } catch {
+    if (!silent) errorMsg.value = '消息加载失败，请刷新重试';
   } finally {
     isInitialLoading.value = false;
   }
@@ -36,15 +46,20 @@ const fetchMessages = async (silent = false) => {
 const handleSend = async () => {
   if (!userInput.value.trim()) return;
   const content = userInput.value;
-  userInput.value = ''; // 立即清空，提升交互感
-  
+  userInput.value = '';
+
   const receiverId = Number(route.query.to) || 2;
-  await axios.post('http://127.0.0.1:8000/api/messages/send', {
-    sender_id: authStore.user?.id || 1,
-    receiver_id: receiverId,
-    content: content
-  });
-  fetchMessages(true);
+  try {
+    await api.post('/api/messages/send', {
+      sender_id: authStore.user?.id || 1,
+      receiver_id: receiverId,
+      content: content
+    });
+    fetchMessages(true);
+  } catch {
+    errorMsg.value = '发送失败，请重试';
+    userInput.value = content;
+  }
 };
 
 const scrollToBottom = async () => {
@@ -61,7 +76,7 @@ const scrollToBottom = async () => {
 onMounted(() => {
   fetchMessages();
   pollTimer = setInterval(() => {
-    fetchMessages(true); // 每3秒执行一次静默同步
+    fetchMessages(true);
   }, 3000);
 });
 
@@ -111,14 +126,19 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- 错误提示 -->
+      <div v-if="errorMsg" class="px-8 py-3 bg-red-500/10 border-b border-red-500/20 text-red-400 text-xs font-bold">
+        {{ errorMsg }}
+      </div>
+
       <!-- 消息区域 -->
       <div v-if="isInitialLoading" class="flex-1 flex items-center justify-center">
         <Loader2 class="animate-spin text-orange-500" :size="48" />
       </div>
-      
+
       <div v-else ref="scrollContainer" class="flex-1 p-8 overflow-y-auto space-y-8 scrollbar-hide">
-        <div v-for="m in messages" :key="m.id" 
-             :class="m.sender_id === authStore.user?.id ? 'flex-row-reverse' : 'flex-row'" 
+        <div v-for="m in messages" :key="m.id"
+             :class="m.sender_id === authStore.user?.id ? 'flex-row-reverse' : 'flex-row'"
              class="flex items-start gap-4 animate-in fade-in slide-in-from-bottom-2">
           <div class="w-10 h-10 rounded-xl bg-white/5 overflow-hidden flex-shrink-0 border border-white/10 shadow-lg">
             <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${m.sender_name || 'User'}`" />
@@ -133,11 +153,11 @@ onUnmounted(() => {
       <!-- 输入框 -->
       <div class="p-8 bg-black/40 border-t border-white/5 flex-shrink-0">
         <div class="flex gap-4 items-center">
-          <input 
-            v-model="userInput" 
-            @keyup.enter="handleSend" 
-            placeholder="在此输入您的咨询信息..." 
-            class="flex-1 bg-white/5 border border-white/10 rounded-[1.5rem] py-5 px-8 text-sm text-white focus:border-orange-500 outline-none transition-all placeholder:text-gray-600 shadow-inner" 
+          <input
+            v-model="userInput"
+            @keyup.enter="handleSend"
+            placeholder="在此输入您的咨询信息..."
+            class="flex-1 bg-white/5 border border-white/10 rounded-[1.5rem] py-5 px-8 text-sm text-white focus:border-orange-500 outline-none transition-all placeholder:text-gray-600 shadow-inner"
           />
           <button @click="handleSend" class="p-5 bg-orange-500 rounded-[1.5rem] text-white hover:bg-orange-600 transition-all shadow-xl shadow-orange-500/30 active:scale-95">
             <Send :size="24" />

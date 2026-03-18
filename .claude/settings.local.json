@@ -5,7 +5,10 @@
       "Bash(cd \"D:\\\\2026毕业设计\\\\project\" && python tests/eval_engine.py 2>&1)",
       "Bash(cd \"D:\\\\2026毕业设计\\\\project\" && python -c \"\nimport sys, io\nsys.stdout = io.TextIOWrapper\\(sys.stdout.buffer, encoding='utf-8', errors='replace'\\)\n\nimport tests.generate_charts as gc\nimport json\n\ndata = gc.load_eval_summary\\(\\)\ngc.chart1_bar_comparison\\(data\\)\ngc.chart2_radar\\(data\\)\ngc.chart3_completion_breakdown\\(\\)\ngc.chart4_triage_risk_distribution\\(\\)\ngc.chart5_nutrition_closure_loop\\(\\)\ngc.chart6_latency_comparison\\(data\\)\nprint\\('All charts generated.'\\)\n\" 2>&1)",
       "Bash(cd \"D:\\\\2026毕业设计\\\\project\" && python -c \"\nimport sys, io\nsys.stdout = io.TextIOWrapper\\(sys.stdout.buffer, encoding='utf-8', errors='replace'\\)\nimport tests.generate_charts as gc\ndata = gc.load_eval_summary\\(\\)\ngc.chart3_completion_breakdown\\(\\)\ngc.chart6_latency_comparison\\(data\\)\nprint\\('Done.'\\)\n\" 2>&1)",
-      "Bash(cd \"D:\\\\2026毕业设计\\\\project\" && python -c \"\nimport sys, io\nsys.stdout = io.TextIOWrapper\\(sys.stdout.buffer, encoding='utf-8', errors='replace'\\)\nimport tests.generate_charts as gc\ndata = gc.load_eval_summary\\(\\)\ngc.chart6_latency_comparison\\(data\\)\n\" 2>&1)"
+      "Bash(cd \"D:\\\\2026毕业设计\\\\project\" && python -c \"\nimport sys, io\nsys.stdout = io.TextIOWrapper\\(sys.stdout.buffer, encoding='utf-8', errors='replace'\\)\nimport tests.generate_charts as gc\ndata = gc.load_eval_summary\\(\\)\ngc.chart6_latency_comparison\\(data\\)\n\" 2>&1)",
+      "Bash(find D:2026毕业设计projectpet-frontendsrc -name *.ts -o -name *.vue)",
+      "Bash(python3:*)",
+      "Bash(python -c \":*)"
     ]
   }
 }

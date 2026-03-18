@@ -20,10 +20,7 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """验证密码是否正确 (兼容明文以便老用户过渡)"""
-    # 如果数据库中存储的是明文（不含 bcrypt 特征），则直接比较
-    if not hashed_password.startswith("$2b$"):
-        return plain_password == hashed_password
+    """验证密码（仅支持 bcrypt 哈希，不允许明文存储）"""
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):

@@ -3,8 +3,12 @@ import { ref, computed } from 'vue'
 import { Salad, Loader2, Sparkles, AlertTriangle } from 'lucide-vue-next'
 import axios from 'axios'
 import BaseCard from '../components/BaseCard.vue'
+import { useAuthStore } from '../store/authStore'
+
+const authStore = useAuthStore()
 
 const form = ref({
+  pet_name: '',
   species: 'cat',
   age_months: 12,
   weight_kg: 4,
@@ -20,7 +24,7 @@ const plan = ref<any | null>(null)
 const markdown = ref('')
 const errorMsg = ref('')
 
-const canSubmit = computed(() => form.value.weight_kg > 0 && form.value.age_months >= 0)
+const canSubmit = computed(() => form.value.weight_kg > 0 && form.value.age_months >= 0 && form.value.pet_name.trim() !== '')
 
 const generatePlan = async () => {
   if (!canSubmit.value) return
@@ -33,6 +37,8 @@ const generatePlan = async () => {
       .filter(Boolean)
 
     const res = await axios.post('http://127.0.0.1:8000/api/nutrition/plan', {
+      user_id: authStore.user?.id ?? 0,
+      pet_name: form.value.pet_name.trim(),
       species: form.value.species,
       age_months: Number(form.value.age_months),
       weight_kg: Number(form.value.weight_kg),

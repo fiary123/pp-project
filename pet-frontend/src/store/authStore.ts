@@ -8,6 +8,7 @@ import { defineStore } from 'pinia'
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: JSON.parse(localStorage.getItem('user') || 'null') as any,
+    token: localStorage.getItem('token') || null as string | null,
     isLoggedIn: !!localStorage.getItem('user'),
   }),
 
@@ -29,10 +30,12 @@ export const useAuthStore = defineStore('auth', {
     /**
      * 设置登录状态
      */
-    login(userData: any) {
+    login(userData: any, accessToken: string) {
       this.user = userData
+      this.token = accessToken
       this.isLoggedIn = true
       localStorage.setItem('user', JSON.stringify(userData))
+      localStorage.setItem('token', accessToken)
     },
 
     /**
@@ -40,8 +43,10 @@ export const useAuthStore = defineStore('auth', {
      */
     logout() {
       this.user = null
+      this.token = null
       this.isLoggedIn = false
       localStorage.removeItem('user')
+      localStorage.removeItem('token')
     }
   }
 })

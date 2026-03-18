@@ -1,7 +1,11 @@
+import os
 import sqlite3
 import requests
 import chromadb
 from crewai.tools import tool
+from dotenv import load_dotenv
+
+load_dotenv()
 try:
     from src.database.db_config import SQLITE_DB_PATH, CHROMA_DB_PATH
 except ImportError:
@@ -38,7 +42,9 @@ def nearby_hospital_search(location_coords: str):
     根据经纬度坐标搜索附近5公里的宠物医院。
     参数 location_coords: 格式为 "经度,纬度" (例如: "116.4814,39.9904")
     """
-    AMAP_KEY = "966b3f41682127d765517a06be14953a"  # 记得去高德控制台申请
+    AMAP_KEY = os.getenv("AMAP_KEY", "")
+    if not AMAP_KEY:
+        return "地图服务未配置，请在 .env 中设置 AMAP_KEY"
     url = f"https://restapi.amap.com/v3/place/around"
     params = {
         "key": AMAP_KEY,

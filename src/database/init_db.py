@@ -1,5 +1,13 @@
 import sqlite3
-from .db_config import SQLITE_DB_PATH
+import os
+import sys
+
+# 支持两种运行方式：直接执行 或 作为包导入
+try:
+    from .db_config import SQLITE_DB_PATH
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    from src.database.db_config import SQLITE_DB_PATH
 
 def init_database():
     # 连接数据库
@@ -174,7 +182,7 @@ def init_database():
 
     conn.commit()
     conn.close()
-    print("✅ 数据库重置成功！已增加图片 URL 以支持瀑布流。")
+    print("数据库初始化成功！已增加图片 URL 以支持瀑布流。")
 
 if __name__ == "__main__":
     init_database()
