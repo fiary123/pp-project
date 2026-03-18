@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { 
-  MessageCircle, Heart, Share2, Plus, X, 
-  ImageIcon, Type, Send, Loader2, Sparkles, User, MessageSquare, Edit3, Trash2
+  MessageCircle, Heart, Plus, X, Loader2, MessageSquare, Edit3, Trash2
 } from 'lucide-vue-next';
 import { useAuthStore } from '../store/authStore';
 import BaseCard from '../components/BaseCard.vue';
-import axios from 'axios';
+import axios from '../api/index';
 
 const authStore = useAuthStore();
 
@@ -25,7 +24,6 @@ const isPublishing = ref(false);
 
 // 评论管理
 const activePostComments = ref<Record<number, any[]>>({});
-const commentInput = ref<Record<number, string>>({});
 
 // 模拟帖子生成器
 const generateMockPosts = () => {
@@ -77,7 +75,7 @@ const fetchPosts = async () => {
   console.log('[DEBUG] 当前用户信息:', authStore.user);
   isLoading.value = true;
   try {
-    const res = await axios.get('http://127.0.0.1:8000/api/posts');
+    const res = await axios.get('/api/posts');
     if (res.data && res.data.length > 0) {
       posts.value = res.data.map((p: any) => ({
         ...p,
@@ -100,7 +98,7 @@ const handleLike = async (postId: number) => {
     const post = posts.value.find(p => p.id === postId);
     if (post) {
       post.likes = (post.likes || 0) + 1;
-      await axios.post(`http://127.0.0.1:8000/api/posts/${postId}/like`).catch(() => {});
+      await axios.post(`/api/posts/${postId}/like`).catch(() => {});
     }
   } catch (err) {}
 };
@@ -111,24 +109,13 @@ const loadComments = async (postId: number) => {
     return;
   }
   try {
-    const res = await axios.get(`http://127.0.0.1:8000/api/posts/${postId}/comments`);
+    const res = await axios.get(`/api/posts/${postId}/comments`);
     activePostComments.value[postId] = res.data.length ? res.data : [{ id: 1, username: '系统', content: '快来发表第一条评论吧！' }];
   } catch (err) {
     activePostComments.value[postId] = [{ id: 1, username: '小萌新', content: '前排围观！' }];
   }
 };
 
-const submitComment = async (postId: number) => {
-  const content = commentInput.value[postId];
-  if (!content) return;
-  const newComment = { id: Date.now(), username: authStore.user?.username || '我', content: content };
-  try {
-    await axios.post('http://127.0.0.1:8000/api/posts/comment', { post_id: postId, user_id: authStore.user?.id || 1, content });
-  } catch (err) {}
-  if (activePostComments.value[postId]) activePostComments.value[postId].push(newComment);
-  else activePostComments.value[postId] = [newComment];
-  commentInput.value[postId] = '';
-};
 
 // 4. 管理员功能
 const startEdit = (post: any) => {
@@ -142,7 +129,7 @@ const startEdit = (post: any) => {
 const handleDelete = async (postId: number) => {
   if (!confirm('确定要删除这条帖子吗？')) return;
   try {
-    await axios.delete(`http://127.0.0.1:8000/api/posts/${postId}`);
+    await axios.delete(`/api/posts/${postId}`);
     posts.value = posts.value.filter(p => p.id !== postId);
   } catch (err: any) {
     if (postId >= 1000 || err.response?.status === 404) {
@@ -158,14 +145,14 @@ const handlePublish = async () => {
   try {
     if (isEditing.value && editingPostId.value) {
       try {
-        await axios.put(`http://127.0.0.1:8000/api/posts/${editingPostId.value}`, { ...publishForm.value, type: publishType.value });
+        await axios.put(`/api/posts/${editingPostId.value}`, { ...publishForm.value, type: publishType.value });
       } catch (err: any) {
         if (editingPostId.value < 1000 && err.response?.status !== 404) throw err;
       }
       const idx = posts.value.findIndex(p => p.id === editingPostId.value);
       if (idx !== -1) posts.value[idx] = { ...posts.value[idx], ...publishForm.value, type: publishType.value };
     } else {
-      await axios.post('http://127.0.0.1:8000/api/posts', { user_id: authStore.user?.id || 1, type: publishType.value, ...publishForm.value });
+      await axios.post('/api/posts', { user_id: authStore.user?.id || 1, type: publishType.value, ...publishForm.value });
       fetchPosts();
     }
   } catch (err) {
@@ -203,7 +190,7 @@ onMounted(fetchPosts);
   <div class="max-w-4xl mx-auto space-y-8 pb-32 px-4">
     <div class="flex items-end justify-between border-b border-white/5 pb-6">
       <div>
-        <h2 class="text-4xl font-black text-white italic tracking-tighter uppercase">Pet <span class="text-orange-500">Social</span></h2>
+        <h2 class="text-4xl font-black text-white italic tracking-tighter uppercase">宠物 <span class="text-orange-500">社区</span></h2>
         <p class="text-gray-400 font-bold text-[10px] uppercase tracking-widest mt-1">
           {{ isAdmin ? '超级管理员模式已开启' : '记录萌宠点滴，分享养宠干货' }}
         </p>
@@ -222,7 +209,7 @@ onMounted(fetchPosts);
       <BaseCard v-for="post in filteredPosts" :key="post.id" class="!p-0 overflow-hidden border-white/5 relative">
         <!-- 管理员面板：常驻显示 -->
         <div v-if="isAdmin" class="px-6 py-3 bg-orange-500/10 border-b border-orange-500/20 flex justify-between items-center">
-          <span class="text-[9px] font-black text-orange-500 uppercase tracking-widest">Admin Control Panel</span>
+          <span class="text-[9px] font-black text-orange-500 uppercase tracking-widest">管理员控制面板</span>
           <div class="flex gap-3">
             <button @click="startEdit(post)" class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 text-blue-400 hover:bg-blue-500 hover:text-white rounded-lg border border-blue-500/30 transition-all text-[10px] font-black uppercase">
               <Edit3 :size="12" /> 编辑
@@ -238,7 +225,7 @@ onMounted(fetchPosts);
           <div class="flex items-center gap-4">
             <div class="w-10 h-10 rounded-full border-2 border-orange-500/20 overflow-hidden"><img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${post.username}`" /></div>
             <div>
-              <h4 class="font-bold text-white text-sm flex items-center gap-2">{{ post.username }} <span class="text-[8px] bg-orange-500/10 text-orange-500 px-1.5 py-0.5 rounded border border-orange-500/20 uppercase">{{ post.role }}</span></h4>
+              <h4 class="font-bold text-white text-sm flex items-center gap-2">{{ post.username }} <span class="text-[8px] bg-orange-500/10 text-orange-500 px-1.5 py-0.5 rounded border border-orange-500/20 uppercase">{{ ({individual:'爱宠人士',org_admin:'救助站',root:'管理员'} as Record<string,string>)[post.role] || post.role }}</span></h4>
               <p class="text-[10px] text-gray-600 font-mono mt-0.5">{{ post.create_time }}</p>
             </div>
           </div>
@@ -281,7 +268,7 @@ onMounted(fetchPosts);
       <div v-if="showPublishModal" class="fixed inset-0 z-[500] flex items-center justify-center bg-black/95 backdrop-blur-md px-4">
         <BaseCard class="w-full max-w-xl p-10 relative">
           <button @click="closeModal" class="absolute top-6 right-6 text-gray-500"><X :size="24"/></button>
-          <h3 class="text-2xl font-black text-white mb-8 italic uppercase tracking-tighter">{{ isEditing ? 'Edit Post' : 'New Post' }}</h3>
+          <h3 class="text-2xl font-black text-white mb-8 italic uppercase tracking-tighter">{{ isEditing ? '编辑帖子' : '发布帖子' }}</h3>
           <div class="space-y-6">
             <div class="grid grid-cols-3 gap-3">
               <button v-for="t in [{id:'daily', n:'日常'}, {id:'experience', n:'攻略'}, {id:'adopt_help', n:'送养'}]" :key="t.id" @click="publishType = t.id as any" :class="publishType === t.id ? 'bg-orange-500 text-white' : 'bg-white/5 text-gray-500'" class="py-3 rounded-xl text-[10px] font-bold uppercase transition-all">{{ t.n }}</button>
@@ -300,5 +287,5 @@ onMounted(fetchPosts);
 </template>
 
 <style scoped>
-@reference "tailwindcss";
+/* @reference "tailwindcss"; */
 </style>

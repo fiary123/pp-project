@@ -2,6 +2,8 @@
 
 本项目采用前后端分离架构。前端基于 **Vue.js 3 + TypeScript + Vite**，后端基于 **FastAPI + CrewAI + ChromaDB**。
 
+---
+
 ## 1. 环境准备
 
 确保您的系统中已安装以下软件：
@@ -11,104 +13,119 @@
 
 ---
 
-## 2. 后端配置与运行 (Python)
+## 2. 每次启动步骤
 
-后端位于项目根目录下的 `src` 文件夹中。
+打开**两个终端**，分别运行：
 
-### 2.1 激活环境 (pet_adoption)
-在项目根目录下运行：
+**终端 1 — 后端：**
 ```powershell
-# 如果使用 Conda (推荐)
 conda activate pet_adoption
-
-# 如果使用 venv
-.\pet_adoption\Scripts\activate
+uvicorn src.web.app:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 2.2 安装依赖
+**终端 2 — 前端：**
+```powershell
+cd pet-frontend
+npm run dev
+```
+
+启动后浏览器访问 **http://127.0.0.1:5173**
+
+> **首次运行前**，请先完成第 3 节的环境初始化。
+
+---
+
+## 3. 首次运行初始化
+
+### 3.1 激活 Python 环境
+
+```powershell
+conda activate pet_adoption
+```
+
+### 3.2 安装 Python 依赖
+
 ```powershell
 pip install -r requirements.txt
 ```
 
-### 2.3 初始化数据库
-在启动应用前，请确保数据库已初始化：
+### 3.3 安装前端依赖
+
+```powershell
+cd pet-frontend
+npm install
+cd ..
+```
+
+### 3.4 初始化数据库
+
 ```powershell
 python src/database/init_db.py
 ```
 
-### 2.4 启动后端服务
-运行 FastAPI 应用（默认运行在 `http://127.0.0.1:8000`）：
+> 以上步骤只需执行一次。之后每次启动直接双击 `启动SmartPet.bat` 即可。
+
+---
+
+## 4. 访问地址
+
+| 场景 | 地址 |
+| :--- | :--- |
+| 本机访问前端 | http://127.0.0.1:5173 |
+| 本机访问后端 API | http://127.0.0.1:8000 |
+| 本机查看 API 文档 | http://127.0.0.1:8000/docs |
+| **局域网其他设备访问** | http://本机IP:5173 |
+
+**查询本机 IP（局域网演示用）：**
 ```powershell
-uvicorn src.web.app:app --reload
+ipconfig
+# 找到形如 192.168.x.x 的地址，其他设备用该地址访问
 ```
 
 ---
 
-## 3. 前端配置与运行 (Vue.js)
+## 5. 手动启动（备用）
 
-前端位于 `pet-frontend` 文件夹中。
-
-### 3.1 进入前端目录
-```powershell
-cd pet-frontend
-```
-
-### 3.2 安装依赖
-```powershell
-npm install
-```
-
-### 3.3 启动开发服务器
-```powershell
-npm run dev
-```
-启动后，您可以在浏览器中访问控制台输出的地址（通常是 `http://localhost:5173`）。
-
----
-
-## 4. 注意事项
-
-- **API 跨域问题**：后端已配置 CORS，允许来自前端开发服务器的请求。
-- **AI 功能**：智能匹配和宠物专家功能依赖于 LLM 模型，请确保在环境变量或 `CREDENTIALS.md` 中正确配置了您的 API Key（如 OpenAI 或 Google Gemini）。
-- **知识库**：ChromaDB 知识库位于 `src/database/data/knowledge`，如需更新知识库，请查看 `src/database/sync_data.py`。
-
----
-
-## 5. 常用命令清单
+如需手动启动，请在项目根目录执行：
 
 | 功能 | 命令 | 目录 |
 | :--- | :--- | :--- |
-| 启动后端 | `uvicorn src.web.app:app --reload` | 根目录 |
+| 启动后端 | `uvicorn src.web.app:app --reload --host 0.0.0.0 --port 8000` | 根目录 |
 | 启动前端 | `npm run dev` | `pet-frontend` |
 | 初始化 DB | `python src/database/init_db.py` | 根目录 |
 | 同步知识库 | `python src/database/sync_data.py` | 根目录 |
 
+---
 
-## 6. 新增功能：营养与喂养专家
+## 6. 注意事项
 
-前端访问路径：`/nutrition`。
+- **AI 功能**：智能匹配、宠物专家等功能依赖 LLM，请确保根目录 `.env` 文件中已正确配置 `OPENAI_API_KEY`。
+- **知识库**：ChromaDB 知识库位于 `src/database/data/knowledge`，如需更新请运行 `python src/database/sync_data.py`。
+- **智能接口降级**：AI 接口不可用时自动降级为规则/模板回复，保证系统基本可用性。
 
-输入：宠物类型、年龄（月）、体重（kg）、绝育状态、活动量、目标、粮食能量密度。
+---
 
-后端接口：`POST /api/nutrition/plan`，返回结构化喂养建议：
-- 每日热量（kcal/day）
-- 每日喂食量（g/day）
-- 喂食频次与每餐克数
-- 饮水建议
-- 禁忌食物清单
-- 7日换粮计划与风险提示
+## 7. 已有接口清单
 
-该功能适用于毕业设计中的“可量化智能推荐”展示。
-
-
-## 7. 前后端接口对齐说明（新增）
-
-为保证 Vue 前端页面可直接联调，后端已补齐以下接口：
 - 认证：`/api/register`, `/api/login`
-- 社区：`/api/posts`, `/api/posts/{id}/like`, `/api/posts/comment`, `/api/posts/{id}/comments`
-- 智能：`/api/chat`, `/api/triage/analyze`, `/api/pets/smart-match`, `/api/nutrition/plan`
-- 私信：`/api/messages/{user_id}`, `/api/messages/send`
-- 用户中心：`/api/user/change-password`, `/api/user/applications/{user_id}`
-- 管理端：`/api/admin/users`, `/api/admin/users/sanction`, `/api/admin/users/reactivate`, `/api/admin/applications`, `/api/admin/applications/update`, `/api/admin/moderation/logs`
+- 宠物：`/api/pets`, `/api/pets/{id}`, `/api/pets/smart-match`
+- 社区：`/api/posts`, `/api/posts/{id}/like`, `/api/posts/{id}/comments`
+- 智能：`/api/chat`, `/api/triage/analyze`, `/api/nutrition/plan`, `/api/adoption/assess`
+- 用户：`/api/user/change-password`, `/api/user/applications/{user_id}`
+- 管理：`/api/admin/users`, `/api/admin/users/sanction`, `/api/admin/users/reactivate`, `/api/admin/applications`, `/api/admin/applications/update`, `/api/admin/moderation/logs`
+- 其他：`/api/announcements`, `/api/upload`
 
-说明：智能接口优先尝试多智能体调用，失败时自动降级为规则/模板回复，保证系统可用性。
+---
+
+## 8. 功能模块说明
+
+| 模块 | 前端路径 | 说明 |
+| :--- | :--- | :--- |
+| 首页 | `/` | 公告栏、平台导航 |
+| 领养中心 | `/adopt` | 宠物列表、AI 智能匹配、领养资质评估 |
+| 社区 | `/community` | 帖子发布、点赞、评论 |
+| 百科 | `/wiki` | 宠物养护知识、AI 专家问答 |
+| 智能分诊 | `/triage` | 上传症状图片/描述，AI 预诊 |
+| 营养规划 | `/nutrition` | 输入宠物参数，生成个性化喂养方案 |
+| 个人中心 | `/profile` | 修改密码、查看领养申请记录 |
+| 管理后台 | `/dashboard` | 审核申请、用户管理、发布公告（管理员专属） |

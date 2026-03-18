@@ -8,11 +8,11 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
-    host: 'localhost',
+    host: '0.0.0.0',   // 监听所有网卡，局域网其他电脑可访问
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',  // 后端地址（本机运行时不需要改）
         changeOrigin: true,
       }
     }

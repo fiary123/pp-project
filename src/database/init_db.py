@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import sys
+from passlib.context import CryptContext
 
 # 支持两种运行方式：直接执行 或 作为包导入
 try:
@@ -8,6 +9,8 @@ try:
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     from src.database.db_config import SQLITE_DB_PATH
+
+_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def init_database():
     # 连接数据库
@@ -156,10 +159,11 @@ def init_database():
     cursor.executemany("INSERT INTO announcements (title, content, date, is_hot) VALUES (?,?,?,?)", notices)
 
     # 4. 插入初始测试账号
+    _h = _pwd_context.hash
     test_users = [
-        ('用户A', 'user@test.com', '123', 'individual', '程序员', '公寓', '猫', '13800000001'),
-        ('阳光救助站', 'admin@test.com', '123', 'org_admin', '站长', '救助中心', '狗', '13800000002'),
-        ('系统管理员', 'root@test.com', '123', 'root', 'IT', '总部', '所有', '13800000003')
+        ('用户A', 'user@test.com', _h('123'), 'individual', '程序员', '公寓', '猫', '13800000001'),
+        ('阳光救助站', 'admin@test.com', _h('123'), 'org_admin', '站长', '救助中心', '狗', '13800000002'),
+        ('系统管理员', 'root@test.com', _h('123'), 'root', 'IT', '总部', '所有', '13800000003')
     ]
     cursor.executemany("INSERT INTO users (username, email, password, role, occupation, living_env, preference, contact) VALUES (?,?,?,?,?,?,?,?)", test_users)
 

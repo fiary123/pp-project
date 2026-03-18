@@ -29,7 +29,7 @@ const navigate = (path: string) => {
           <PawPrint :size="20" />
         </div>
         <h1 class="text-xl font-black tracking-tighter text-white drop-shadow-md">
-          SmartPet <span class="text-orange-400">Hub</span>
+          智宠 <span class="text-orange-400">平台</span>
         </h1>
       </div>
 

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { 
-  Search, Heart, MapPin, Loader2, X, Wand2, Star, Quote, ChevronRight, Sparkles, Edit3, Trash2, Upload
+import {
+  Search, Heart, MapPin, Loader2, X, Wand2, ChevronRight, Edit3, Trash2, Upload,
+  CheckCircle2, AlertTriangle, XCircle, ClipboardList, BrainCircuit, ShieldCheck
 } from 'lucide-vue-next';
 import { useAuthStore } from '../store/authStore';
-import axios from 'axios';
+import axios from '../api/index';
 
 const authStore = useAuthStore();
 
@@ -19,6 +20,81 @@ const selectedPet = ref<any>(null);
 const aiQuery = ref('');
 const isAiMatching = ref(false);
 const recommendedMatches = ref<Record<number, string>>({});
+
+// 领养申请状态
+const showAdoptModal = ref(false);
+const isAssessing = ref(false);
+const assessmentResult = ref<any>(null);
+const adoptForm = ref({
+  applicant_info: '',
+  application_reason: '',
+  target_species: 'cat' as 'cat' | 'dog',
+  monthly_budget: 500,
+  daily_companion_hours: 2,
+  has_pet_experience: false,
+  housing_type: 'apartment' as 'apartment' | 'house' | 'other',
+  existing_pets: ''
+});
+
+const openAdoptModal = (pet: any) => {
+  adoptForm.value.target_species = pet.type === '狗狗' ? 'dog' : 'cat';
+  assessmentResult.value = null;
+  showAdoptModal.value = true;
+  selectedPet.value = null;
+};
+
+const handleAdoptAssess = async () => {
+  if (!adoptForm.value.applicant_info.trim() || adoptForm.value.applicant_info.length < 10) return;
+  isAssessing.value = true;
+  assessmentResult.value = null;
+  try {
+    const token = localStorage.getItem('token');
+    const res = await axios.post('/api/adoption/assess', {
+      ...adoptForm.value,
+      target_pet_name: adoptingPet.value?.name || '未知宠物'
+    }, { headers: { Authorization: `Bearer ${token}` } });
+    assessmentResult.value = res.data;
+  } catch (err: any) {
+    assessmentResult.value = {
+      readiness_score: 0,
+      risk_level: 'High',
+      decision: 'review_required',
+      final_summary: '评估服务暂时不可用，请稍后再试或联系管理员。',
+      risk_factors: [],
+      recommendations: [],
+      baseline_report: '',
+      profile_report: '',
+      cohabitation_report: ''
+    };
+  } finally {
+    isAssessing.value = false;
+  }
+};
+
+const adoptingPet = ref<any>(null);
+const startAdopt = (pet: any) => {
+  adoptingPet.value = pet;
+  openAdoptModal(pet);
+};
+
+const decisionConfig: Record<string, { label: string; color: string; icon: any }> = {
+  pass: { label: '建议通过', color: 'text-green-400', icon: CheckCircle2 },
+  conditional_pass: { label: '条件通过', color: 'text-yellow-400', icon: AlertTriangle },
+  review_required: { label: '需人工复核', color: 'text-blue-400', icon: ShieldCheck },
+  reject: { label: '建议驳回', color: 'text-red-400', icon: XCircle }
+};
+
+const riskLevelConfig: Record<string, { label: string; bg: string; text: string }> = {
+  Low: { label: '低风险', bg: 'bg-green-500/20', text: 'text-green-400' },
+  Medium: { label: '中风险', bg: 'bg-yellow-500/20', text: 'text-yellow-400' },
+  High: { label: '高风险', bg: 'bg-red-500/20', text: 'text-red-400' }
+};
+
+const severityColor: Record<string, string> = {
+  low: 'text-green-400',
+  medium: 'text-yellow-400',
+  high: 'text-red-400'
+};
 
 // 管理员编辑状态
 const showEditModal = ref(false);
@@ -36,7 +112,7 @@ const handleFileUpload = async (e: Event) => {
   const formData = new FormData();
   formData.append('file', file);
   try {
-    const res = await axios.post('http://127.0.0.1:8000/api/upload', formData);
+    const res = await axios.post('/api/upload', formData);
     editPetForm.value.img = res.data.url;
   } catch (err) { alert('图片上传失败'); }
   finally { isUploading.value = false; }
@@ -67,10 +143,10 @@ const generatePets = () => {
   for (let i = 0; i < 60; i++) {
     const typeIdx = i % 3;
     const itemIdx = Math.floor(i/3);
-    let type, name, speciesInfo;
-    if (typeIdx === 0) { type='狗狗'; name=dogNames[itemIdx%dogNames.length]; speciesInfo=dogSpecies[itemIdx%dogSpecies.length]; }
-    else if (typeIdx === 1) { type='猫咪'; name=catNames[itemIdx%catNames.length]; speciesInfo=catSpecies[itemIdx%catSpecies.length]; }
-    else { type='异宠'; name=exoticNames[itemIdx%exoticNames.length]; speciesInfo=exoticSpecies[itemIdx%exoticSpecies.length]; }
+    let type: string, name: string, speciesInfo: { name: string; img: string };
+    if (typeIdx === 0) { type='狗狗'; name=dogNames[itemIdx%dogNames.length]!; speciesInfo=dogSpecies[itemIdx%dogSpecies.length]!; }
+    else if (typeIdx === 1) { type='猫咪'; name=catNames[itemIdx%catNames.length]!; speciesInfo=catSpecies[itemIdx%catSpecies.length]!; }
+    else { type='异宠'; name=exoticNames[itemIdx%exoticNames.length]!; speciesInfo=exoticSpecies[itemIdx%exoticSpecies.length]!; }
 
     data.push({
       id: i + 1000,
@@ -91,7 +167,7 @@ const generatePets = () => {
 const fetchPets = async () => {
   isLoading.value = true;
   try {
-    const res = await axios.get('http://127.0.0.1:8000/api/pets');
+    const res = await axios.get('/api/pets');
     if (res.data && res.data.length >= 10) {
       pets.value = res.data.map((p: any) => ({
         ...p,
@@ -123,7 +199,7 @@ const handleUpdatePet = async () => {
   isUpdatingPet.value = true;
   try {
     if (editPetForm.value.id < 1000) {
-      await axios.put(`http://127.0.0.1:8000/api/pets/${editPetForm.value.id}`, {
+      await axios.put(`/api/pets/${editPetForm.value.id}`, {
         name: editPetForm.value.name,
         species: editPetForm.value.species,
         image_url: editPetForm.value.img,
@@ -144,7 +220,7 @@ const handleUpdatePet = async () => {
 const handleDeletePet = async (petId: number) => {
   if (!confirm('确定要从领养列表中移除这只宠物吗？')) return;
   try {
-    if (petId < 1000) await axios.delete(`http://127.0.0.1:8000/api/pets/${petId}`);
+    if (petId < 1000) await axios.delete(`/api/pets/${petId}`);
     pets.value = pets.value.filter(p => p.id !== petId);
   } catch (err) {}
 };
@@ -153,7 +229,7 @@ const handleAiMatch = async () => {
   if (!aiQuery.value.trim()) return;
   isAiMatching.value = true;
   try {
-    const res = await axios.post('http://127.0.0.1:8000/api/pets/smart-match', { user_query: aiQuery.value, pet_list: pets.value });
+    const res = await axios.post('/api/pets/smart-match', { user_query: aiQuery.value, pet_list: pets.value });
     const matchMap: Record<number, string> = {};
     if (res.data?.matches) res.data.matches.forEach((m: any) => matchMap[m.id] = m.reason);
     recommendedMatches.value = matchMap;
@@ -184,7 +260,7 @@ onMounted(fetchPets);
     <!-- 头部和 Hero 略，逻辑保持一致 -->
     <div class="relative py-16 text-center space-y-8 overflow-hidden rounded-[4rem] bg-gradient-to-b from-orange-500/10 to-transparent border border-white/5 shadow-2xl">
       <div class="relative z-10 space-y-4">
-        <h2 class="text-6xl font-black text-white italic tracking-tighter uppercase text-orange-500 leading-tight">Find Your <br/>Perfect Match</h2>
+        <h2 class="text-6xl font-black text-white italic tracking-tighter uppercase text-orange-500 leading-tight">寻找您的 <br/>完美伙伴</h2>
         <div class="max-w-4xl mx-auto px-6 mt-8">
           <div class="bg-[#1a1a1a]/80 backdrop-blur-3xl p-2 rounded-[2.5rem] border border-white/10 flex items-center">
             <Wand2 class="ml-6 text-orange-500" :size="28" />
@@ -238,6 +314,169 @@ onMounted(fetchPets);
       </div>
     </div>
 
+    <!-- 智能领养申请弹窗 -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="showAdoptModal" class="fixed inset-0 z-[500] flex items-center justify-center bg-black/95 backdrop-blur-md px-4 py-8 overflow-y-auto">
+          <div class="bg-[#111] border border-white/10 rounded-[3rem] w-full max-w-2xl my-auto">
+
+            <!-- 弹窗头部 -->
+            <div class="p-10 pb-0 flex justify-between items-start">
+              <div>
+                <div class="flex items-center gap-3 mb-2">
+                  <BrainCircuit class="text-orange-500" :size="28" />
+                  <span class="text-[10px] font-black text-orange-500 uppercase tracking-widest">AI 智能评估系统</span>
+                </div>
+                <h3 class="text-3xl font-black text-white italic uppercase tracking-tighter">领养资质评估</h3>
+                <p class="text-gray-500 text-sm mt-1">正在为 <span class="text-orange-500 font-bold">{{ adoptingPet?.name }}</span> 寻找合适的家</p>
+              </div>
+              <button @click="showAdoptModal = false" class="text-gray-500 hover:text-white transition-colors mt-1"><X :size="24"/></button>
+            </div>
+
+            <!-- 表单区域（未评估时显示） -->
+            <div v-if="!assessmentResult" class="p-10 space-y-6">
+              <!-- 个人情况 -->
+              <div class="space-y-2">
+                <label class="text-xs font-black text-gray-400 uppercase tracking-wider">个人情况描述 <span class="text-orange-500">*</span></label>
+                <textarea v-model="adoptForm.applicant_info" rows="3" placeholder="请详细描述您的居住环境（面积/楼层/是否封窗）、职业作息、家庭成员情况等..." class="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white text-sm outline-none focus:border-orange-500 transition-colors resize-none placeholder-gray-600" />
+              </div>
+
+              <!-- 领养理由 -->
+              <div class="space-y-2">
+                <label class="text-xs font-black text-gray-400 uppercase tracking-wider">领养申请理由</label>
+                <textarea v-model="adoptForm.application_reason" rows="2" placeholder="为什么想要领养这只宠物？您准备好了吗？" class="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white text-sm outline-none focus:border-orange-500 transition-colors resize-none placeholder-gray-600" />
+              </div>
+
+              <!-- 量化信息 -->
+              <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-2">
+                  <label class="text-xs font-black text-gray-400 uppercase tracking-wider">月均养宠预算（元）</label>
+                  <input v-model.number="adoptForm.monthly_budget" type="number" min="0" class="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white text-sm outline-none focus:border-orange-500 transition-colors" />
+                </div>
+                <div class="space-y-2">
+                  <label class="text-xs font-black text-gray-400 uppercase tracking-wider">每日陪伴时长（小时）</label>
+                  <input v-model.number="adoptForm.daily_companion_hours" type="number" min="0" max="24" step="0.5" class="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white text-sm outline-none focus:border-orange-500 transition-colors" />
+                </div>
+              </div>
+
+              <!-- 选项 -->
+              <div class="grid grid-cols-3 gap-4">
+                <div class="space-y-2">
+                  <label class="text-xs font-black text-gray-400 uppercase tracking-wider">住房类型</label>
+                  <select v-model="adoptForm.housing_type" class="w-full bg-[#1a1a1a] border border-white/10 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-orange-500 transition-colors">
+                    <option value="apartment">公寓</option>
+                    <option value="house">独栋/别墅</option>
+                    <option value="other">其他</option>
+                  </select>
+                </div>
+                <div class="space-y-2">
+                  <label class="text-xs font-black text-gray-400 uppercase tracking-wider">宠物类型</label>
+                  <select v-model="adoptForm.target_species" class="w-full bg-[#1a1a1a] border border-white/10 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-orange-500 transition-colors">
+                    <option value="cat">猫咪</option>
+                    <option value="dog">狗狗</option>
+                  </select>
+                </div>
+                <div class="space-y-2">
+                  <label class="text-xs font-black text-gray-400 uppercase tracking-wider">养宠经验</label>
+                  <select v-model="adoptForm.has_pet_experience" class="w-full bg-[#1a1a1a] border border-white/10 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-orange-500 transition-colors">
+                    <option :value="false">新手</option>
+                    <option :value="true">有经验</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- 原住宠物 -->
+              <div class="space-y-2">
+                <label class="text-xs font-black text-gray-400 uppercase tracking-wider">家中原有宠物（无则留空）</label>
+                <input v-model="adoptForm.existing_pets" placeholder="如：家有一只2岁英短猫，已绝育..." class="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white text-sm outline-none focus:border-orange-500 transition-colors placeholder-gray-600" />
+              </div>
+
+              <!-- 提交按钮 -->
+              <button @click="handleAdoptAssess" :disabled="isAssessing || adoptForm.applicant_info.length < 10" class="w-full bg-orange-500 disabled:bg-orange-500/30 disabled:cursor-not-allowed text-white py-5 rounded-2xl font-black text-lg hover:bg-orange-600 transition-all flex justify-center items-center gap-3">
+                <Loader2 v-if="isAssessing" class="animate-spin" :size="22" />
+                <BrainCircuit v-else :size="22" />
+                {{ isAssessing ? 'AI 多智能体评估中...' : '开始智能评估' }}
+              </button>
+              <p class="text-center text-xs text-gray-600">由三位 AI 专家协同分析 · 结果仅供参考 · 最终决定由管理员审核</p>
+            </div>
+
+            <!-- 评估结果区域 -->
+            <div v-else class="p-10 space-y-6">
+              <!-- 评分头部 -->
+              <div class="bg-white/5 rounded-3xl p-8 flex items-center justify-between border border-white/5">
+                <div class="text-center">
+                  <div class="text-6xl font-black" :class="assessmentResult.readiness_score >= 70 ? 'text-green-400' : assessmentResult.readiness_score >= 50 ? 'text-yellow-400' : 'text-red-400'">
+                    {{ assessmentResult.readiness_score }}
+                  </div>
+                  <div class="text-xs text-gray-500 mt-1 font-bold uppercase">准备度评分</div>
+                </div>
+                <div class="text-center">
+                  <div class="text-3xl font-black text-white">{{ Math.round((assessmentResult.success_probability || 0) * 100) }}%</div>
+                  <div class="text-xs text-gray-500 mt-1 font-bold uppercase">成功倾向</div>
+                </div>
+                <div class="text-center">
+                  <div :class="[riskLevelConfig[assessmentResult.risk_level]?.bg, riskLevelConfig[assessmentResult.risk_level]?.text]" class="px-4 py-2 rounded-full text-sm font-black">
+                    {{ riskLevelConfig[assessmentResult.risk_level]?.label || assessmentResult.risk_level }}
+                  </div>
+                  <div class="text-xs text-gray-500 mt-1 font-bold uppercase">风险等级</div>
+                </div>
+                <div class="text-center">
+                  <component :is="decisionConfig[assessmentResult.decision]?.icon || CheckCircle2" :size="32" :class="decisionConfig[assessmentResult.decision]?.color || 'text-gray-400'" />
+                  <div :class="decisionConfig[assessmentResult.decision]?.color || 'text-gray-400'" class="text-xs mt-1 font-black uppercase">
+                    {{ decisionConfig[assessmentResult.decision]?.label || assessmentResult.decision }}
+                  </div>
+                </div>
+              </div>
+
+              <!-- 综合报告 -->
+              <div class="space-y-2">
+                <div class="text-xs font-black text-gray-400 uppercase tracking-wider flex items-center gap-2"><BrainCircuit :size="14" class="text-orange-500" />综合评估摘要</div>
+                <div class="bg-white/5 rounded-2xl p-6 text-sm text-gray-300 leading-relaxed border border-white/5 max-h-48 overflow-y-auto whitespace-pre-wrap">{{ assessmentResult.final_summary }}</div>
+              </div>
+
+              <!-- 风险因子 -->
+              <div v-if="assessmentResult.risk_factors?.length" class="space-y-2">
+                <div class="text-xs font-black text-gray-400 uppercase tracking-wider flex items-center gap-2"><AlertTriangle :size="14" class="text-yellow-500" />风险因子（{{ assessmentResult.risk_factors.length }}项）</div>
+                <div class="space-y-2 max-h-40 overflow-y-auto pr-1">
+                  <div v-for="(rf, i) in assessmentResult.risk_factors" :key="i" class="bg-white/5 rounded-xl px-5 py-3 flex items-start gap-3 border border-white/5">
+                    <span :class="severityColor[rf.severity]" class="text-xs font-black uppercase mt-0.5 shrink-0">{{ rf.severity }}</span>
+                    <div>
+                      <span class="text-orange-400 text-xs font-bold mr-2">{{ rf.dimension }}</span>
+                      <span class="text-gray-300 text-xs">{{ rf.description }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 建议 -->
+              <div v-if="assessmentResult.recommendations?.length" class="space-y-2">
+                <div class="text-xs font-black text-gray-400 uppercase tracking-wider flex items-center gap-2"><CheckCircle2 :size="14" class="text-green-500" />个性化建议</div>
+                <ul class="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                  <li v-for="(rec, i) in assessmentResult.recommendations" :key="i" class="flex items-start gap-2 text-xs text-gray-300">
+                    <span class="text-orange-500 mt-0.5 shrink-0">›</span>{{ rec }}
+                  </li>
+                </ul>
+              </div>
+
+              <!-- 管理员备注 -->
+              <div v-if="assessmentResult.review_note" class="bg-blue-500/10 border border-blue-500/20 rounded-2xl px-6 py-4">
+                <div class="text-xs font-black text-blue-400 uppercase mb-1 flex items-center gap-2"><ShieldCheck :size="12" />管理员审核备注</div>
+                <p class="text-sm text-gray-300">{{ assessmentResult.review_note }}</p>
+              </div>
+
+              <!-- 底部操作 -->
+              <div class="flex gap-3 pt-2">
+                <button @click="assessmentResult = null" class="flex-1 bg-white/10 text-white py-4 rounded-2xl font-black hover:bg-white/20 transition-all text-sm">重新填写</button>
+                <button @click="showAdoptModal = false" class="flex-1 bg-orange-500 text-white py-4 rounded-2xl font-black hover:bg-orange-600 transition-all text-sm">已了解，关闭</button>
+              </div>
+              <p class="text-center text-xs text-gray-600">评估结果已同步至管理员后台 · Trace ID: {{ assessmentResult.trace_id?.slice(0,8) || 'N/A' }}</p>
+            </div>
+
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
     <!-- 宠物编辑弹窗 -->
     <Teleport to="body">
       <div v-if="showEditModal" class="fixed inset-0 z-[600] flex items-center justify-center bg-black/95 backdrop-blur-md px-4">
@@ -275,7 +514,7 @@ onMounted(fetchPets);
           <div class="lg:w-2/5 p-12 space-y-8 text-left">
             <div><span class="bg-orange-500/20 text-orange-500 px-4 py-1 rounded-full text-[10px] font-black uppercase">{{ selectedPet.type }}</span><h3 class="text-6xl font-black text-white mt-4">{{ selectedPet.name }}</h3></div>
             <p class="text-gray-400 text-lg leading-relaxed">{{ selectedPet.desc }}</p>
-            <div class="flex gap-4 pt-4"><button class="flex-1 bg-white text-black py-6 rounded-[2rem] font-black text-xl hover:bg-orange-500 hover:text-white transition-all">立即领养</button><button class="p-6 bg-white/5 text-white rounded-[2rem] border border-white/10"><Heart :size="28" /></button></div>
+            <div class="flex gap-4 pt-4"><button @click="startAdopt(selectedPet)" class="flex-1 bg-white text-black py-6 rounded-[2rem] font-black text-xl hover:bg-orange-500 hover:text-white transition-all flex items-center justify-center gap-2"><ClipboardList :size="22" />智能申请领养</button><button class="p-6 bg-white/5 text-white rounded-[2rem] border border-white/10"><Heart :size="28" /></button></div>
           </div>
         </div>
       </div>
@@ -284,7 +523,7 @@ onMounted(fetchPets);
 </template>
 
 <style scoped>
-@reference "tailwindcss";
+/* @reference "tailwindcss"; */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

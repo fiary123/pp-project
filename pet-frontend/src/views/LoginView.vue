@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Mail, Lock, User, Shield, ArrowRight, Loader2 } from 'lucide-vue-next'
+import { Mail, Lock, User, ArrowRight, Loader2 } from 'lucide-vue-next'
 import { useAuthStore } from '../store/authStore'
 import axios from 'axios'
-import BaseCard from '../components/BaseCard.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -27,15 +26,15 @@ const handleAuth = async () => {
   try {
     if (isLogin.value) {
       // 登录逻辑
-      const res = await axios.post('http://127.0.0.1:8000/api/login', {
+      const res = await axios.post('/api/login', {
         email: form.value.email,
         password: form.value.password
       })
-      authStore.login(res.data.user)
+      authStore.login(res.data.user, res.data.access_token)
       router.push('/')
     } else {
       // 注册逻辑
-      await axios.post('http://127.0.0.1:8000/api/register', form.value)
+      await axios.post('/api/register', form.value)
       isLogin.value = true
       alert('注册成功，请登录！')
     }
@@ -121,5 +120,5 @@ const handleAuth = async () => {
 </template>
 
 <style scoped>
-@reference "tailwindcss";
+/* @reference "tailwindcss"; */
 </style>

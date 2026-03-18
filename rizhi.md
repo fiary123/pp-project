@@ -1,8 +1,138 @@
-【猫咪篇】全能养护·疾病·营养·环境百科手册
-猫咪高冷又软萌，看似省心，实则养护需兼顾营养、环境与疾病预防，掌握核心要点，就能守护它安稳度过一生，新手也能轻松上手。
-
-营养方面，遵循“精准适配”原则。幼猫少食多餐，每天3-4次，喂幼猫专用粮+羊奶粉，忌喂牛奶；成猫每天1-2次，定时定量，优先选无谷猫粮，搭配少量水煮鸡胸肉、无盐蛋黄，坚决避开巧克力、洋葱、葡萄等有毒食物，保证充足饮水。
-
-环境与护理要细致，打造安静舒适的空间，封窗防盗网是重中之重，避免坠楼风险。猫咪无需频繁洗澡，3-6个月一次即可，每周梳毛1-2次，每月剪指甲、定期清理耳道和眼角。定期体内外驱虫，幼猫每月一次，成猫按需调整。
-
-疾病预防别忽视，疫苗不可漏，幼猫8周龄开始打猫三联，3月龄打狂犬疫苗，每年补针。警惕异常信号，拒食、精神萎靡、呕吐腹泻、粪便异常，需及时就医；日常保持环境干燥清洁，减少皮肤病和呼吸道疾病发生。1
+(索引):17   GET https://webapi.amap.com/maps?v=2.0&key=57042dab2994bb65ab829cc878477b44 net::ERR_CONNECTION_CLOSED
+index.ts:52  [Vue Router warn]: The `next()` callback in navigation guards is deprecated. Return the value instead of calling `next(value)`.
+warn$1 @ devtools-CVsCuYdF.js:13
+(匿名) @ devtools-CVsCuYdF.js:614
+(匿名) @ index.ts:52
+(匿名) @ devtools-CVsCuYdF.js:579
+runWithContext @ devtools-CVsCuYdF.js:561
+(匿名) @ devtools-CVsCuYdF.js:579
+(匿名) @ devtools-CVsCuYdF.js:563
+runWithContext @ runtime-core.esm-bundler.js:4276
+runWithContext @ vue-router.js:1333
+(匿名) @ vue-router.js:1535
+Promise.then
+(匿名) @ vue-router.js:1535
+runGuardQueue @ vue-router.js:1535
+(匿名) @ vue-router.js:1348
+Promise.then
+navigate @ vue-router.js:1344
+pushWithRedirect @ vue-router.js:1305
+push @ vue-router.js:1258
+install @ vue-router.js:1505
+use @ runtime-core.esm-bundler.js:4139
+(匿名) @ main.ts:10
+index.ts:52  [Vue Router warn]: The `next()` callback in navigation guards is deprecated. Return the value instead of calling `next(value)`.
+warn$1 @ devtools-CVsCuYdF.js:13
+(匿名) @ devtools-CVsCuYdF.js:614
+(匿名) @ index.ts:52
+(匿名) @ devtools-CVsCuYdF.js:579
+runWithContext @ devtools-CVsCuYdF.js:561
+(匿名) @ devtools-CVsCuYdF.js:579
+(匿名) @ devtools-CVsCuYdF.js:563
+runWithContext @ runtime-core.esm-bundler.js:4276
+runWithContext @ vue-router.js:1333
+(匿名) @ vue-router.js:1535
+Promise.then
+(匿名) @ vue-router.js:1535
+runGuardQueue @ vue-router.js:1535
+(匿名) @ vue-router.js:1348
+Promise.then
+navigate @ vue-router.js:1344
+pushWithRedirect @ vue-router.js:1305
+push @ vue-router.js:1258
+navigate @ AppHeader.vue:19
+_createElementVNode.onClick._cache.<computed>._cache.<computed> @ AppHeader.vue:66
+callWithErrorHandling @ runtime-core.esm-bundler.js:199
+callWithAsyncErrorHandling @ runtime-core.esm-bundler.js:206
+invoker @ runtime-dom.esm-bundler.js:730
+ProfileView.vue:164  [Vue warn]: Failed to resolve component: Loader2
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <ProfileView onVnodeUnmounted=fn<onVnodeUnmounted> ref=Ref< null > > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade-slide" mode="out-in" > 
+  at <RouterView> 
+  at <App>
+warn$1 @ runtime-core.esm-bundler.js:51
+resolveAsset @ runtime-core.esm-bundler.js:3144
+resolveComponent @ runtime-core.esm-bundler.js:3106
+_sfc_render @ ProfileView.vue:164
+renderComponentRoot @ runtime-core.esm-bundler.js:4533
+componentUpdateFn @ runtime-core.esm-bundler.js:6079
+run @ reactivity.esm-bundler.js:239
+setupRenderEffect @ runtime-core.esm-bundler.js:6214
+mountComponent @ runtime-core.esm-bundler.js:5989
+processComponent @ runtime-core.esm-bundler.js:5941
+patch @ runtime-core.esm-bundler.js:5447
+componentUpdateFn @ runtime-core.esm-bundler.js:6166
+run @ reactivity.esm-bundler.js:239
+leavingHooks.afterLeave @ runtime-core.esm-bundler.js:1405
+performRemove @ runtime-core.esm-bundler.js:6679
+el.<computed> @ runtime-core.esm-bundler.js:1582
+finishLeave @ runtime-dom.esm-bundler.js:183
+resolve @ runtime-dom.esm-bundler.js:214
+resolveIfNotStale @ runtime-dom.esm-bundler.js:290
+end @ runtime-dom.esm-bundler.js:304
+onEnd @ runtime-dom.esm-bundler.js:308
+ProfileView.vue:164  [Vue warn]: Failed to resolve component: Heart
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <ProfileView onVnodeUnmounted=fn<onVnodeUnmounted> ref=Ref< null > > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade-slide" mode="out-in" > 
+  at <RouterView> 
+  at <App>
+warn$1 @ runtime-core.esm-bundler.js:51
+resolveAsset @ runtime-core.esm-bundler.js:3144
+resolveComponent @ runtime-core.esm-bundler.js:3106
+_sfc_render @ ProfileView.vue:164
+renderComponentRoot @ runtime-core.esm-bundler.js:4533
+componentUpdateFn @ runtime-core.esm-bundler.js:6079
+run @ reactivity.esm-bundler.js:239
+setupRenderEffect @ runtime-core.esm-bundler.js:6214
+mountComponent @ runtime-core.esm-bundler.js:5989
+processComponent @ runtime-core.esm-bundler.js:5941
+patch @ runtime-core.esm-bundler.js:5447
+componentUpdateFn @ runtime-core.esm-bundler.js:6166
+run @ reactivity.esm-bundler.js:239
+leavingHooks.afterLeave @ runtime-core.esm-bundler.js:1405
+performRemove @ runtime-core.esm-bundler.js:6679
+el.<computed> @ runtime-core.esm-bundler.js:1582
+finishLeave @ runtime-dom.esm-bundler.js:183
+resolve @ runtime-dom.esm-bundler.js:214
+resolveIfNotStale @ runtime-dom.esm-bundler.js:290
+end @ runtime-dom.esm-bundler.js:304
+onEnd @ runtime-dom.esm-bundler.js:308
+index.ts:52  [Vue Router warn]: The `next()` callback in navigation guards is deprecated. Return the value instead of calling `next(value)`.
+warn$1 @ devtools-CVsCuYdF.js:13
+(匿名) @ devtools-CVsCuYdF.js:614
+(匿名) @ index.ts:52
+(匿名) @ devtools-CVsCuYdF.js:579
+runWithContext @ devtools-CVsCuYdF.js:561
+(匿名) @ devtools-CVsCuYdF.js:579
+(匿名) @ devtools-CVsCuYdF.js:563
+runWithContext @ runtime-core.esm-bundler.js:4276
+runWithContext @ vue-router.js:1333
+(匿名) @ vue-router.js:1535
+Promise.then
+(匿名) @ vue-router.js:1535
+runGuardQueue @ vue-router.js:1535
+(匿名) @ vue-router.js:1348
+Promise.then
+navigate @ vue-router.js:1344
+pushWithRedirect @ vue-router.js:1305
+push @ vue-router.js:1258
+_createElementVNode.onClick._cache.<computed>._cache.<computed> @ ProfileView.vue:71
+callWithErrorHandling @ runtime-core.esm-bundler.js:199
+callWithAsyncErrorHandling @ runtime-core.esm-bundler.js:206
+invoker @ runtime-dom.esm-bundler.js:730
+LoginView.vue:29   POST http://localhost:5173/api/login 500 (Internal Server Error)
+dispatchXhrRequest @ xhr.js:220
+xhr @ xhr.js:16
+dispatchRequest @ dispatchRequest.js:46
+_request @ Axios.js:202
+request @ Axios.js:41
+httpMethod @ Axios.js:243
+wrap @ bind.js:12
+handleAuth @ LoginView.vue:29
+callWithErrorHandling @ runtime-core.esm-bundler.js:199
+callWithAsyncErrorHandling @ runtime-core.esm-bundler.js:206
+invoker @ runtime-dom.esm-bundler.js:730

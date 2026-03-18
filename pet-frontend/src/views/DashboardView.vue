@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { 
-  BarChart3, Users, Dog, FileCheck, Bell, Trash2, 
-  Plus, CheckCircle2, XCircle, BrainCircuit, Loader2, Send, 
-  History, ShieldAlert, ExternalLink, MicOff, UserX, UserCheck, ShieldCheck
+  Users, CheckCircle2, XCircle, Loader2,
+  ShieldAlert, MicOff, UserX, UserCheck, ShieldCheck
 } from 'lucide-vue-next'
 import { useAuthStore } from '../store/authStore'
 import BaseCard from '../components/BaseCard.vue'
-import axios from 'axios'
+import axios from '../api/index'
 
 const authStore = useAuthStore()
 
@@ -30,10 +29,10 @@ const fetchData = async () => {
   isLoading.value = true
   try {
     const [apps, notices, logs, users] = await Promise.all([
-      axios.get('http://127.0.0.1:8000/api/admin/applications'),
-      axios.get('http://127.0.0.1:8000/api/announcements'),
-      axios.get('http://127.0.0.1:8000/api/admin/moderation/logs'),
-      axios.get('http://127.0.0.1:8000/api/admin/users')
+      axios.get('/api/admin/applications'),
+      axios.get('/api/announcements'),
+      axios.get('/api/admin/moderation/logs'),
+      axios.get('/api/admin/users')
     ])
     applications.value = apps.data
     announcements.value = notices.data
@@ -51,7 +50,7 @@ const openSanctionModal = (user: any) => {
 const handleSanction = async () => {
   if (!sanctionForm.value.reason) return
   isSanctionSubmitting.value = true
-  await axios.post('http://127.0.0.1:8000/api/admin/users/sanction', {
+  await axios.post('/api/admin/users/sanction', {
     user_id: sanctionTarget.value.id,
     admin_id: authStore.user?.id || 0,
     ...sanctionForm.value
@@ -63,13 +62,13 @@ const handleSanction = async () => {
 }
 
 const reactivateUser = async (id: number) => {
-  await axios.post(`http://127.0.0.1:8000/api/admin/users/reactivate?user_id=${id}`)
+  await axios.post(`/api/admin/users/reactivate?user_id=${id}`)
   fetchData()
 }
 
 // (其余审核/公告操作逻辑保持)
 const handleAudit = async (appId: number, status: string) => {
-  await axios.post('http://127.0.0.1:8000/api/admin/applications/update', { app_id: appId, status })
+  await axios.post('/api/admin/applications/update', { app_id: appId, status })
   fetchData()
 }
 
@@ -126,7 +125,7 @@ onMounted(fetchData)
             </div>
 
             <div class="mt-6 flex justify-between items-center pt-4 border-t border-white/5">
-              <span class="text-[10px] font-black uppercase text-gray-600 tracking-widest">Role: {{ user.role }}</span>
+              <span class="text-[10px] font-black uppercase text-gray-600 tracking-widest">角色：{{ ({individual:'爱宠人士',org_admin:'救助站管理员',root:'超级管理员'} as Record<string,string>)[user.role] || user.role }}</span>
               <div class="flex gap-2">
                 <button v-if="user.status !== 'active'" @click="reactivateUser(user.id)" class="px-3 py-1 bg-green-500/10 text-green-500 rounded-lg text-[10px] font-bold hover:bg-green-500 hover:text-white transition-all">恢复正常</button>
                 <button v-else @click="openSanctionModal(user)" class="px-3 py-1 bg-red-500/10 text-red-500 rounded-lg text-[10px] font-bold hover:bg-red-500 hover:text-white transition-all">违规处罚</button>
@@ -170,14 +169,14 @@ onMounted(fetchData)
           <div class="w-full max-w-lg bg-[#121212] rounded-[3rem] border border-red-500/30 p-10 shadow-2xl">
             <div class="text-center space-y-4 mb-8">
               <div class="w-16 h-16 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto"><ShieldCheck :size="32" /></div>
-              <h3 class="text-2xl font-black text-white italic uppercase tracking-tighter">Account Enforcement</h3>
+              <h3 class="text-2xl font-black text-white italic uppercase tracking-tighter">用户违规处罚</h3>
               <p class="text-xs text-gray-500">正在对用户 {{ sanctionTarget?.username }} 启动处罚存证</p>
             </div>
 
             <div class="space-y-6">
               <div class="grid grid-cols-2 gap-4">
-                <button @click="sanctionForm.type = 'muted'" :class="sanctionForm.type === 'muted' ? 'bg-yellow-500 text-black' : 'bg-white/5 text-gray-500'" class="py-4 rounded-2xl text-xs font-black uppercase transition-all">限制发言 (MUTE)</button>
-                <button @click="sanctionForm.type = 'banned'" :class="sanctionForm.type === 'banned' ? 'bg-red-500 text-white' : 'bg-white/5 text-gray-500'" class="py-4 rounded-2xl text-xs font-black uppercase transition-all">封禁账号 (BAN)</button>
+                <button @click="sanctionForm.type = 'muted'" :class="sanctionForm.type === 'muted' ? 'bg-yellow-500 text-black' : 'bg-white/5 text-gray-500'" class="py-4 rounded-2xl text-xs font-black uppercase transition-all">限制发言</button>
+                <button @click="sanctionForm.type = 'banned'" :class="sanctionForm.type === 'banned' ? 'bg-red-500 text-white' : 'bg-white/5 text-gray-500'" class="py-4 rounded-2xl text-xs font-black uppercase transition-all">封禁账号</button>
               </div>
               <div class="space-y-2">
                 <label class="text-[10px] text-gray-500 font-bold uppercase">处罚正当理由 (必填)</label>
@@ -206,5 +205,5 @@ onMounted(fetchData)
 </template>
 
 <style scoped>
-@reference "tailwindcss";
+/* @reference "tailwindcss"; */
 </style>

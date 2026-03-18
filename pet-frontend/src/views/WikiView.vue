@@ -1,11 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
-import { 
-  Cat, Dog, Bird, ThermometerSnowflake, Sparkles, Send, Fish,
-  ChevronLeft, Heart, Share2, MessageCircle, Clock, Eye, BookOpen, ShieldCheck, Loader2
-} from 'lucide-vue-next'
-import BaseCard from '../components/BaseCard.vue'
-import axios from 'axios'
+import { Sparkles, Send, ChevronLeft, Eye } from 'lucide-vue-next'
+import axios from '../api/index'
 
 // 1. 全量推文数据 (保持最新封面和内容)
 const allPosts = [
@@ -119,6 +115,7 @@ const allPosts = [
   ]
 // 状态控制
 const activeCategory = ref('all')
+const categoryNames: Record<string, string> = { all: '全部', cat: '猫咪', dog: '狗狗', reptile: '爬宠', fish: '鱼类' }
 const selectedArticleId = ref<number | null>(null)
 const filteredPosts = computed(() => activeCategory.value === 'all' ? allPosts : allPosts.filter(p => p.category === activeCategory.value))
 const currentArticle = computed(() => allPosts.find(p => p.id === selectedArticleId.value))
@@ -156,7 +153,7 @@ const handleAsk = async () => {
   scrollToBottom()
 
   try {
-    const res = await axios.post('http://127.0.0.1:8000/api/chat', { message: msg })
+    const res = await axios.post('/api/chat', { message: msg })
     chatHistory.value.push({ role: 'ai', text: res.data.reply })
   } catch {
     chatHistory.value.push({ role: 'ai', text: '连接超时，专家正在路上' })
@@ -176,13 +173,13 @@ const handleAsk = async () => {
         <div v-if="!selectedArticleId" key="list" class="space-y-8">
           <div class="flex items-end justify-between border-b border-white/10 pb-6">
             <div>
-              <h2 class="text-4xl font-black text-white italic tracking-tighter uppercase text-orange-500">Pet Encyclopedia</h2>
+              <h2 class="text-4xl font-black text-white italic tracking-tighter uppercase text-orange-500">宠物百科</h2>
               <p class="text-gray-400 font-bold text-xs uppercase tracking-[0.3em] mt-1">智能百科知识库</p>
             </div>
             <div class="flex gap-4">
-              <button v-for="c in ['all', 'cat', 'dog', 'reptile', 'fish']" :key="c" @click="activeCategory = c"
-                      :class="activeCategory === c ? 'text-orange-500 font-black border-b-2 border-orange-500' : 'text-gray-500'"
-                      class="text-xs uppercase font-bold transition-all hover:text-white px-2">{{ c }}</button>
+              <button v-for="c in [{v:'all',n:'全部'},{v:'cat',n:'猫咪'},{v:'dog',n:'狗狗'},{v:'reptile',n:'爬宠'},{v:'fish',n:'鱼类'}]" :key="c.v" @click="activeCategory = c.v"
+                      :class="activeCategory === c.v ? 'text-orange-500 font-black border-b-2 border-orange-500' : 'text-gray-500'"
+                      class="text-xs uppercase font-bold transition-all hover:text-white px-2">{{ c.n }}</button>
             </div>
           </div>
 
@@ -191,14 +188,14 @@ const handleAsk = async () => {
                  class="group bg-[#1a1a1a] rounded-[2.5rem] overflow-hidden border border-white/5 hover:border-orange-500/40 transition-all cursor-pointer shadow-2xl">
               <div class="h-56 overflow-hidden relative">
                 <img :src="post.cover" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" />
-                <div class="absolute top-4 left-4 bg-orange-500 text-white text-[10px] font-black px-2 py-1 rounded-full uppercase">{{ post.category }}</div>
+                <div class="absolute top-4 left-4 bg-orange-500 text-white text-[10px] font-black px-2 py-1 rounded-full uppercase">{{ categoryNames[post.category] || post.category }}</div>
               </div>
               <div class="p-8 space-y-4">
                 <h3 class="text-xl font-bold text-white group-hover:text-orange-400 leading-tight transition-colors">{{ post.title }}</h3>
                 <p class="text-xs text-gray-500 leading-relaxed line-clamp-2">{{ post.summary }}</p>
                 <div class="flex items-center justify-between pt-4 border-t border-white/5 text-gray-600 text-[10px] font-bold">
                   <span class="flex items-center gap-1"><Eye :size="12"/> {{ post.views }} 阅读</span>
-                  <span class="text-orange-500 uppercase tracking-widest">Read More</span>
+                  <span class="text-orange-500 uppercase tracking-widest">阅读全文</span>
                 </div>
               </div>
             </div>
@@ -245,8 +242,8 @@ const handleAsk = async () => {
           <div class="flex items-center gap-5">
             <div class="p-4 bg-orange-500 rounded-2xl text-white shadow-lg shadow-orange-500/40"><Sparkles :size="28" /></div>
             <div>
-              <h4 class="text-xl font-black text-white uppercase tracking-tighter italic">AI ENCYCLOPEDIA</h4>
-              <p class="text-xs text-orange-400 font-bold tracking-widest mt-1 uppercase">24/7 Expert Assistant</p>
+              <h4 class="text-xl font-black text-white uppercase tracking-tighter italic">AI 智能百科</h4>
+              <p class="text-xs text-orange-400 font-bold tracking-widest mt-1 uppercase">全天候专家助手</p>
             </div>
           </div>
         </div>
@@ -297,7 +294,7 @@ const handleAsk = async () => {
 </template>
 
 <style scoped>
-@reference "tailwindcss";
+/* @reference "tailwindcss"; */
 
 /* 全局切换动画 */
 .fade-slide-enter-active, .fade-slide-leave-active { transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1); }

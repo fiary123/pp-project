@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { Salad, Loader2, Sparkles, AlertTriangle } from 'lucide-vue-next'
-import axios from 'axios'
+import axios from '../api/index'
 import BaseCard from '../components/BaseCard.vue'
 import { useAuthStore } from '../store/authStore'
 
@@ -36,7 +36,7 @@ const generatePlan = async () => {
       .map(s => s.trim())
       .filter(Boolean)
 
-    const res = await axios.post('http://127.0.0.1:8000/api/nutrition/plan', {
+    const res = await axios.post('/api/nutrition/plan', {
       user_id: authStore.user?.id ?? 0,
       pet_name: form.value.pet_name.trim(),
       species: form.value.species,
@@ -63,7 +63,7 @@ const generatePlan = async () => {
   <div class="space-y-8">
     <div class="text-center space-y-3">
       <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold uppercase tracking-[0.2em]">
-        <Sparkles :size="14" /> Nutrition Expert
+        <Sparkles :size="14" /> 营养专家
       </div>
       <h2 class="text-5xl font-black text-white italic">营养与喂养专家</h2>
       <p class="text-gray-400">按年龄、体重、绝育状态、活动量生成结构化喂养方案</p>
