@@ -35,21 +35,19 @@ const router = createRouter({
 })
 
 // 导航守卫 (权限控制)
-router.beforeEach((to, _from, next) => {
+router.beforeEach((to, _from) => {
   const authStore = useAuthStore()
 
   // 1. 如果访问需要管理员权限的页面
   if (to.meta.requiresAdmin && !authStore.isAdmin) {
     alert('权限不足：该页面仅限救助站管理员访问')
-    return next('/')
+    return '/'
   }
 
   // 2. 如果未登录且访问的不是登录页
   if (!authStore.isLoggedIn && to.name !== 'login') {
-    return next('/login')
+    return '/login'
   }
-
-  next()
 })
 
 export default router

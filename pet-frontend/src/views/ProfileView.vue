@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useAuthStore } from '../store/authStore'
-import { 
-  User, Shield, AtSign, LogOut, KeyRound, 
-  FileText, Clock, CheckCircle, ChevronRight, Activity 
+import {
+  User, Shield, LogOut, KeyRound, FileText, ChevronRight, Loader2, Heart
 } from 'lucide-vue-next'
 import BaseCard from '../components/BaseCard.vue'
-import axios from 'axios'
+import axios from '../api/index'
 
 const authStore = useAuthStore()
 const activeTab = ref('info')
@@ -16,7 +15,7 @@ const passForm = ref({ old: '', new: '' })
 const statusMsg = ref('')
 const handleUpdatePassword = async () => {
   try {
-    await axios.post('http://127.0.0.1:8000/api/user/change-password', {
+    await axios.post('/api/user/change-password', {
       user_id: authStore.user.id,
       old_password: passForm.value.old,
       new_password: passForm.value.new
@@ -35,7 +34,7 @@ const isLoadingApps = ref(false)
 const fetchApplications = async () => {
   isLoadingApps.value = true
   try {
-    const res = await axios.get(`http://127.0.0.1:8000/api/user/applications/${authStore.user?.id || 1}`)
+    const res = await axios.get(`/api/user/applications/${authStore.user?.id || 1}`)
     applications.value = res.data
   } catch (err) {
     console.error('获取记录失败')
@@ -53,7 +52,7 @@ const switchTab = (tab: string) => {
 
 <template>
   <div class="max-w-5xl mx-auto space-y-8">
-    <h2 class="text-3xl font-black text-white">个人中心 / <span class="text-orange-500 italic">User Center</span></h2>
+    <h2 class="text-3xl font-black text-white">个人中心</h2>
 
     <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
       <!-- A. 左侧边栏 -->
@@ -93,7 +92,7 @@ const switchTab = (tab: string) => {
                       {{ authStore.roleName }}
                     </span>
                     <span class="px-3 py-1 bg-green-500/10 text-green-500 text-[10px] font-black uppercase tracking-widest rounded-full border border-green-500/20">
-                      Active User
+                      账户正常
                     </span>
                   </div>
                 </div>
@@ -133,7 +132,7 @@ const switchTab = (tab: string) => {
                     <div class="px-4 py-1.5 rounded-full bg-orange-500/10 text-orange-500 text-[10px] font-black uppercase tracking-widest border border-orange-500/20">
                       {{ app.status || 'AI 评估中' }}
                     </div>
-                    <p class="text-[10px] text-gray-600 mt-2 font-bold uppercase">View Details <ChevronRight class="inline" :size="12"/></p>
+                    <p class="text-[10px] text-gray-600 mt-2 font-bold uppercase">查看详情 <ChevronRight class="inline" :size="12"/></p>
                   </div>
                 </div>
               </BaseCard>
@@ -177,7 +176,7 @@ const switchTab = (tab: string) => {
 </template>
 
 <style scoped>
-@reference "tailwindcss";
+/* @reference "tailwindcss"; */
 .fade-enter-active, .fade-leave-active { transition: all 0.3s ease; }
 .fade-enter-from { opacity: 0; transform: translateY(10px); }
 .fade-leave-to { opacity: 0; transform: translateY(-10px); }

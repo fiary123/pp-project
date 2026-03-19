@@ -1,10 +1,15 @@
+import os
 import sqlite3
 import requests
+import chromadb
 from crewai.tools import tool
+from dotenv import load_dotenv
+
+load_dotenv()
 try:
-    from src.database.db_config import SQLITE_DB_PATH
+    from src.database.db_config import SQLITE_DB_PATH, CHROMA_DB_PATH
 except ImportError:
-    from ..database.db_config import SQLITE_DB_PATH
+    from ..database.db_config import SQLITE_DB_PATH, CHROMA_DB_PATH
 
 # ==========================================
 # 1. 领养申请提交工具 (Action Tool)
@@ -37,7 +42,9 @@ def nearby_hospital_search(location_coords: str):
     根据经纬度坐标搜索附近5公里的宠物医院。
     参数 location_coords: 格式为 "经度,纬度" (例如: "116.4814,39.9904")
     """
-    AMAP_KEY = "966b3f41682127d765517a06be14953a"  # 记得去高德控制台申请
+    AMAP_KEY = os.getenv("AMAP_KEY", "")
+    if not AMAP_KEY:
+        return "地图服务未配置，请在 .env 中设置 AMAP_KEY"
     url = f"https://restapi.amap.com/v3/place/around"
     params = {
         "key": AMAP_KEY,
@@ -63,26 +70,64 @@ def nearby_hospital_search(location_coords: str):
         return f"地图服务调用异常: {str(e)}"
 
 # ==========================================
-# 3. 宠物健康知识库 RAG 工具 (Knowledge Tool)
+# 3. 宠物健康知识库 RAG 工具 (ChromaDB Vector Search)
 # ==========================================
 @tool("pet_health_knowledge_search")
 def pet_health_knowledge_search(symptom_keyword: str):
     """
-    在宠物健康百科中搜索相关症状的护理建议和病理说明。
+    在宠物健康知识库中进行语义向量检索，返回与症状最相关的护理建议和病理说明。
+    参数 symptom_keyword: 症状描述，例如 "猫咪呕吐腹泻"、"犬细小病毒"
     """
-    # 这里在毕设中可以升级为 ChromaDB 向量检索
-    # 目前我们先用一个简单的字典或 SQL 模拟 RAG 效果
+    try:
+        chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+        collection = chroma_client.get_or_create_collection(name="pet_knowledge")
+
+        # 检查集合是否有数据
+        count = collection.count()
+        if count == 0:
+            return _fallback_health_search(symptom_keyword)
+
+        # 向量语义检索，取最相关的3条
+        results = collection.query(
+            query_texts=[symptom_keyword],
+            n_results=min(3, count),
+            include=["documents", "metadatas", "distances"]
+        )
+
+        docs = results.get("documents", [[]])[0]
+        distances = results.get("distances", [[]])[0]
+
+        if not docs:
+            return _fallback_health_search(symptom_keyword)
+
+        # 过滤相关度：distance < 1.5 视为有效匹配（ChromaDB 使用 L2 距离）
+        relevant = [(doc, dist) for doc, dist in zip(docs, distances) if dist < 1.5]
+        if not relevant:
+            return _fallback_health_search(symptom_keyword)
+
+        retrieved = "\n---\n".join([doc for doc, _ in relevant])
+        return f"【知识库检索结果】\n{retrieved}"
+
+    except Exception as e:
+        return _fallback_health_search(symptom_keyword)
+
+
+def _fallback_health_search(keyword: str) -> str:
+    """ChromaDB 不可用时的兜底字典查找"""
     health_tips = {
         "呕吐": "可能原因：误食异物、寄生虫或肠胃炎。建议：禁食4-6小时，观察是否伴随腹泻。",
-        "细小": "极其危险！高传染性。症状：精神萎靡、呕血、腥臭粪便。建议：立即隔离并送医。",
-        "皮肤瘙痒": "可能原因：真菌感染（猫癣）、体外寄生虫。建议：保持环境干燥，配合药皂洗澡。"
+        "腹泻": "可能原因：饮食不当、肠道感染。建议：喂食易消化食物，补充电解质，持续超过24小时立即就医。",
+        "细小": "极其危险！高传染性病毒病。症状：精神萎靡、呕血、腥臭粪便。建议：立即隔离并紧急送医。",
+        "猫瘟": "传染性极强，症状：高热、呕吐、腹泻带血、精神萎靡。建议：立即隔离送医，接种猫三联疫苗可预防。",
+        "皮肤瘙痒": "可能原因：真菌感染（猫癣）、体外寄生虫。建议：保持环境干燥，配合药皂洗澡，必要时就医。",
+        "打喷嚏": "可能原因：猫鼻支/杯状病毒感染。建议：观察是否伴随流鼻涕、眼分泌物，症状持续需就医。",
+        "不吃饭": "可能原因：应激、口腔疾病、全身性疾病。建议：超过24小时不进食需就医排查病因。",
+        "抽搐": "紧急情况！可能原因：犬瘟热、低血糖、癫痫。建议：立即紧急送医，保持宠物安全不受伤。",
     }
-    
-    # 模糊匹配
-    for key in health_tips:
-        if key in symptom_keyword:
-            return health_tips[key]
-    return "该症状在基础库中未记录，建议由医疗 Agent 进行深度逻辑分析。"
+    for key, tip in health_tips.items():
+        if key in keyword:
+            return f"【基础知识库】{tip}"
+    return "该症状在知识库中未检索到匹配结果，建议由医疗 Agent 结合专业知识进行综合分析。"
 
 @tool("pet_database_search")
 def pet_database_search(requirement_keywords: str):

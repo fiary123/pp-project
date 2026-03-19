@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref } from 'vue'
 import { 
   Stethoscope, BrainCircuit, Activity, AlertCircle, 
-  Image as ImageIcon, Video as VideoIcon, Send, Loader2, 
+  Image as ImageIcon, Video as VideoIcon, Loader2,
   CheckCircle2, ChevronRight, X, FileText
 } from 'lucide-vue-next'
 import BaseCard from '../components/BaseCard.vue'
-import axios from 'axios'
+import axios from '../api/index'
 
 // 1. 状态管理
 const symptom = ref('')
@@ -68,7 +68,7 @@ const analyzeSymptom = async () => {
       formData.append('file', selectedFile.value)
     }
 
-    const res = await axios.post('http://127.0.0.1:8000/api/triage/analyze', formData, {
+    const res = await axios.post('/api/triage/analyze', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
 
@@ -88,7 +88,7 @@ const analyzeSymptom = async () => {
     <!-- 顶部 -->
     <div class="text-center space-y-4">
       <div class="inline-flex items-center gap-2 px-4 py-2 bg-orange-500/10 border border-orange-500/20 rounded-full text-orange-500 text-xs font-bold uppercase tracking-[0.2em]">
-        <BrainCircuit :size="14" /> Multi-Modal Agent System
+        <BrainCircuit :size="14" /> 多模态智能体系统
       </div>
       <h2 class="text-5xl font-black text-white drop-shadow-2xl italic">智能多模态分诊</h2>
       <p class="text-gray-400 max-w-2xl mx-auto text-lg font-medium">上传患处图片或症状视频，由 AI 专家团为您进行深度视觉扫描与初步诊断</p>
@@ -123,7 +123,7 @@ const analyzeSymptom = async () => {
                   <div class="p-4 bg-purple-500/20 text-purple-500 rounded-full"><VideoIcon :size="32" /></div>
                 </div>
                 <p class="text-gray-400 font-bold">点击或拖拽上传图片/视频</p>
-                <p class="text-[10px] text-gray-600 uppercase tracking-widest">Supports JPG, PNG, MP4 (Max 20MB)</p>
+                <p class="text-[10px] text-gray-600 uppercase tracking-widest">支持 JPG、PNG、MP4（最大 20MB）</p>
               </div>
             </div>
 
@@ -158,7 +158,7 @@ const analyzeSymptom = async () => {
         <BaseCard v-if="isAnalyzing || thoughts.length > 0" class="border-orange-500/20 bg-black/20">
           <div class="flex items-center justify-between mb-6">
             <h4 class="text-xs font-black text-orange-500 uppercase tracking-widest flex items-center gap-2">
-              <Activity :size="14" /> Agent reasoning chain
+              <Activity :size="14" /> 智能体推理过程
             </h4>
             <span class="text-[10px] font-mono text-gray-500">{{ progress }}%</span>
           </div>
@@ -181,8 +181,8 @@ const analyzeSymptom = async () => {
             <div class="flex items-center gap-4 mb-8 border-b border-gray-100 pb-6">
               <div class="p-4 bg-orange-500 text-white rounded-[1.5rem] shadow-lg shadow-orange-500/30"><FileText :size="28" /></div>
               <div>
-                <h3 class="font-black text-2xl uppercase tracking-tighter">AI Medical Report</h3>
-                <p class="text-xs text-gray-400 font-bold uppercase">SmartPet Expert Team</p>
+                <h3 class="font-black text-2xl uppercase tracking-tighter">AI 智能诊断报告</h3>
+                <p class="text-xs text-gray-400 font-bold uppercase">SmartPet 专家团队</p>
               </div>
             </div>
             
@@ -203,7 +203,7 @@ const analyzeSymptom = async () => {
         <div v-if="!isAnalyzing && thoughts.length === 0" class="h-full flex flex-col items-center justify-center p-20 border-4 border-dashed border-white/5 rounded-[4rem] text-gray-700 text-center space-y-6">
           <BrainCircuit :size="80" class="opacity-10" />
           <div class="space-y-2">
-            <p class="text-2xl font-black text-white/20">READY FOR ANALYSIS</p>
+            <p class="text-2xl font-black text-white/20">等待分析中</p>
             <p class="text-sm max-w-xs mx-auto">请在左侧上传宠物的现状信息，AI 视觉与医疗专家组已待命</p>
           </div>
         </div>
@@ -213,7 +213,7 @@ const analyzeSymptom = async () => {
 </template>
 
 <style scoped>
-@reference "tailwindcss";
+/* @reference "tailwindcss"; */
 
 .fade-slide-enter-active { transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1); }
 .fade-slide-enter-from { opacity: 0; transform: translateY(40px); }
