@@ -7,8 +7,33 @@ import logging
 from typing import List, Optional, Tuple
 from src.agents.nutrition_planner import build_nutrition_plan, render_nutrition_markdown
 from src.web.services.db_service import get_db
+from langchain_openai import ChatOpenAI
+from dotenv import load_dotenv
 
+load_dotenv()
 logger = logging.getLogger(__name__)
+
+class AIService:
+    """统一的 AI 服务接口"""
+    def __init__(self):
+        self.llm = ChatOpenAI(
+            model="deepseek-chat",
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_api_base=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
+            temperature=0.3
+        )
+
+    async def ask(self, prompt: str) -> str:
+        """简单的问答接口"""
+        try:
+            res = await self.llm.ainvoke(prompt)
+            return res.content
+        except Exception as e:
+            logger.error(f"AIService error: {e}")
+            return "AI 服务暂时无法响应"
+
+# 全局单例
+ai_service = AIService()
 
 def _log_agent_trace(trace_id: str, endpoint: str, agent_name: str, input_msg: str, output_msg: str, latency_ms: int, fallback: bool = False, tool_name: str = "default"):
     """记录 AI 执行日志"""
@@ -62,41 +87,168 @@ def get_triage_reply(symptom: str) -> Tuple[str, str]:
     _log_agent_trace(trace_id, "triage", agent_name, symptom, reply, latency, fallback)
     return reply, trace_id
 
-def get_smart_match(user_query: str, pet_list: List[dict]) -> List[dict]:
-    """智能宠物匹配：加权关键词匹配（物种 > 标签 > 描述 > 名字）"""
+def get_match_followup_questions(user_query: str) -> List[dict]:
+    """
+    创新点1：基于用户的初始描述，由 LLM 生成 2-3 个针对性追问。
+    用于将模糊的情感表达转化为结构化偏好维度（活跃度/空间/时间/经验等）。
+    返回追问列表：[{"key": "activity_level", "question": "...", "options": [...]}]
+    """
+    try:
+        import os
+        from langchain_openai import ChatOpenAI
+        from dotenv import load_dotenv
+        load_dotenv()
+        llm = ChatOpenAI(
+            model="deepseek-chat",
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_api_base=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
+            temperature=0.4
+        )
+        prompt = f"""用户正在寻找宠物，他们说："{user_query}"
+
+基于这段描述，你需要提出 2-3 个追问，帮助更准确地了解他们的需求。
+每个追问都应该针对他们描述中的模糊点或隐性偏好。
+
+请用 JSON 数组格式输出，每个元素包含：
+- key: 偏好维度标识符（如 activity_level / living_space / time_availability / experience_level / allergic）
+- question: 中文追问问题（15-25字，口语化，友好）
+- options: 2-4个选项的字符串数组（简洁，5字以内）
+
+示例输出：
+[
+  {{"key": "activity_level", "question": "您希望这只宠物平时是活泼好动还是安静陪伴型的？", "options": ["活泼爱玩", "温和安静", "都可以"]}},
+  {{"key": "living_space", "question": "您住的地方大概有多大，方便宠物活动吗？", "options": ["小公寓(60㎡以下)", "中等户型(60-120㎡)", "大户型/别墅"]}}
+]
+
+只输出 JSON 数组，不要其他文字。"""
+        response = llm.invoke(prompt)
+        content = response.content.strip()
+        # 提取 JSON
+        import re
+        json_match = re.search(r'\[[\s\S]*\]', content)
+        if json_match:
+            questions = json.loads(json_match.group())
+            return questions[:3]
+    except Exception as e:
+        logger.warning(f"Followup question generation failed: {e}")
+    # 降级：返回默认追问
+    return [
+        {"key": "activity_level", "question": "您更希望宠物是活泼好动还是安静乖巧的？", "options": ["活泼好动", "安静乖巧", "都可以"]},
+        {"key": "living_space", "question": "您的居住空间大概是什么情况？", "options": ["小型公寓", "中等户型", "带院子的大户型"]},
+        {"key": "time_availability", "question": "平时每天能陪伴宠物大概多长时间？", "options": ["2小时以内", "2-4小时", "4小时以上"]}
+    ]
+
+
+def get_smart_match(user_query: str, pet_list: List[dict], followup_answers: Optional[dict] = None) -> List[dict]:
+    """
+    创新点1+3：LLM 语义匹配 + 结构化可解释推荐。
+    当 followup_answers 不为空时，将追问答案合并到偏好上下文，由 LLM 生成
+    结构化匹配理由（适配优势 / 潜在挑战 / 弥合建议），替代原关键词匹配。
+    """
+    # 构建完整的偏好描述
+    context_parts = [f"用户需求：{user_query}"]
+    if followup_answers:
+        for key, answer in followup_answers.items():
+            key_labels = {
+                "activity_level": "活跃度偏好",
+                "living_space": "居住空间",
+                "time_availability": "可陪伴时长",
+                "experience_level": "养宠经验",
+                "allergic": "过敏情况"
+            }
+            label = key_labels.get(key, key)
+            context_parts.append(f"{label}：{answer}")
+    full_context = "；".join(context_parts)
+
+    # 尝试 LLM 语义匹配
+    try:
+        import os
+        from langchain_openai import ChatOpenAI
+        from dotenv import load_dotenv
+        load_dotenv()
+        llm = ChatOpenAI(
+            model="deepseek-chat",
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_api_base=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
+            temperature=0.3
+        )
+        # 构建宠物摘要列表（避免 token 过多）
+        pet_summaries = []
+        for p in pet_list[:30]:  # 限制数量
+            tags = p.get('tags', [])
+            tags_str = "、".join(tags) if isinstance(tags, list) else str(tags)
+            pet_summaries.append({
+                "id": p.get("id"),
+                "name": p.get("name", ""),
+                "species": p.get("species", ""),
+                "type": p.get("type", ""),
+                "tags": tags_str,
+                "desc": (p.get("desc") or "")[:50]
+            })
+
+        prompt = f"""你是一个宠物匹配专家。用户画像：{full_context}
+
+以下是可选宠物列表（JSON）：
+{json.dumps(pet_summaries, ensure_ascii=False)}
+
+请从中挑选最合适的 5 只，为每只生成结构化的个性化推荐理由。
+
+输出 JSON 数组，每个元素：
+- id: 宠物ID（整数）
+- fit_score: 契合度分数（0-100整数）
+- reason: 一句话推荐理由（20字内，口语化）
+- fit_advantages: 适配优势（数组，每项10-15字，列2-3条）
+- potential_challenges: 潜在挑战（数组，每项10-15字，列1-2条，没有则为空数组）
+- mitigation: 弥合建议（一句话，针对挑战，没挑战可不填，为空字符串）
+
+只输出 JSON 数组，不要其他文字。"""
+
+        response = llm.invoke(prompt)
+        content = response.content.strip()
+        import re
+        json_match = re.search(r'\[[\s\S]*\]', content)
+        if json_match:
+            matches = json.loads(json_match.group())
+            # 验证并清洗结果
+            result = []
+            for m in matches[:5]:
+                if m.get("id") is not None:
+                    result.append({
+                        "id": m["id"],
+                        "fit_score": m.get("fit_score", 80),
+                        "reason": m.get("reason", "综合推荐"),
+                        "fit_advantages": m.get("fit_advantages", []),
+                        "potential_challenges": m.get("potential_challenges", []),
+                        "mitigation": m.get("mitigation", "")
+                    })
+            if result:
+                return result
+    except Exception as e:
+        logger.warning(f"LLM smart match failed, falling back to keyword match: {e}")
+
+    # 降级：关键词匹配（兜底）
     WEIGHTS = {"species": 3, "tags": 2, "desc": 1, "name": 1}
-    keywords = [w.strip() for w in user_query.replace('，', ',').replace(' ', ',').split(',') if w.strip()]
+    keywords = [w.strip() for w in full_context.replace('，', ',').replace(' ', ',').split(',') if w.strip()]
 
     scored = []
     for pet in pet_list:
         score = 0
         matched_reasons = []
-
         species_text = (pet.get('species') or '').lower()
         for kw in keywords:
             if kw in species_text:
                 score += WEIGHTS["species"]
                 matched_reasons.append(f'物种匹配"{kw}"')
-
-        for tag in pet.get('tags', []):
+        for tag in (pet.get('tags') or []):
             for kw in keywords:
-                if kw in tag.lower():
+                if kw in str(tag).lower():
                     score += WEIGHTS["tags"]
                     matched_reasons.append(f'标签匹配"{kw}"')
-
         desc_text = (pet.get('desc') or '').lower()
         for kw in keywords:
             if kw in desc_text:
                 score += WEIGHTS["desc"]
                 matched_reasons.append(f'描述匹配"{kw}"')
-
-        name_text = (pet.get('name') or '').lower()
-        for kw in keywords:
-            if kw in name_text:
-                score += WEIGHTS["name"]
-                matched_reasons.append(f'名字匹配"{kw}"')
-
-
         reason_str = "、".join(matched_reasons[:3]) if matched_reasons else "综合推荐"
         scored.append((score, pet, reason_str))
 
@@ -104,11 +256,59 @@ def get_smart_match(user_query: str, pet_list: List[dict]) -> List[dict]:
     return [
         {
             "id": p.get("id"),
-            "reason": f"匹配分 {s}：{r}，该宠物与您的需求高度契合。",
+            "fit_score": min(95, 60 + s * 5),
+            "reason": f"与您的需求高度契合（{r}）",
+            "fit_advantages": [r] if r != "综合推荐" else ["综合条件匹配"],
+            "potential_challenges": [],
+            "mitigation": ""
         }
         for s, p, r in scored[:5]
         if p.get("id") is not None
     ]
+
+
+def submit_adoption_feedback(
+    user_id: int,
+    pet_id: int,
+    pet_name: str,
+    overall_satisfaction: int,
+    bond_level: str,
+    unexpected_challenges: str,
+    would_recommend: bool,
+    free_feedback: str
+) -> int:
+    """
+    创新点3：领养后回访反馈存储。
+    将真实领养质量标注写入数据库，作为后续匹配模型的监督信号（数据飞轮闭环）。
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        # 确保表存在（首次调用时自动创建）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS adoption_feedbacks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                pet_id INTEGER,
+                pet_name TEXT,
+                overall_satisfaction INTEGER,
+                bond_level TEXT,
+                unexpected_challenges TEXT,
+                would_recommend INTEGER,
+                free_feedback TEXT,
+                create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute(
+            """INSERT INTO adoption_feedbacks
+               (user_id, pet_id, pet_name, overall_satisfaction, bond_level,
+                unexpected_challenges, would_recommend, free_feedback)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, pet_id, pet_name, overall_satisfaction, bond_level,
+             unexpected_challenges, 1 if would_recommend else 0, free_feedback)
+        )
+        feedback_id = cursor.lastrowid
+        conn.commit()
+    return feedback_id
 
 def generate_nutrition_plan(data: dict) -> Tuple[dict, str, str, int]:
     """生成初始营养方案，并存入数据库"""

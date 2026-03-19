@@ -72,46 +72,48 @@ const generatePlan = async () => {
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <BaseCard class="!p-8 space-y-5">
         <div class="grid grid-cols-2 gap-4">
-          <label class="text-xs text-gray-400">宠物类型
-            <select v-model="form.species" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
+          <label class="text-xs text-gray-400" for="pet_name">宠物昵称
+            <input id="pet_name" name="pet_name" v-model="form.pet_name" type="text" placeholder="例: 豆包" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
+          </label>
+          <label class="text-xs text-gray-400" for="species">宠物类型
+            <select id="species" name="species" v-model="form.species" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
               <option value="cat">猫</option>
               <option value="dog">狗</option>
             </select>
           </label>
-          <label class="text-xs text-gray-400">年龄（月）
-            <input v-model.number="form.age_months" type="number" min="0" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
+          <label class="text-xs text-gray-400" for="age_months">年龄（月）
+            <input id="age_months" name="age_months" v-model.number="form.age_months" type="number" min="0" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
           </label>
-          <label class="text-xs text-gray-400">体重（kg）
-            <input v-model.number="form.weight_kg" type="number" min="0.1" step="0.1" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
+          <label class="text-xs text-gray-400" for="weight_kg">体重（kg）
+            <input id="weight_kg" name="weight_kg" v-model.number="form.weight_kg" type="number" min="0.1" step="0.1" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
           </label>
-          <label class="text-xs text-gray-400">粮食能量(kcal/100g)
-            <input v-model.number="form.food_kcal_per_100g" type="number" min="1" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
+          <label class="text-xs text-gray-400" for="food_kcal">粮食能量(kcal/100g)
+            <input id="food_kcal" name="food_kcal" v-model.number="form.food_kcal_per_100g" type="number" min="1" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
           </label>
-        </div>
-
-        <div class="grid grid-cols-2 gap-4">
-          <label class="text-xs text-gray-400">活动量
-            <select v-model="form.activity_level" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
+          <label class="text-xs text-gray-400" for="activity_level">活动量
+            <select id="activity_level" name="activity_level" v-model="form.activity_level" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
               <option value="low">低</option>
               <option value="medium">中</option>
               <option value="high">高</option>
             </select>
           </label>
-          <label class="text-xs text-gray-400">目标
-            <select v-model="form.goal" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <label class="text-xs text-gray-400" for="goal">目标
+            <select id="goal" name="goal" v-model="form.goal" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
               <option value="maintain">维持</option>
               <option value="lose_weight">减脂</option>
               <option value="gain_weight">增重</option>
             </select>
           </label>
+          <label class="text-xs text-gray-400 flex items-end pb-3 gap-2" for="neutered">
+            <input id="neutered" name="neutered" type="checkbox" v-model="form.neutered" /> 已绝育
+          </label>
         </div>
 
-        <label class="text-xs text-gray-400 flex items-center gap-2">
-          <input type="checkbox" v-model="form.neutered" /> 已绝育
-        </label>
-
-        <label class="text-xs text-gray-400">特殊情况（使用“、”分隔）
-          <input v-model="form.symptoms_text" type="text" placeholder="软便、掉毛" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
+        <label class="text-xs text-gray-400" for="symptoms">特殊情况（使用“、”分隔）
+          <input id="symptoms" name="symptoms" v-model="form.symptoms_text" type="text" placeholder="软便、掉毛" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
         </label>
 
         <button @click="generatePlan" :disabled="isLoading || !canSubmit" class="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-700 rounded-2xl py-3 font-black text-white flex items-center justify-center gap-2 transition-all">

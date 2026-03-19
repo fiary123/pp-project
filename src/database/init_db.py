@@ -34,8 +34,6 @@ def init_database():
         )
     ''')
 
-    # ... (中间 pets, applications, announcements, moderation_logs 保持不变)
-
     # 6. 用户处罚存证表 (新增)
     cursor.execute("DROP TABLE IF EXISTS user_sanctions")
     cursor.execute('''
@@ -119,11 +117,81 @@ def init_database():
         )
     ''')
 
-    # ... (保持 applications, announcements, moderation_logs, user_sanctions 结构不变)
+    # 10. 用户信用档案表 (新增)
+    cursor.execute("DROP TABLE IF EXISTS user_credit_profiles")
+    cursor.execute('''
+        CREATE TABLE user_credit_profiles (
+            user_id INTEGER PRIMARY KEY,
+            responsibility_score REAL DEFAULT 100.0, -- 责任力
+            engagement_score REAL DEFAULT 0.0,      -- 参与力
+            community_score REAL DEFAULT 0.0,       -- 社区力
+            level TEXT DEFAULT 'Bronze',            -- Bronze, Silver, Gold, Black
+            last_decay_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+
+    # 11. 信用事件流水表 (新增)
+    cursor.execute("DROP TABLE IF EXISTS credit_events")
+    cursor.execute('''
+        CREATE TABLE credit_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            event_type TEXT NOT NULL, -- visit_report, course_done, help_others, pet_return
+            dimension TEXT NOT NULL,  -- responsibility, engagement, community
+            content TEXT,             -- 原始文字内容
+            base_points REAL,         -- 基础分
+            llm_multiplier REAL,      -- AI 评分系数 (0-1)
+            final_points REAL,        -- 最终得分
+            create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+
+    # 12. 营养方案表 (新增)
+    cursor.execute("DROP TABLE IF EXISTS nutrition_plans")
+    cursor.execute('''
+        CREATE TABLE nutrition_plans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            pet_name TEXT,
+            species TEXT,
+            plan_data TEXT, -- JSON 字符串
+            is_active INTEGER DEFAULT 1,
+            create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+
+    # 13. 营养反馈表 (新增)
+    cursor.execute("DROP TABLE IF EXISTS nutrition_feedbacks")
+    cursor.execute('''
+        CREATE TABLE nutrition_feedbacks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plan_id INTEGER,
+            weight_change TEXT,
+            appetite_status TEXT,
+            stool_status TEXT,
+            activity_change TEXT,
+            create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (plan_id) REFERENCES nutrition_plans (id)
+        )
+    ''')
 
     # 3. 领养申请表
     cursor.execute("DROP TABLE IF EXISTS applications")
-    # ... (保持 applications 表结构不变)
+    cursor.execute('''
+        CREATE TABLE applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            pet_id INTEGER,
+            status TEXT DEFAULT 'pending', -- pending, approved, rejected
+            apply_reason TEXT,
+            create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (pet_id) REFERENCES pets (id)
+        )
+    ''')
 
     # 4. 公告表
     cursor.execute("DROP TABLE IF EXISTS announcements")

@@ -93,6 +93,22 @@ class UserSanctionRequest(BaseModel):
 class SmartMatchRequest(BaseModel):
     user_query: str
     pet_list: List[dict] = Field(default_factory=list)
+    followup_answers: Optional[dict] = Field(default=None, description="追问答案字典，key为偏好维度，value为用户选择")
+
+
+class MatchFollowupRequest(BaseModel):
+    user_query: str
+
+
+class AdoptionFeedbackRequest(BaseModel):
+    user_id: int
+    pet_id: int
+    pet_name: str
+    overall_satisfaction: int = Field(ge=1, le=5, description="整体满意度 1-5")
+    bond_level: Literal["very_close", "close", "normal", "distant"] = Field(description="与宠物的亲密程度")
+    unexpected_challenges: str = Field(default="", description="遇到的意外挑战")
+    would_recommend: bool = Field(description="是否向他人推荐领养")
+    free_feedback: str = Field(default="", description="自由反馈文本")
 
 class AdoptionAssessmentRequest(BaseModel):
     """领养资质评估请求 - 输入层"""

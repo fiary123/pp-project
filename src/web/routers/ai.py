@@ -1,24 +1,128 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends
 from typing import Optional
+import json
 from src.web.schemas import (
     ChatRequest, NutritionPlanRequest, SmartMatchRequest,
-    NutritionFeedbackRequest, NutritionReplanRequest, AdoptionAssessmentRequest
+    NutritionFeedbackRequest, NutritionReplanRequest, AdoptionAssessmentRequest,
+    MatchFollowupRequest, AdoptionFeedbackRequest
 )
 from src.web.services.ai_service import (
     get_agent_reply, get_triage_reply, generate_nutrition_plan,
-    get_smart_match, submit_nutrition_feedback, replan_nutrition,
-    run_adoption_assessment_service
+    get_smart_match, get_match_followup_questions, submit_adoption_feedback,
+    submit_nutrition_feedback, replan_nutrition,
+    run_adoption_assessment_service,
+    get_db
 )
+from src.web.services.assessment_service import AdoptionAssessmentService
 from src.web.dependencies import get_current_user
 from src.web.limiter import limiter
+from src.agents.coordinator import CoordinatorAgent
+from langchain_openai import ChatOpenAI
+import os
 
 router = APIRouter(prefix="/api", tags=["ai"])
 
+# 初始化子智能体
+class LLMWrapper:
+    """为了兼容 CoordinatorAgent 的 llm.ask 接口"""
+    def __init__(self):
+        self.llm = ChatOpenAI(
+            model="deepseek-chat",
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_api_base=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
+            temperature=0.3
+        )
+    async def ask(self, prompt: str) -> str:
+        res = await self.llm.ainvoke(prompt)
+        return res.content
+
+coordinator = CoordinatorAgent(LLMWrapper(), get_db)
+assessment_service = AdoptionAssessmentService()
+
+
+@router.get("/knowledge/stats")
+async def knowledge_stats():
+    """查询知识库状态：条目数量、分类统计"""
+    try:
+        import chromadb
+        from src.database.db_config import CHROMA_DB_PATH
+        client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+        collection = client.get_or_create_collection(name="pet_knowledge")
+        total = collection.count()
+        # 按分类统计
+        if total > 0:
+            all_items = collection.get(include=["metadatas"])
+            categories: dict = {}
+            for meta in all_items["metadatas"]:
+                cat = meta.get("category", "other")
+                categories[cat] = categories.get(cat, 0) + 1
+        else:
+            categories = {}
+        return {
+            "total": total,
+            "categories": categories,
+            "category_labels": {
+                "breed_wiki": "品种百科",
+                "health_care": "健康护理",
+                "feeding_guide": "喂养指南",
+                "adoption_knowledge": "领养知识"
+            }
+        }
+    except Exception as e:
+        return {"total": 0, "categories": {}, "error": str(e)}
+
+
+@router.post("/knowledge/search")
+async def knowledge_search(req: dict):
+    """知识库语义检索接口（演示用）"""
+    keyword = req.get("keyword", "")
+    if not keyword:
+        raise HTTPException(status_code=400, detail="keyword is required")
+    try:
+        import chromadb
+        from src.database.db_config import CHROMA_DB_PATH
+        client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+        collection = client.get_or_create_collection(name="pet_knowledge")
+        if collection.count() == 0:
+            return {"results": [], "message": "知识库尚未初始化"}
+        results = collection.query(
+            query_texts=[keyword],
+            n_results=min(5, collection.count()),
+            include=["documents", "metadatas", "distances"]
+        )
+        items = []
+        for doc, meta, dist in zip(
+            results["documents"][0],
+            results["metadatas"][0],
+            results["distances"][0]
+        ):
+            items.append({
+                "text": doc[:300],
+                "category": meta.get("category"),
+                "similarity": round(1 - dist, 3),
+                "meta": meta
+            })
+        return {"results": items, "keyword": keyword}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/chat")
 @limiter.limit("20/minute")
-async def chat(request: Request, req: ChatRequest):
-    reply, trace_id = get_agent_reply(req.message)
-    return {"reply": reply, "trace_id": trace_id}
+async def chat(request: Request, req: ChatRequest, current_user: dict = Depends(get_current_user)):
+    # 使用协调智能体处理输入
+    session_id = f"session_{current_user['id']}"
+    result = await coordinator.handle_user_input(
+        session_id=session_id,
+        user_id=current_user["id"],
+        user_message=req.message
+    )
+    return {
+        "reply": result["reply"],
+        "ui_actions": result["ui_actions"],
+        "stage": result["stage"],
+        "trace_id": "coord_" + session_id
+    }
 
 @router.post("/triage/analyze")
 @limiter.limit("15/minute")
@@ -58,10 +162,43 @@ async def nutrition_replan(req: NutritionReplanRequest):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+@router.post("/pets/match-followup")
+async def match_followup(req: MatchFollowupRequest):
+    """
+    创新点1：基于用户初始描述，生成 2-3 个追问问题（需求显化）。
+    """
+    questions = get_match_followup_questions(req.user_query)
+    return {"questions": questions}
+
+
 @router.post("/pets/smart-match")
 async def smart_match(req: SmartMatchRequest):
-    matches = get_smart_match(req.user_query, req.pet_list)
+    """
+    创新点1+3：LLM 语义匹配 + 结构化可解释推荐。
+    """
+    matches = get_smart_match(req.user_query, req.pet_list, req.followup_answers)
     return {"matches": matches}
+
+
+@router.post("/adoption/feedback")
+async def adoption_feedback(
+    req: AdoptionFeedbackRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    创新点3：领养后回访反馈接口。
+    """
+    feedback_id = submit_adoption_feedback(
+        user_id=req.user_id,
+        pet_id=req.pet_id,
+        pet_name=req.pet_name,
+        overall_satisfaction=req.overall_satisfaction,
+        bond_level=req.bond_level,
+        unexpected_challenges=req.unexpected_challenges,
+        would_recommend=req.would_recommend,
+        free_feedback=req.free_feedback
+    )
+    return {"status": "success", "feedback_id": feedback_id}
 
 
 @router.post("/adoption/assess")
@@ -72,45 +209,46 @@ async def adoption_assess(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    领养资质多智能体评估接口（五层架构）
-
-    L2 规则预筛  → 识别硬约束与明显风险（命中硬约束直接驳回，不消耗 LLM）
-    L3 LLM 推理  → 语义动机分析、矛盾识别、四维评分
-    L4 多专家协同 → 百科专家（Baseline）+ 共处风险专家
-    L5 结构化输出 → readiness_score / success_probability / risk_factors / recommendations
-
-    所有 AI 决策链路写入 agent_trace_logs，可在管理后台审计溯源。
+    领养资质多智能体评估接口（创新架构版）
+    结合规则引擎与 LLM 语义推理，输出可解释的结构化报告。
     """
-    result, trace_id = run_adoption_assessment_service(
-        applicant_info=req.applicant_info,
-        target_species=req.target_species,
-        target_pet_name=req.target_pet_name,
-        monthly_budget=req.monthly_budget,
-        daily_companion_hours=req.daily_companion_hours,
-        has_pet_experience=req.has_pet_experience,
-        housing_type=req.housing_type,
-        application_reason=req.application_reason,
-        existing_pets=req.existing_pets,
+    result = await assessment_service.run_full_assessment(
+        user_id=current_user["id"],
+        applicant_data=req.model_dump()
     )
+    return result
+
+@router.get("/admin/assessment/report/{trace_id}")
+async def get_assessment_report(trace_id: str, current_user: dict = Depends(get_current_user)):
+    """
+    [管理员专享] 获取结构化的 AI 审核详情报告。
+    用于解决 AI 黑盒决策问题，提供审计追踪依据。
+    """
+    if current_user.get("role") not in ["org_admin", "root"]:
+        raise HTTPException(status_code=403, detail="无权查阅 AI 审计日志")
+        
+    with get_db() as conn:
+        conn.row_factory = json.loads # 简单模拟 Row 转 Dict，实际可能需要处理
+        cursor = conn.cursor()
+        # 兼容性处理列名
+        cursor.execute("SELECT input_msg, output_msg FROM agent_trace_logs WHERE trace_id = ?", (trace_id,))
+        row = cursor.fetchone()
+        
+    if not row:
+        raise HTTPException(status_code=404, detail="未找到相关评估记录")
+        
+    # 由于 sqlite 返回的是 tuple，手动处理
+    input_msg, output_msg = row
+    assessment_data = json.loads(output_msg)
+    
     return {
-        "status": "success",
-        # 核心评分
-        "readiness_score": result["readiness_score"],
-        "success_probability": result["success_probability"],
-        "confidence_level": result["confidence_level"],
-        # 决策结论
-        "risk_level": result["risk_level"],
-        "decision": result["decision"],
-        "need_manual_review": result["need_manual_review"],
-        # 详细分析
-        "risk_factors": result["risk_factors"],
-        "recommendations": result["recommendations"],
-        "review_note": result["review_note"],
-        # 子报告
-        "baseline_report": result["baseline_report"],
-        "profile_report": result["profile_report"],
-        "cohabitation_report": result["cohabitation_report"],
-        "final_summary": result["final_summary"],
-        # 追踪
-        "trace_id": trace_id,
+        "report_id": trace_id,
+        "applicant_snapshot": json.loads(input_msg),
+        "ai_decision_summary": {
+            "final_score": assessment_data.get("readiness_score"),
+            "conclusion": assessment_data.get("decision"),
+            "confidence": assessment_data.get("confidence_level"),
+            "risk_tags": assessment_data.get("risk_tags", [])
+        },
+        "expert_reasoning": assessment_data.get("expert_summary")
     }

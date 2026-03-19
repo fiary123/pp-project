@@ -1,138 +1,42 @@
-(索引):17   GET https://webapi.amap.com/maps?v=2.0&key=57042dab2994bb65ab829cc878477b44 net::ERR_CONNECTION_CLOSED
-index.ts:52  [Vue Router warn]: The `next()` callback in navigation guards is deprecated. Return the value instead of calling `next(value)`.
-warn$1 @ devtools-CVsCuYdF.js:13
-(匿名) @ devtools-CVsCuYdF.js:614
-(匿名) @ index.ts:52
-(匿名) @ devtools-CVsCuYdF.js:579
-runWithContext @ devtools-CVsCuYdF.js:561
-(匿名) @ devtools-CVsCuYdF.js:579
-(匿名) @ devtools-CVsCuYdF.js:563
-runWithContext @ runtime-core.esm-bundler.js:4276
-runWithContext @ vue-router.js:1333
-(匿名) @ vue-router.js:1535
-Promise.then
-(匿名) @ vue-router.js:1535
-runGuardQueue @ vue-router.js:1535
-(匿名) @ vue-router.js:1348
-Promise.then
-navigate @ vue-router.js:1344
-pushWithRedirect @ vue-router.js:1305
-push @ vue-router.js:1258
-install @ vue-router.js:1505
-use @ runtime-core.esm-bundler.js:4139
-(匿名) @ main.ts:10
-index.ts:52  [Vue Router warn]: The `next()` callback in navigation guards is deprecated. Return the value instead of calling `next(value)`.
-warn$1 @ devtools-CVsCuYdF.js:13
-(匿名) @ devtools-CVsCuYdF.js:614
-(匿名) @ index.ts:52
-(匿名) @ devtools-CVsCuYdF.js:579
-runWithContext @ devtools-CVsCuYdF.js:561
-(匿名) @ devtools-CVsCuYdF.js:579
-(匿名) @ devtools-CVsCuYdF.js:563
-runWithContext @ runtime-core.esm-bundler.js:4276
-runWithContext @ vue-router.js:1333
-(匿名) @ vue-router.js:1535
-Promise.then
-(匿名) @ vue-router.js:1535
-runGuardQueue @ vue-router.js:1535
-(匿名) @ vue-router.js:1348
-Promise.then
-navigate @ vue-router.js:1344
-pushWithRedirect @ vue-router.js:1305
-push @ vue-router.js:1258
-navigate @ AppHeader.vue:19
-_createElementVNode.onClick._cache.<computed>._cache.<computed> @ AppHeader.vue:66
-callWithErrorHandling @ runtime-core.esm-bundler.js:199
-callWithAsyncErrorHandling @ runtime-core.esm-bundler.js:206
-invoker @ runtime-dom.esm-bundler.js:730
-ProfileView.vue:164  [Vue warn]: Failed to resolve component: Loader2
-If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
-  at <ProfileView onVnodeUnmounted=fn<onVnodeUnmounted> ref=Ref< null > > 
-  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
-  at <Transition name="fade-slide" mode="out-in" > 
-  at <RouterView> 
-  at <App>
-warn$1 @ runtime-core.esm-bundler.js:51
-resolveAsset @ runtime-core.esm-bundler.js:3144
-resolveComponent @ runtime-core.esm-bundler.js:3106
-_sfc_render @ ProfileView.vue:164
-renderComponentRoot @ runtime-core.esm-bundler.js:4533
-componentUpdateFn @ runtime-core.esm-bundler.js:6079
-run @ reactivity.esm-bundler.js:239
-setupRenderEffect @ runtime-core.esm-bundler.js:6214
-mountComponent @ runtime-core.esm-bundler.js:5989
-processComponent @ runtime-core.esm-bundler.js:5941
-patch @ runtime-core.esm-bundler.js:5447
-componentUpdateFn @ runtime-core.esm-bundler.js:6166
-run @ reactivity.esm-bundler.js:239
-leavingHooks.afterLeave @ runtime-core.esm-bundler.js:1405
-performRemove @ runtime-core.esm-bundler.js:6679
-el.<computed> @ runtime-core.esm-bundler.js:1582
-finishLeave @ runtime-dom.esm-bundler.js:183
-resolve @ runtime-dom.esm-bundler.js:214
-resolveIfNotStale @ runtime-dom.esm-bundler.js:290
-end @ runtime-dom.esm-bundler.js:304
-onEnd @ runtime-dom.esm-bundler.js:308
-ProfileView.vue:164  [Vue warn]: Failed to resolve component: Heart
-If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
-  at <ProfileView onVnodeUnmounted=fn<onVnodeUnmounted> ref=Ref< null > > 
-  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
-  at <Transition name="fade-slide" mode="out-in" > 
-  at <RouterView> 
-  at <App>
-warn$1 @ runtime-core.esm-bundler.js:51
-resolveAsset @ runtime-core.esm-bundler.js:3144
-resolveComponent @ runtime-core.esm-bundler.js:3106
-_sfc_render @ ProfileView.vue:164
-renderComponentRoot @ runtime-core.esm-bundler.js:4533
-componentUpdateFn @ runtime-core.esm-bundler.js:6079
-run @ reactivity.esm-bundler.js:239
-setupRenderEffect @ runtime-core.esm-bundler.js:6214
-mountComponent @ runtime-core.esm-bundler.js:5989
-processComponent @ runtime-core.esm-bundler.js:5941
-patch @ runtime-core.esm-bundler.js:5447
-componentUpdateFn @ runtime-core.esm-bundler.js:6166
-run @ reactivity.esm-bundler.js:239
-leavingHooks.afterLeave @ runtime-core.esm-bundler.js:1405
-performRemove @ runtime-core.esm-bundler.js:6679
-el.<computed> @ runtime-core.esm-bundler.js:1582
-finishLeave @ runtime-dom.esm-bundler.js:183
-resolve @ runtime-dom.esm-bundler.js:214
-resolveIfNotStale @ runtime-dom.esm-bundler.js:290
-end @ runtime-dom.esm-bundler.js:304
-onEnd @ runtime-dom.esm-bundler.js:308
-index.ts:52  [Vue Router warn]: The `next()` callback in navigation guards is deprecated. Return the value instead of calling `next(value)`.
-warn$1 @ devtools-CVsCuYdF.js:13
-(匿名) @ devtools-CVsCuYdF.js:614
-(匿名) @ index.ts:52
-(匿名) @ devtools-CVsCuYdF.js:579
-runWithContext @ devtools-CVsCuYdF.js:561
-(匿名) @ devtools-CVsCuYdF.js:579
-(匿名) @ devtools-CVsCuYdF.js:563
-runWithContext @ runtime-core.esm-bundler.js:4276
-runWithContext @ vue-router.js:1333
-(匿名) @ vue-router.js:1535
-Promise.then
-(匿名) @ vue-router.js:1535
-runGuardQueue @ vue-router.js:1535
-(匿名) @ vue-router.js:1348
-Promise.then
-navigate @ vue-router.js:1344
-pushWithRedirect @ vue-router.js:1305
-push @ vue-router.js:1258
-_createElementVNode.onClick._cache.<computed>._cache.<computed> @ ProfileView.vue:71
-callWithErrorHandling @ runtime-core.esm-bundler.js:199
-callWithAsyncErrorHandling @ runtime-core.esm-bundler.js:206
-invoker @ runtime-dom.esm-bundler.js:730
-LoginView.vue:29   POST http://localhost:5173/api/login 500 (Internal Server Error)
-dispatchXhrRequest @ xhr.js:220
-xhr @ xhr.js:16
-dispatchRequest @ dispatchRequest.js:46
-_request @ Axios.js:202
-request @ Axios.js:41
-httpMethod @ Axios.js:243
-wrap @ bind.js:12
-handleAuth @ LoginView.vue:29
-callWithErrorHandling @ runtime-core.esm-bundler.js:199
-callWithAsyncErrorHandling @ runtime-core.esm-bundler.js:206
-invoker @ runtime-dom.esm-bundler.js:730
+好，把这个功能拆解成可以真正实现的技术方案。这个模块在你的系统里属于激励体系智能体的职责范围，它不只是一个积分表，而是一个需要数据模型、评分引擎、权益兑换三层协作的完整子系统。
+
+一、先想清楚：这个模块要解决什么问题
+传统领养平台没有信用体系，导致两个问题：好的领养人没有任何激励继续保持负责任的行为；坏的领养人（有退养记录）换个账号重新申请，平台完全不知道。
+你的信用体系要同时解决这两个问题：正向激励让好人越来越好，负向记录让风险可追踪。
+
+二、数据模型设计
+这是整个模块的基础，其他所有东西都建立在这个数据结构上。
+用户信用档案包含三个维度的分数，而不是一个总分。三维分开记录是为了防止"刷分"——用户不能靠刷某一个维度来掩盖另一个维度的缺失：
+责任力维度记录和领养行为直接相关的事项，包括按时完成回访的次数与质量、上传宠物健康记录的频率、是否有退养历史、医疗记录是否按时更新。这个维度的权重最高，因为它直接反映领养人对宠物的责任心。
+参与力维度记录用户在平台的活跃程度，包括完成养宠培训课程的数量、在知识问答板块的贡献质量（被采纳次数）、参与线下领养活动的记录。
+社区力维度记录互助行为，包括帮助其他领养人解答问题、提供临时寄养服务、举报虐待行为被核实的次数。
+每次行为事件都有一条独立记录，包含事件类型、发生时间、对应分值变化、当时的原始数据（比如回访的文字内容）。保留原始记录是关键，方便后续审计和LLM分析。
+
+三、评分计算引擎
+这是最核心的部分，也是体现你工作量的地方。
+基础加分规则不需要LLM，用规则引擎处理即可。按时完成回访加固定分，逾期完成扣分，未完成扣更多分。完成一门培训课程加分，课程难度不同加分不同。帮助他人的回答被采纳一次加分。
+质量评分才需要LLM介入，这是你系统的创新点。同样是"完成回访"，敷衍了事填三个字和认真描述宠物状态是完全不同的质量，规则引擎区分不了，但LLM可以。
+具体做法是：用户提交回访内容后，回访内容自动发送给LLM，让它按照你设计的评分标准（是否描述了宠物的具体状态、是否提到了遇到的问题、内容长度是否达到最低要求、是否有具体细节）输出一个质量分数，这个质量分数乘以基础分就是最终得分。
+比如基础回访分是10分，LLM评估质量为0.9（描述详细）则得9分，评估质量为0.3（敷衍填写）则只得3分。这个设计让用户无法通过应付式完成任务来刷分。
+时间衰减机制防止用户靠早期积累永久躺赢。每个月信用分按照一定比例自然衰减，衰减率在活跃期间可以被正向行为抵消。这样老用户需要持续参与才能维持高分，新用户只要认真参与也能逐渐追上。
+负向事件的处理需要特别设计。退养记录不是简单扣分了事，而是触发"信用冻结"——在一段时间内，该用户的申请会被自动标记需要人工复核。多次退养记录会触发永久黑名单，且这个记录跨账号关联（通过手机号、身份证等）。
+
+四、权益兑换层
+信用分最终要兑换成用户真实在意的东西，否则激励体系就是空的。
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0.25s;
+    animation-timing-function: cubic-bezier(0.19, 1, 0.22, 1);
+  }
+Vvisualize  可视化Vvisualize show_widget权益设计的原则是：高等级的权益必须是领养人真正在意且无法从其他渠道获取的东西。"审核时间缩短"和"稀缺宠物优先队列"对认真的领养人而言有真实价值，这才能驱动行为改变。
+
+五、LLM 在这个模块里具体做什么
+这是你向老师解释工作量的关键部分。信用体系里有三个环节必须用LLM，规则引擎做不到：
+回访内容质量评估：用户提交回访后，LLM读取内容，判断是否有实质性描述（宠物的饮食状态、行为变化、遇到的问题），输出0到1的质量系数。这个评估结果直接影响加分幅度。
+退养原因智能分析：当发生退养时，LLM分析用户提交的退养原因文字，判断是主观放弃（降信用分）还是客观原因（比如用户生病住院，可以酌情处理）。这个分类影响后续的信用处理方式，纯规则判断做不到这种语义理解。
+个性化激励话术生成：不同信用等级、不同行为模式的用户，系统推送的激励信息应该不一样。对价格敏感的用户强调费用减免，对社区型用户强调大使身份和影响力，LLM根据用户画像生成个性化的推送文案，而不是千篇一律的模板消息。
+
+六、系统实现的完整流程
+用户完成一次行为（比如提交回访）之后，整个链条是这样运转的：
+用户提交回访内容，系统记录原始事件（时间、内容、用户ID）。激励体系智能体接收到事件触发，调用LLM对回访内容进行质量评分，评分结果乘以基础分得到本次加分值。系统更新用户三个维度的信用分，检查是否触发等级变化。如果发生等级升级，触发权益更新，并通过LLM生成个性化的升级通知消息推送给用户。整条链路的每个步骤都写入日志，方便审计和论文里展示系统运行效果。

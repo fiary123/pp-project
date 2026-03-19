@@ -16,10 +16,30 @@ const searchQuery = ref('');
 const activeFilter = ref('全部');
 const selectedPet = ref<any>(null);
 
-// AI 匹配状态
+// AI 匹配状态 - 创新点1：多轮对话式需求显化
 const aiQuery = ref('');
 const isAiMatching = ref(false);
-const recommendedMatches = ref<Record<number, string>>({});
+const isLoadingFollowup = ref(false);
+const recommendedMatches = ref<Record<number, any>>({});
+
+// 多轮对话状态
+type MatchStep = 'input' | 'followup' | 'result';
+const matchStep = ref<MatchStep>('input');
+const followupQuestions = ref<Array<{ key: string; question: string; options: string[] }>>([]);
+const followupAnswers = ref<Record<string, string>>({});
+
+// 领养后回访状态 - 创新点3：数据飞轮闭环
+const showFeedbackModal = ref(false);
+const feedbackPet = ref<any>(null);
+const feedbackForm = ref({
+  overall_satisfaction: 5,
+  bond_level: 'close' as 'very_close' | 'close' | 'normal' | 'distant',
+  unexpected_challenges: '',
+  would_recommend: true,
+  free_feedback: ''
+});
+const isSubmittingFeedback = ref(false);
+const feedbackSubmitted = ref(false);
 
 // 领养申请状态
 const showAdoptModal = ref(false);
@@ -225,18 +245,87 @@ const handleDeletePet = async (petId: number) => {
   } catch (err) {}
 };
 
+// 创新点1：第一步 - 获取追问问题
+const handleAiMatchStart = async () => {
+  if (!aiQuery.value.trim()) return;
+  isLoadingFollowup.value = true;
+  followupAnswers.value = {};
+  try {
+    const res = await axios.post('/api/pets/match-followup', { user_query: aiQuery.value });
+    if (res.data?.questions?.length) {
+      followupQuestions.value = res.data.questions;
+      matchStep.value = 'followup';
+    } else {
+      await handleAiMatch();
+    }
+  } catch (err) {
+    await handleAiMatch();
+  } finally {
+    isLoadingFollowup.value = false;
+  }
+};
+
+// 创新点1+3：第二步 - 携带追问答案进行 LLM 语义匹配
 const handleAiMatch = async () => {
   if (!aiQuery.value.trim()) return;
   isAiMatching.value = true;
+  matchStep.value = 'result';
   try {
-    const res = await axios.post('/api/pets/smart-match', { user_query: aiQuery.value, pet_list: pets.value });
-    const matchMap: Record<number, string> = {};
-    if (res.data?.matches) res.data.matches.forEach((m: any) => matchMap[m.id] = m.reason);
+    const res = await axios.post('/api/pets/smart-match', {
+      user_query: aiQuery.value,
+      pet_list: pets.value,
+      followup_answers: Object.keys(followupAnswers.value).length ? followupAnswers.value : null
+    });
+    const matchMap: Record<number, any> = {};
+    if (res.data?.matches) {
+      res.data.matches.forEach((m: any) => {
+        matchMap[m.id] = {
+          fit_score: m.fit_score || 80,
+          reason: m.reason || '综合推荐',
+          fit_advantages: m.fit_advantages || [],
+          potential_challenges: m.potential_challenges || [],
+          mitigation: m.mitigation || ''
+        };
+      });
+    }
     recommendedMatches.value = matchMap;
     activeFilter.value = '全部';
     searchQuery.value = '';
   } catch (err) {}
   finally { isAiMatching.value = false; }
+};
+
+const resetAiMatch = () => {
+  matchStep.value = 'input';
+  recommendedMatches.value = {};
+  followupAnswers.value = {};
+  followupQuestions.value = [];
+};
+
+// 创新点3：提交领养后回访
+const openFeedbackModal = (pet: any) => {
+  feedbackPet.value = pet;
+  feedbackSubmitted.value = false;
+  feedbackForm.value = { overall_satisfaction: 5, bond_level: 'close', unexpected_challenges: '', would_recommend: true, free_feedback: '' };
+  showFeedbackModal.value = true;
+};
+
+const handleSubmitFeedback = async () => {
+  if (!feedbackPet.value) return;
+  isSubmittingFeedback.value = true;
+  try {
+    await axios.post('/api/adoption/feedback', {
+      user_id: authStore.user?.id,
+      pet_id: feedbackPet.value.id,
+      pet_name: feedbackPet.value.name,
+      ...feedbackForm.value
+    });
+    feedbackSubmitted.value = true;
+  } catch (err) {
+    alert('反馈提交失败，请稍后再试');
+  } finally {
+    isSubmittingFeedback.value = false;
+  }
 };
 
 const filteredPets = computed(() => {
@@ -248,7 +337,13 @@ const filteredPets = computed(() => {
     const matchesType = activeFilter.value === '全部' || p.type === activeFilter.value;
     return (nameMatch || speciesMatch) && matchesType;
   });
-  if (recIds.length > 0) return result.sort((a, b) => (recIds.includes(b.id)?1:0) - (recIds.includes(a.id)?1:0));
+  if (recIds.length > 0) {
+    return result.sort((a, b) => {
+      const aScore = recommendedMatches.value[a.id]?.fit_score || 0;
+      const bScore = recommendedMatches.value[b.id]?.fit_score || 0;
+      return bScore - aScore;
+    });
+  }
   return result.sort((a, b) => b.match - a.match);
 });
 
@@ -257,17 +352,61 @@ onMounted(fetchPets);
 
 <template>
   <div class="space-y-12 pb-20 px-4 max-w-[1600px] mx-auto">
-    <!-- 头部和 Hero 略，逻辑保持一致 -->
+    <!-- Hero 区：多轮对话式 AI 匹配 -->
     <div class="relative py-16 text-center space-y-8 overflow-hidden rounded-[4rem] bg-gradient-to-b from-orange-500/10 to-transparent border border-white/5 shadow-2xl">
       <div class="relative z-10 space-y-4">
         <h2 class="text-6xl font-black text-white italic tracking-tighter uppercase text-orange-500 leading-tight">寻找您的 <br/>完美伙伴</h2>
-        <div class="max-w-4xl mx-auto px-6 mt-8">
+        <p class="text-gray-500 text-sm">AI 理解您的真实需求 · 多轮对话挖掘隐性偏好 · 可解释推荐理由</p>
+
+        <!-- Step 1: 初始输入 -->
+        <div v-if="matchStep === 'input'" class="max-w-4xl mx-auto px-6 mt-8">
           <div class="bg-[#1a1a1a]/80 backdrop-blur-3xl p-2 rounded-[2.5rem] border border-white/10 flex items-center">
-            <Wand2 class="ml-6 text-orange-500" :size="28" />
-            <input v-model="aiQuery" @keyup.enter="handleAiMatch" type="text" placeholder="描述您的理想伙伴..." class="flex-1 bg-transparent py-6 px-6 text-white outline-none" />
-            <button @click="handleAiMatch" :disabled="isAiMatching" class="bg-orange-500 text-white px-10 py-5 rounded-[2rem] font-black flex items-center gap-2">
-              <Loader2 v-if="isAiMatching" class="animate-spin" :size="20" />立即匹配
+            <Wand2 class="ml-6 text-orange-500 shrink-0" :size="28" />
+            <input v-model="aiQuery" @keyup.enter="handleAiMatchStart" type="text" placeholder="描述您的理想伙伴，越详细越好..." class="flex-1 bg-transparent py-6 px-6 text-white outline-none" />
+            <button @click="handleAiMatchStart" :disabled="isLoadingFollowup || !aiQuery.trim()" class="bg-orange-500 disabled:bg-orange-500/40 disabled:cursor-not-allowed text-white px-10 py-5 rounded-[2rem] font-black flex items-center gap-2 shrink-0">
+              <Loader2 v-if="isLoadingFollowup" class="animate-spin" :size="20" />
+              <Wand2 v-else :size="20" />
+              {{ isLoadingFollowup ? '分析中...' : '开始匹配' }}
             </button>
+          </div>
+        </div>
+
+        <!-- Step 2: 追问卡片（创新点1：隐性需求显化） -->
+        <div v-else-if="matchStep === 'followup'" class="max-w-2xl mx-auto px-6 mt-8 space-y-4 text-left">
+          <div class="flex items-center gap-3 mb-4">
+            <BrainCircuit class="text-orange-500" :size="22" />
+            <div>
+              <p class="text-white font-bold text-sm">为您进一步了解需求</p>
+              <p class="text-gray-500 text-xs">基于「{{ aiQuery }}」，我还想多了解一些</p>
+            </div>
+            <button @click="handleAiMatch" class="ml-auto text-xs text-gray-500 hover:text-orange-500 transition-colors">跳过 →</button>
+          </div>
+          <div v-for="(q, idx) in followupQuestions" :key="q.key" class="bg-[#1a1a1a]/80 border border-white/10 rounded-3xl p-6 space-y-3">
+            <p class="text-white text-sm font-semibold">{{ idx + 1 }}. {{ q.question }}</p>
+            <div class="flex flex-wrap gap-2">
+              <button v-for="opt in q.options" :key="opt" @click="followupAnswers[q.key] = opt"
+                :class="followupAnswers[q.key] === opt ? 'bg-orange-500 text-white border-orange-500' : 'bg-white/5 text-gray-400 border-white/10 hover:border-orange-500/50'"
+                class="px-4 py-2 rounded-xl text-sm border transition-all font-medium">
+                {{ opt }}
+              </button>
+            </div>
+          </div>
+          <button @click="handleAiMatch" :disabled="isAiMatching"
+            class="w-full bg-orange-500 disabled:bg-orange-500/40 text-white py-5 rounded-2xl font-black flex items-center justify-center gap-2 mt-2">
+            <Loader2 v-if="isAiMatching" class="animate-spin" :size="20" />
+            <BrainCircuit v-else :size="20" />
+            {{ isAiMatching ? 'AI 语义匹配中...' : '生成个性化推荐' }}
+          </button>
+        </div>
+
+        <!-- Step 3: 匹配结果提示 -->
+        <div v-else class="max-w-4xl mx-auto px-6 mt-6">
+          <div class="bg-orange-500/10 border border-orange-500/20 rounded-3xl px-8 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <BrainCircuit class="text-orange-500" :size="20" />
+              <span class="text-orange-400 text-sm font-bold">已为您找到 {{ Object.keys(recommendedMatches).length }} 只匹配宠物，排列在前面</span>
+            </div>
+            <button @click="resetAiMatch" class="text-gray-500 hover:text-white text-xs transition-colors flex items-center gap-1"><X :size="14" />重新搜索</button>
           </div>
         </div>
       </div>
@@ -303,8 +442,20 @@ onMounted(fetchPets);
             <div class="absolute inset-0 bg-gradient-to-t from-[#1a1a1a]/80 via-transparent to-transparent"></div>
             <h4 class="absolute bottom-4 left-5 font-black text-xl text-white">{{ pet.name }}</h4>
           </div>
-          <div @click="selectedPet = pet" class="p-5 space-y-4 flex-1">
-            <div class="flex flex-wrap gap-1.5"><span v-for="t in pet.tags" :key="t" class="text-[9px] bg-white/5 px-2 py-1 rounded-lg text-gray-500">#{{ t }}</span></div>
+          <div @click="selectedPet = pet" class="p-5 space-y-3 flex-1">
+            <!-- AI 推荐解释（创新点3：可解释推荐） -->
+            <div v-if="recommendedMatches[pet.id]" class="bg-orange-500/10 border border-orange-500/20 rounded-2xl p-3 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-[9px] font-black text-orange-500 uppercase tracking-wider flex items-center gap-1"><BrainCircuit :size="10" />AI 推荐</span>
+                <span class="text-[9px] font-black text-orange-400">契合度 {{ recommendedMatches[pet.id]?.fit_score }}%</span>
+              </div>
+              <p class="text-[10px] text-orange-300 leading-relaxed">{{ recommendedMatches[pet.id]?.reason }}</p>
+              <div v-if="recommendedMatches[pet.id]?.fit_advantages?.length" class="space-y-0.5">
+                <p v-for="(adv, i) in recommendedMatches[pet.id].fit_advantages.slice(0,2)" :key="i" class="text-[9px] text-green-400 flex items-center gap-1"><span class="text-green-500">✓</span>{{ adv }}</p>
+              </div>
+              <p v-if="recommendedMatches[pet.id]?.potential_challenges?.length" class="text-[9px] text-yellow-400 flex items-center gap-1"><span>⚠</span>{{ recommendedMatches[pet.id].potential_challenges[0] }}</p>
+            </div>
+            <div v-else class="flex flex-wrap gap-1.5"><span v-for="t in pet.tags" :key="t" class="text-[9px] bg-white/5 px-2 py-1 rounded-lg text-gray-500">#{{ t }}</span></div>
             <div class="flex items-center justify-between pt-2 border-t border-white/5">
               <div><p class="text-[9px] text-gray-500 uppercase">{{ pet.species }}</p><div class="flex items-center gap-1 text-gray-400"><MapPin :size="10" /><span class="text-[9px] font-bold">{{ pet.distance }} KM</span></div></div>
               <ChevronRight class="text-orange-500" :size="16" />
@@ -481,7 +632,7 @@ onMounted(fetchPets);
     <Teleport to="body">
       <div v-if="showEditModal" class="fixed inset-0 z-[600] flex items-center justify-center bg-black/95 backdrop-blur-md px-4">
         <div class="bg-[#111] border border-white/10 p-10 rounded-[3rem] w-full max-w-xl space-y-6">
-          <div class="flex justify-between items-center mb-4"><h3 class="text-2xl font-black text-white italic uppercase">Edit Pet Profile</h3><button @click="showEditModal=false" class="text-gray-500"><X :size="24"/></button></div>
+          <div class="flex justify-between items-center mb-4"><h3 class="text-2xl font-black text-white italic uppercase">编辑宠物信息</h3><button @click="showEditModal=false" class="text-gray-500"><X :size="24"/></button></div>
           <div class="space-y-4">
             <input v-model="editPetForm.name" placeholder="宠物名字" class="w-full bg-white/5 border border-white/10 rounded-xl px-6 py-4 text-white outline-none focus:border-orange-500" />
             <input v-model="editPetForm.species" placeholder="品种" class="w-full bg-white/5 border border-white/10 rounded-xl px-6 py-4 text-white outline-none focus:border-orange-500" />
@@ -505,6 +656,81 @@ onMounted(fetchPets);
       </div>
     </Teleport>
 
+    <!-- 领养后回访弹窗（创新点3：数据飞轮闭环） -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="showFeedbackModal" class="fixed inset-0 z-[700] flex items-center justify-center bg-black/95 backdrop-blur-md px-4 py-8 overflow-y-auto">
+          <div class="bg-[#111] border border-white/10 rounded-[3rem] w-full max-w-lg my-auto">
+            <div class="p-10 pb-0 flex justify-between items-start">
+              <div>
+                <div class="flex items-center gap-3 mb-2">
+                  <Heart class="text-green-400" :size="24" />
+                  <span class="text-[10px] font-black text-green-400 uppercase tracking-widest">领养后回访</span>
+                </div>
+                <h3 class="text-2xl font-black text-white italic uppercase tracking-tighter">{{ feedbackPet?.name }} 现在怎么样了？</h3>
+                <p class="text-gray-500 text-sm mt-1">您的反馈帮助 AI 越来越精准 · 数据仅用于优化匹配</p>
+              </div>
+              <button @click="showFeedbackModal = false" class="text-gray-500 hover:text-white transition-colors mt-1"><X :size="24"/></button>
+            </div>
+
+            <!-- 反馈成功 -->
+            <div v-if="feedbackSubmitted" class="p-10 text-center space-y-4">
+              <div class="text-6xl">🐾</div>
+              <p class="text-white font-black text-xl">感谢您的回访！</p>
+              <p class="text-gray-400 text-sm">您的真实反馈已记录，将持续帮助改善宠物匹配算法。</p>
+              <button @click="showFeedbackModal = false" class="w-full bg-orange-500 text-white py-4 rounded-2xl font-black hover:bg-orange-600 transition-all">关闭</button>
+            </div>
+
+            <!-- 反馈表单 -->
+            <div v-else class="p-10 space-y-6">
+              <!-- 整体满意度 -->
+              <div class="space-y-2">
+                <label class="text-xs font-black text-gray-400 uppercase tracking-wider">整体满意度</label>
+                <div class="flex gap-2">
+                  <button v-for="n in [1,2,3,4,5]" :key="n" @click="feedbackForm.overall_satisfaction = n"
+                    :class="feedbackForm.overall_satisfaction >= n ? 'text-orange-400' : 'text-gray-600'"
+                    class="text-3xl transition-colors hover:text-orange-400">★</button>
+                </div>
+              </div>
+              <!-- 亲密程度 -->
+              <div class="space-y-2">
+                <label class="text-xs font-black text-gray-400 uppercase tracking-wider">与宠物的亲密程度</label>
+                <div class="grid grid-cols-2 gap-2">
+                  <button v-for="opt in [{val:'very_close',label:'非常亲密'},{val:'close',label:'比较亲密'},{val:'normal',label:'一般'},{val:'distant',label:'有距离感'}]" :key="opt.val"
+                    @click="(feedbackForm.bond_level as any) = opt.val"
+                    :class="feedbackForm.bond_level === opt.val ? 'bg-orange-500/20 border-orange-500 text-orange-400' : 'bg-white/5 border-white/10 text-gray-400'"
+                    class="py-3 px-4 rounded-xl border text-sm font-bold transition-all">{{ opt.label }}</button>
+                </div>
+              </div>
+              <!-- 意外挑战 -->
+              <div class="space-y-2">
+                <label class="text-xs font-black text-gray-400 uppercase tracking-wider">遇到的意外挑战（选填）</label>
+                <input v-model="feedbackForm.unexpected_challenges" placeholder="如：掉毛比预期多、比较黏人..." class="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white text-sm outline-none focus:border-orange-500 transition-colors placeholder-gray-600" />
+              </div>
+              <!-- 是否推荐 -->
+              <div class="flex items-center gap-4">
+                <label class="text-xs font-black text-gray-400 uppercase tracking-wider">会向朋友推荐领养吗？</label>
+                <div class="flex gap-2 ml-auto">
+                  <button @click="feedbackForm.would_recommend = true" :class="feedbackForm.would_recommend ? 'bg-green-500/20 text-green-400 border-green-500' : 'bg-white/5 text-gray-400 border-white/10'" class="px-4 py-2 rounded-xl border text-sm font-bold transition-all">会 ✓</button>
+                  <button @click="feedbackForm.would_recommend = false" :class="!feedbackForm.would_recommend ? 'bg-red-500/20 text-red-400 border-red-500' : 'bg-white/5 text-gray-400 border-white/10'" class="px-4 py-2 rounded-xl border text-sm font-bold transition-all">不会</button>
+                </div>
+              </div>
+              <!-- 自由反馈 -->
+              <div class="space-y-2">
+                <label class="text-xs font-black text-gray-400 uppercase tracking-wider">想对 AI 说的话（选填）</label>
+                <textarea v-model="feedbackForm.free_feedback" rows="2" placeholder="AI 匹配准确吗？有什么想说的..." class="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white text-sm outline-none focus:border-orange-500 transition-colors resize-none placeholder-gray-600" />
+              </div>
+              <button @click="handleSubmitFeedback" :disabled="isSubmittingFeedback" class="w-full bg-green-600 hover:bg-green-500 disabled:bg-green-600/40 text-white py-5 rounded-2xl font-black text-lg transition-all flex justify-center items-center gap-3">
+                <Loader2 v-if="isSubmittingFeedback" class="animate-spin" :size="22" />
+                <Heart v-else :size="22" />
+                {{ isSubmittingFeedback ? '提交中...' : '提交回访反馈' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
     <!-- 详情弹窗 -->
     <Transition name="fade">
       <div v-if="selectedPet" class="fixed inset-0 z-[100] flex items-center justify-center p-4 backdrop-blur-2xl">
@@ -514,7 +740,32 @@ onMounted(fetchPets);
           <div class="lg:w-2/5 p-12 space-y-8 text-left">
             <div><span class="bg-orange-500/20 text-orange-500 px-4 py-1 rounded-full text-[10px] font-black uppercase">{{ selectedPet.type }}</span><h3 class="text-6xl font-black text-white mt-4">{{ selectedPet.name }}</h3></div>
             <p class="text-gray-400 text-lg leading-relaxed">{{ selectedPet.desc }}</p>
-            <div class="flex gap-4 pt-4"><button @click="startAdopt(selectedPet)" class="flex-1 bg-white text-black py-6 rounded-[2rem] font-black text-xl hover:bg-orange-500 hover:text-white transition-all flex items-center justify-center gap-2"><ClipboardList :size="22" />智能申请领养</button><button class="p-6 bg-white/5 text-white rounded-[2rem] border border-white/10"><Heart :size="28" /></button></div>
+            <!-- 创新点3：详情页内联显示结构化推荐解释 -->
+            <div v-if="recommendedMatches[selectedPet.id]" class="bg-orange-500/10 border border-orange-500/20 rounded-3xl p-6 space-y-4">
+              <div class="flex items-center gap-2 mb-1">
+                <BrainCircuit class="text-orange-500" :size="16" />
+                <span class="text-orange-500 text-xs font-black uppercase tracking-wider">AI 个性化推荐分析</span>
+                <span class="ml-auto text-orange-400 font-black">{{ recommendedMatches[selectedPet.id]?.fit_score }}% 契合</span>
+              </div>
+              <p class="text-orange-300 text-sm">{{ recommendedMatches[selectedPet.id]?.reason }}</p>
+              <div v-if="recommendedMatches[selectedPet.id]?.fit_advantages?.length">
+                <p class="text-xs text-gray-500 font-bold mb-1.5">适配优势</p>
+                <ul class="space-y-1">
+                  <li v-for="adv in recommendedMatches[selectedPet.id].fit_advantages" :key="adv" class="text-xs text-green-400 flex items-center gap-2"><span class="text-green-500">✓</span>{{ adv }}</li>
+                </ul>
+              </div>
+              <div v-if="recommendedMatches[selectedPet.id]?.potential_challenges?.length">
+                <p class="text-xs text-gray-500 font-bold mb-1.5">潜在挑战</p>
+                <ul class="space-y-1">
+                  <li v-for="ch in recommendedMatches[selectedPet.id].potential_challenges" :key="ch" class="text-xs text-yellow-400 flex items-center gap-2"><span>⚠</span>{{ ch }}</li>
+                </ul>
+              </div>
+              <p v-if="recommendedMatches[selectedPet.id]?.mitigation" class="text-xs text-blue-400 bg-blue-500/10 rounded-xl px-4 py-2">💡 {{ recommendedMatches[selectedPet.id].mitigation }}</p>
+            </div>
+            <div class="flex gap-4 pt-4">
+              <button @click="startAdopt(selectedPet)" class="flex-1 bg-white text-black py-6 rounded-[2rem] font-black text-xl hover:bg-orange-500 hover:text-white transition-all flex items-center justify-center gap-2"><ClipboardList :size="22" />智能申请领养</button>
+              <button @click="openFeedbackModal(selectedPet)" class="p-6 bg-white/5 text-white rounded-[2rem] border border-white/10 hover:bg-green-500/20 hover:border-green-500/30 hover:text-green-400 transition-all" title="领养后回访"><Heart :size="28" /></button>
+            </div>
           </div>
         </div>
       </div>

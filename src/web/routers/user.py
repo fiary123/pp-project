@@ -1,10 +1,13 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from src.web.schemas import ChangePasswordRequest, MessageCreate
 from src.web.services.db_service import get_db, ensure_tables
 from src.web.services.auth_service import verify_password, get_password_hash
 from src.web.dependencies import get_current_user
+from src.web.services.credit_service import CreditService
+from src.web.services.ai_service import ai_service
 
 router = APIRouter(prefix="/api/user", tags=["user"])
+credit_service = CreditService(ai_service)
 
 @router.post("/change-password")
 async def change_password(req: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
@@ -79,3 +82,30 @@ async def send_message(req: MessageCreate, current_user: dict = Depends(get_curr
         )
         conn.commit()
     return {"status": "success"}
+
+@router.get("/credit")
+async def get_my_credit(current_user: dict = Depends(get_current_user)):
+    """获取我的信用档案"""
+    profile = credit_service.get_user_credit(current_user["id"])
+    if not profile:
+        # 如果没记录，尝试初始化一个
+        await credit_service.add_credit_event(current_user["id"], "initial", "")
+        profile = credit_service.get_user_credit(current_user["id"])
+    return profile
+
+@router.post("/credit/task/visit_report")
+async def submit_visit_report(
+    content: str = Body(..., embed=True),
+    current_user: dict = Depends(get_current_user)
+):
+    """提交宠物回访任务，触发 AI 评分"""
+    result = await credit_service.add_credit_event(
+        current_user["id"], 
+        "visit_report", 
+        content
+    )
+    return {
+        "message": "回访提交成功，AI 已完成评估",
+        "points_earned": result["points"],
+        "quality_multiplier": result["multiplier"]
+    }
