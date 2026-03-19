@@ -1,4 +1,5 @@
 import os
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
@@ -7,10 +8,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- 关键配置（从环境变量读取）---
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "PetAdoptionSystem-GraduationProject-SecretKey")
+# --- 关键配置（必须通过环境变量 JWT_SECRET_KEY 配置，不提供默认值）---
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "环境变量 JWT_SECRET_KEY 未设置。"
+        "请在 .env 文件或部署环境中设置一个足够随机的密钥，"
+        "例如：JWT_SECRET_KEY=" + secrets.token_hex(32)
+    )
+
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # Token 有效期设为 24 小时方便调试
+# Token 有效期：优先读取环境变量 ACCESS_TOKEN_EXPIRE_MINUTES，默认 60 分钟
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
 # 密码哈希上下文
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -24,12 +33,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    """创建 JWT Token"""
+    """创建 JWT Token，过期时间由 ACCESS_TOKEN_EXPIRE_MINUTES 统一控制"""
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt

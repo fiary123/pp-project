@@ -40,11 +40,12 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 # 跨域资源共享配置（限制来源，防止 CSRF）
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:4173",   # vite preview
-]
+# 生产环境请通过环境变量 CORS_ALLOWED_ORIGINS 配置域名，多个域名用逗号分隔
+# 例如：CORS_ALLOWED_ORIGINS=https://your-domain.com,https://www.your-domain.com
+_default_dev_origins = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173"
+_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", _default_dev_origins)
+ALLOWED_ORIGINS = [origin.strip() for origin in _origins_env.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
