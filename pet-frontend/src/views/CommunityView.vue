@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
+<<<<<<< Updated upstream
 import {
   MessageCircle, Heart, Plus, X, Loader2, MessageSquare, Edit3, Trash2,
   User, Send, Briefcase, Home, Star
+=======
+import { 
+  MessageCircle, Heart, Plus, X, Loader2, MessageSquare, Edit3, Trash2, Image as ImageIcon, Video as VideoIcon, Upload
+>>>>>>> Stashed changes
 } from 'lucide-vue-next';
 import { useAuthStore } from '../store/authStore';
 import BaseCard from '../components/BaseCard.vue';
@@ -22,10 +27,16 @@ const editingPostId = ref<number | null>(null);
 const publishType = ref<'daily' | 'experience' | 'adopt_help'>('daily');
 const publishForm = ref({ title: '', content: '', image_url: '' });
 const isPublishing = ref(false);
+const isUploading = ref(false);
+const fileInput = ref<HTMLInputElement | null>(null);
 
 // 评论管理
 const activePostComments = ref<Record<number, any[]>>({});
+const commentInputs = ref<Record<number, string>>({});
+const isSubmittingComment = ref<Record<number, boolean>>({});
+const likedPosts = ref<Set<number>>(new Set());
 
+<<<<<<< Updated upstream
 // 用户信息弹窗
 const showUserProfile = ref(false);
 const profileUser = ref<any>(null);
@@ -47,6 +58,16 @@ const openUserProfile = async (userId: number, fallback: any) => {
 };
 
 // 模拟帖子生成器
+=======
+// 判断是否为视频
+const isVideo = (url: string) => {
+  if (!url) return false;
+  const videoExts = ['.mp4', '.webm', '.ogg', '.mov'];
+  return videoExts.some(ext => url.toLowerCase().endsWith(ext));
+};
+
+// 模拟帖子生成器 (用于展示)
+>>>>>>> Stashed changes
 const generateMockPosts = () => {
   const users = ['猫片达人', '狗狗日记', '宠物百科', '爱宠志愿者', '铲屎官小李'];
   const contents = [
@@ -58,7 +79,7 @@ const generateMockPosts = () => {
     },
     { 
       title: '新手养猫避坑指南', 
-      content: '作为一名有着5年养猫经验的博主，今天要给各位新手家长排排雷。', 
+      content: '作为一名有着5年养猫经验的博主，今天要给各位新手家长排排雷。建议收藏！', 
       img: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=1200&q=80', 
       type: 'experience' 
     },
@@ -67,46 +88,44 @@ const generateMockPosts = () => {
       content: '在小区楼下发现的小橘，大概3个月大，已做完基础驱虫。性格超级粘人。', 
       img: 'https://images.unsplash.com/photo-1548247416-ec66f4900b2e?auto=format&fit=crop&w=1200&q=80', 
       type: 'adopt_help' 
-    },
-    { 
-      title: '自制宠物零食：鸡肉干教程', 
-      content: '步骤很简单：1. 鸡胸肉切薄片；2. 烘干机70度烘干8小时。', 
-      img: 'https://images.unsplash.com/photo-1601758228041-f3b2795255f1?auto=format&fit=crop&w=1200&q=80', 
-      type: 'experience' 
     }
   ];
 
   return contents.map((c, i) => ({
-    id: 1000 + i,
-    user_id: 99 + i,
+    id: 9000 + i,
+    user_id: 0,
     username: users[i % users.length],
-    role: i % 2 === 0 ? '达人' : '个人',
+    role: i % 2 === 0 ? 'root' : 'individual',
     title: c.title,
     content: c.content,
     image_url: c.img,
     type: c.type,
     likes: 12 + i * 5,
-    comments_count: 5 + i,
-    create_time: '2026-03-04 10:00'
+    create_time: '2026-03-22 10:00'
   }));
 };
 
 // 2. 加载数据
 const fetchPosts = async () => {
-  console.log('[DEBUG] 当前用户信息:', authStore.user);
   isLoading.value = true;
   try {
     const res = await axios.get('/api/posts');
-    if (res.data && res.data.length > 0) {
-      posts.value = res.data.map((p: any) => ({
-        ...p,
-        likes: p.likes || Math.floor(Math.random() * 20),
-        create_time: p.create_time ? new Date(p.create_time).toLocaleString() : '刚刚'
-      }));
-    } else {
+    const dbItems = (res.data && res.data.items) ? res.data.items : [];
+    
+    // 将数据库内容与模拟内容合并
+    const formattedDbItems = dbItems.map((p: any) => ({
+      ...p,
+      create_time: p.create_time ? new Date(p.create_time).toLocaleString() : '刚刚'
+    }));
+    
+    // 如果数据库没数据，则显示模拟数据；如果有数据，则展示数据库内容并在末尾追加模拟数据作为演示
+    if (formattedDbItems.length === 0) {
       posts.value = generateMockPosts();
+    } else {
+      posts.value = [...formattedDbItems, ...generateMockPosts()];
     }
   } catch (err) {
+    console.error('获取帖子失败，加载模拟数据:', err);
     posts.value = generateMockPosts();
   } finally {
     isLoading.value = false;
@@ -115,31 +134,94 @@ const fetchPosts = async () => {
 
 // 3. 互动逻辑
 const handleLike = async (postId: number) => {
-  try {
-    const post = posts.value.find(p => p.id === postId);
-    if (post) {
-      post.likes = (post.likes || 0) + 1;
-      await axios.post(`/api/posts/${postId}/like`).catch(() => {});
-    }
-  } catch (err) {}
+  if (likedPosts.value.has(postId)) return; // 防重复点赞
+  const post = posts.value.find(p => p.id === postId);
+  if (!post) return;
+  post.likes = (post.likes || 0) + 1;
+  likedPosts.value.add(postId);
+  if (postId < 9000) {
+    try { await axios.post(`/api/posts/${postId}/like`); } catch {}
+  }
 };
 
 const loadComments = async (postId: number) => {
-  if (activePostComments.value[postId]) {
+  if (activePostComments.value[postId] !== undefined) {
     delete activePostComments.value[postId];
+    return;
+  }
+  if (postId >= 9000) {
+    activePostComments.value[postId] = [];
     return;
   }
   try {
     const res = await axios.get(`/api/posts/${postId}/comments`);
-    activePostComments.value[postId] = res.data.length ? res.data : [{ id: 1, username: '系统', content: '快来发表第一条评论吧！' }];
-  } catch (err) {
-    activePostComments.value[postId] = [{ id: 1, username: '小萌新', content: '前排围观！' }];
+    activePostComments.value[postId] = res.data || [];
+  } catch {
+    activePostComments.value[postId] = [];
   }
 };
 
+const handleSubmitComment = async (postId: number) => {
+  const content = commentInputs.value[postId]?.trim();
+  if (!content || !authStore.user?.id) return;
+  if (postId >= 9000) {
+    // 模拟帖子：直接在本地追加
+    if (!activePostComments.value[postId]) activePostComments.value[postId] = [];
+    activePostComments.value[postId].push({
+      id: Date.now(),
+      username: authStore.user.username || '我',
+      content
+    });
+    commentInputs.value[postId] = '';
+    return;
+  }
+  isSubmittingComment.value[postId] = true;
+  try {
+    await axios.post('/api/posts/comment', {
+      post_id: postId,
+      user_id: authStore.user.id,
+      content
+    });
+    commentInputs.value[postId] = '';
+    // 重新拉取评论列表
+    const res = await axios.get(`/api/posts/${postId}/comments`);
+    activePostComments.value[postId] = res.data || [];
+  } catch {
+    alert('评论发送失败，请重试');
+  } finally {
+    isSubmittingComment.value[postId] = false;
+  }
+};
 
-// 4. 管理员功能
+// 4. 文件上传逻辑
+const triggerUpload = () => fileInput.value?.click();
+
+const handleFileUpload = async (event: Event) => {
+  const file = (event.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  isUploading.value = true;
+  try {
+    const res = await axios.post('/api/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    publishForm.value.image_url = res.data.url;
+  } catch (err: any) {
+    alert(err.response?.data?.detail || '上传失败，请重试');
+  } finally {
+    isUploading.value = false;
+  }
+};
+
+// 5. 管理员与编辑功能
 const startEdit = (post: any) => {
+  if (post.id >= 9000) {
+    alert('演示贴不支持编辑哦');
+    return;
+  }
   isEditing.value = true;
   editingPostId.value = post.id;
   publishType.value = post.type;
@@ -148,40 +230,39 @@ const startEdit = (post: any) => {
 };
 
 const handleDelete = async (postId: number) => {
+  if (postId >= 9000) {
+    posts.value = posts.value.filter(p => p.id !== postId);
+    return;
+  }
   if (!confirm('确定要删除这条帖子吗？')) return;
   try {
     await axios.delete(`/api/posts/${postId}`);
     posts.value = posts.value.filter(p => p.id !== postId);
-  } catch (err: any) {
-    if (postId >= 1000 || err.response?.status === 404) {
-      posts.value = posts.value.filter(p => p.id !== postId);
-    }
-  }
+  } catch (err) {}
 };
 
-// 5. 提交逻辑
 const handlePublish = async () => {
   if (!publishForm.value.content) return;
   isPublishing.value = true;
   try {
+    const payload = {
+      user_id: authStore.user?.id,
+      title: publishForm.value.title,
+      content: publishForm.value.content,
+      image_url: publishForm.value.image_url,
+      type: publishType.value
+    };
+
     if (isEditing.value && editingPostId.value) {
-      try {
-        await axios.put(`/api/posts/${editingPostId.value}`, { ...publishForm.value, type: publishType.value });
-      } catch (err: any) {
-        if (editingPostId.value < 1000 && err.response?.status !== 404) throw err;
-      }
-      const idx = posts.value.findIndex(p => p.id === editingPostId.value);
-      if (idx !== -1) posts.value[idx] = { ...posts.value[idx], ...publishForm.value, type: publishType.value };
+      await axios.put(`/api/posts/${editingPostId.value}`, payload);
     } else {
-      await axios.post('/api/posts', { user_id: authStore.user?.id || 1, type: publishType.value, ...publishForm.value });
-      fetchPosts();
+      await axios.post('/api/posts', payload);
     }
-  } catch (err) {
-    if (!isEditing.value) {
-      posts.value.unshift({ id: Date.now(), username: authStore.user?.username || '本地用户', role: '个人', ...publishForm.value, type: publishType.value, likes: 0, create_time: '刚刚' });
-    }
-  } finally {
+    fetchPosts();
     closeModal();
+  } catch (err: any) {
+    alert(err.response?.data?.detail || '发布失败');
+  } finally {
     isPublishing.value = false;
   }
 };
@@ -198,10 +279,9 @@ const filteredPosts = computed(() => {
   return posts.value.filter(p => p.type === activeType.value);
 });
 
-// 计算属性：判断是否为管理员
 const isAdmin = computed(() => {
   const role = authStore.user?.role;
-  return role === 'admin' || role === 'root';
+  return role === 'admin' || role === 'root' || role === 'org_admin';
 });
 
 onMounted(fetchPosts);
@@ -212,15 +292,15 @@ onMounted(fetchPosts);
     <div class="flex items-end justify-between border-b border-white/5 pb-6">
       <div>
         <h2 class="text-4xl font-black text-white italic tracking-tighter uppercase">宠物 <span class="text-orange-500">社区</span></h2>
-        <p class="text-gray-400 font-bold text-[10px] uppercase tracking-widest mt-1">
-          {{ isAdmin ? '超级管理员模式已开启' : '记录萌宠点滴，分享养宠干货' }}
+        <p class="text-gray-400 font-bold text-sm uppercase tracking-widest mt-2">
+          {{ isAdmin ? '管理模式已开启' : '记录萌宠点滴，分享养宠干货' }}
         </p>
       </div>
-      <div class="flex gap-4">
-        <button v-for="t in [{id:'all', n:'全部'}, {id:'daily', n:'日常'}, {id:'experience', n:'攻略'}, {id:'adopt_help', n:'互助'}]" 
+      <div class="flex gap-6">
+        <button v-for="t in [{id:'all', n:'全部'}, {id:'daily', n:'日常'}, {id:'experience', n:'攻略'}, {id:'adopt_help', n:'送养'}]" 
                 :key="t.id" @click="activeType = t.id as any"
-                :class="activeType === t.id ? 'text-orange-500 border-b-2 border-orange-500 font-black' : 'text-gray-500'"
-                class="text-xs uppercase tracking-widest transition-all px-2 pb-1">{{ t.n }}</button>
+                :class="activeType === t.id ? 'text-orange-500 border-b-2 border-orange-500 font-black scale-110' : 'text-gray-500'"
+                class="text-base uppercase tracking-widest transition-all px-3 pb-2">{{ t.n }}</button>
       </div>
     </div>
 
@@ -228,21 +308,20 @@ onMounted(fetchPosts);
     
     <div v-else class="space-y-10">
       <BaseCard v-for="post in filteredPosts" :key="post.id" class="!p-0 overflow-hidden border-white/5 relative">
-        <!-- 管理员面板：常驻显示 -->
-        <div v-if="isAdmin" class="px-6 py-3 bg-orange-500/10 border-b border-orange-500/20 flex justify-between items-center">
-          <span class="text-[9px] font-black text-orange-500 uppercase tracking-widest">管理员控制面板</span>
+        <div v-if="isAdmin || authStore.user?.id === post.user_id" class="px-6 py-3 bg-white/5 border-b border-white/5 flex justify-between items-center">
+          <span class="text-[9px] font-black text-gray-500 uppercase tracking-widest">{{ authStore.user?.id === post.user_id ? '我的帖子' : '内容管理' }}</span>
           <div class="flex gap-3">
-            <button @click="startEdit(post)" class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 text-blue-400 hover:bg-blue-500 hover:text-white rounded-lg border border-blue-500/30 transition-all text-[10px] font-black uppercase">
+            <button @click="startEdit(post)" class="text-blue-400 hover:text-blue-300 text-[10px] font-black uppercase flex items-center gap-1 transition-colors">
               <Edit3 :size="12" /> 编辑
             </button>
-            <button @click="handleDelete(post.id)" class="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg border border-red-500/30 transition-all text-[10px] font-black uppercase">
+            <button @click="handleDelete(post.id)" class="text-red-400 hover:text-red-300 text-[10px] font-black uppercase flex items-center gap-1 transition-colors">
               <Trash2 :size="12" /> 删除
             </button>
           </div>
         </div>
 
-        <!-- 头部 -->
         <div class="p-6 flex items-center justify-between">
+<<<<<<< Updated upstream
           <div class="flex items-center gap-4">
             <button @click="openUserProfile(post.user_id, { id: post.user_id, username: post.username, role: post.role })"
               class="w-10 h-10 rounded-full border-2 border-orange-500/20 overflow-hidden hover:border-orange-500 transition-all hover:scale-110 flex-shrink-0">
@@ -259,54 +338,154 @@ onMounted(fetchPosts);
               <p class="text-[10px] text-gray-600 font-mono mt-0.5">{{ post.create_time }}</p>
             </div>
           </div>
-        </div>
-
-        <!-- 内容 -->
-        <div class="px-8 pb-6 space-y-4">
-          <h3 v-if="post.title" class="text-2xl font-black text-white italic tracking-tight">{{ post.title }}</h3>
-          <p class="text-gray-300 text-sm leading-relaxed whitespace-pre-line">{{ post.content }}</p>
-          <img v-if="post.image_url" :src="post.image_url" class="rounded-[2.5rem] w-full h-auto max-h-[600px] object-cover border border-white/5" />
-        </div>
-
-        <!-- 互动栏 -->
-        <div class="px-8 py-4 bg-white/5 flex items-center gap-10">
-          <button @click="handleLike(post.id)" class="flex items-center gap-2 text-xs font-bold transition-all text-gray-500 hover:text-red-500">
-            <Heart :size="20" /> {{ post.likes }}
-          </button>
-          <button @click="loadComments(post.id)" class="flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-blue-500">
-            <MessageCircle :size="20" /> 评论
-          </button>
-        </div>
-
-        <!-- 评论列表 -->
-        <div v-if="activePostComments[post.id]" class="bg-black/20 p-8 space-y-6 border-t border-white/5">
-          <div v-for="c in activePostComments[post.id]" :key="c.id" class="flex gap-4">
-            <div class="w-8 h-8 rounded-full bg-white/5 overflow-hidden"><img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${c.username}`" /></div>
-            <div class="flex-1 bg-white/5 rounded-2xl p-4 border border-white/5">
-              <p class="text-[10px] font-black text-orange-500 uppercase mb-1">{{ c.username }}</p>
-              <p class="text-xs text-gray-300">{{ c.content }}</p>
+=======
+          <div class="flex items-center gap-5">
+            <div class="w-12 h-12 rounded-full border-2 border-orange-500/20 overflow-hidden shadow-lg shadow-orange-500/10">
+              <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${post.username}`" />
             </div>
+            <div>
+              <h4 class="font-bold text-white text-lg flex items-center gap-3">
+                {{ post.username }} 
+                <span class="text-[11px] bg-orange-500/10 text-orange-500 px-2 py-0.5 rounded border border-orange-500/20 uppercase tracking-wider font-black">
+                  {{ post.role === 'root' ? '管理员' : post.role === 'org_admin' ? '救助站' : '爱宠人士' }}
+                </span>
+              </h4>
+              <p class="text-xs text-gray-500 font-mono mt-1 tracking-tight">{{ post.create_time }}</p>
+            </div>
+          </div>
+          <button @click="$router.push(`/chat?to=${post.user_id}`)" class="p-3 text-gray-500 hover:text-orange-500 transition-all hover:scale-110">
+            <MessageSquare :size="20" />
+          </button>
+>>>>>>> Stashed changes
+        </div>
+
+        <div class="px-8 pb-8 space-y-5">
+          <h3 v-if="post.title" class="text-2xl font-black text-white italic tracking-tight">{{ post.title }}</h3>
+          <p class="text-gray-300 text-base leading-relaxed whitespace-pre-line">{{ post.content }}</p>
+          
+          <!-- 媒体展示 -->
+          <div v-if="post.image_url" class="mt-4">
+            <video v-if="isVideo(post.image_url)" :src="post.image_url" controls class="rounded-[2.5rem] w-full max-h-[600px] bg-black/40 border border-white/5"></video>
+            <img v-else :src="post.image_url" class="rounded-[2.5rem] w-full h-auto max-h-[600px] object-cover border border-white/5 shadow-2xl" />
+          </div>
+        </div>
+
+        <div class="px-8 py-5 bg-white/5 flex items-center gap-12 border-t border-white/5">
+          <button @click="handleLike(post.id)"
+            :class="likedPosts.has(post.id) ? 'text-red-500' : 'text-gray-500 hover:text-red-500'"
+            class="flex items-center gap-3 text-base font-black transition-all group">
+            <Heart :size="24" :fill="likedPosts.has(post.id) ? 'currentColor' : 'none'" class="group-hover:scale-110 transition-transform" />
+            {{ post.likes }}
+          </button>
+          <button @click="loadComments(post.id)" class="flex items-center gap-3 text-base font-black text-gray-500 hover:text-blue-500 group">
+            <MessageCircle :size="24" class="group-hover:scale-110 transition-transform" />
+            评论
+            <span v-if="activePostComments[post.id]?.length" class="text-xs text-gray-600">{{ activePostComments[post.id].length }}</span>
+          </button>
+        </div>
+
+        <div v-if="activePostComments[post.id] !== undefined" class="bg-black/20 border-t border-white/5">
+          <!-- 评论列表 -->
+          <div class="px-8 pt-6 space-y-4">
+            <div v-if="activePostComments[post.id].length === 0" class="text-center text-gray-600 text-sm py-4">
+              暂无评论，来发表第一条吧 👋
+            </div>
+            <div v-for="c in activePostComments[post.id]" :key="c.id" class="flex gap-4">
+              <div class="w-9 h-9 rounded-full bg-white/5 overflow-hidden flex-shrink-0">
+                <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${c.username}`" />
+              </div>
+              <div class="flex-1 bg-white/5 rounded-2xl px-4 py-3 border border-white/5">
+                <p class="text-xs font-black text-orange-500 uppercase mb-1">{{ c.username }}</p>
+                <p class="text-sm text-gray-300">{{ c.content }}</p>
+              </div>
+            </div>
+          </div>
+          <!-- 评论输入框 -->
+          <div class="px-8 py-5 flex gap-3 items-center">
+            <div class="w-9 h-9 rounded-full bg-white/5 overflow-hidden flex-shrink-0 border border-white/10">
+              <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${authStore.user?.username || 'me'}`" />
+            </div>
+            <input
+              v-model="commentInputs[post.id]"
+              @keyup.enter="handleSubmitComment(post.id)"
+              :placeholder="authStore.user ? '写下你的评论...' : '登录后才能评论'"
+              :disabled="!authStore.user"
+              class="flex-1 bg-white/5 border border-white/10 rounded-2xl px-5 py-3 text-sm text-white outline-none focus:border-orange-500 transition-colors placeholder-gray-600 disabled:opacity-40"
+            />
+            <button
+              @click="handleSubmitComment(post.id)"
+              :disabled="!commentInputs[post.id]?.trim() || !authStore.user || isSubmittingComment[post.id]"
+              class="px-5 py-3 bg-orange-500 disabled:bg-orange-500/40 text-white text-sm font-black rounded-2xl transition-all flex items-center gap-2"
+            >
+              <Loader2 v-if="isSubmittingComment[post.id]" class="animate-spin" :size="14" />
+              <span v-else>发送</span>
+            </button>
           </div>
         </div>
       </BaseCard>
     </div>
 
     <!-- 发布/编辑弹窗 -->
-    <button @click="showPublishModal = true" class="fixed bottom-12 right-12 w-16 h-16 bg-orange-500 text-white rounded-full flex items-center justify-center shadow-2xl z-50 hover:scale-110 transition-all"><Plus :size="32" /></button>
+    <button @click="showPublishModal = true" class="fixed bottom-12 right-12 w-16 h-16 bg-orange-500 text-white rounded-full flex items-center justify-center shadow-2xl z-50 hover:scale-110 transition-all shadow-orange-500/20">
+      <Plus :size="32" />
+    </button>
+    
     <Teleport to="body">
       <div v-if="showPublishModal" class="fixed inset-0 z-[500] flex items-center justify-center bg-black/95 backdrop-blur-md px-4">
-        <BaseCard class="w-full max-w-xl p-10 relative">
-          <button @click="closeModal" class="absolute top-6 right-6 text-gray-500"><X :size="24"/></button>
-          <h3 class="text-2xl font-black text-white mb-8 italic uppercase tracking-tighter">{{ isEditing ? '编辑帖子' : '发布帖子' }}</h3>
-          <div class="space-y-6">
+        <BaseCard class="w-full max-w-xl p-10 relative !bg-zinc-900 border-white/10 shadow-2xl">
+          <button @click="closeModal" class="absolute top-6 right-6 text-gray-500 hover:text-white transition-colors">
+            <X :size="24"/>
+          </button>
+          <h3 class="text-3xl font-black text-white mb-10 italic uppercase tracking-tighter">{{ isEditing ? '编辑帖子' : '发布动态' }}</h3>
+          
+          <div class="space-y-8">
             <div class="grid grid-cols-3 gap-3">
-              <button v-for="t in [{id:'daily', n:'日常'}, {id:'experience', n:'攻略'}, {id:'adopt_help', n:'送养'}]" :key="t.id" @click="publishType = t.id as any" :class="publishType === t.id ? 'bg-orange-500 text-white' : 'bg-white/5 text-gray-500'" class="py-3 rounded-xl text-[10px] font-bold uppercase transition-all">{{ t.n }}</button>
+              <button v-for="t in [{id:'daily', n:'日常分享'}, {id:'experience', n:'养宠攻略'}, {id:'adopt_help', n:'寻主/求助'}]" 
+                      :key="t.id" @click="publishType = t.id as any" 
+                      :class="publishType === t.id ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'bg-white/5 text-gray-500'" 
+                      class="py-4 rounded-xl text-sm font-black uppercase transition-all tracking-widest border border-white/5">
+                {{ t.n }}
+              </button>
             </div>
-            <input v-model="publishForm.title" placeholder="文章标题 (可选)" class="w-full bg-white/5 border border-white/10 rounded-xl px-6 py-4 text-sm text-white outline-none focus:border-orange-500" />
-            <textarea v-model="publishForm.content" class="w-full h-40 bg-white/5 border border-white/10 rounded-2xl p-6 text-white outline-none focus:border-orange-500" placeholder="分享点什么吧..."></textarea>
-            <input v-model="publishForm.image_url" placeholder="封面图片链接 https://..." class="w-full bg-white/5 border border-white/10 rounded-xl px-6 py-4 text-sm text-white outline-none focus:border-orange-500" />
-            <button @click="handlePublish" :disabled="isPublishing" class="w-full bg-orange-500 text-white py-4 rounded-xl font-black text-lg hover:bg-orange-600 transition-all flex justify-center items-center gap-2">
-              <Loader2 v-if="isPublishing" class="animate-spin" :size="20" />{{ isEditing ? '确认修改' : '立即发布' }}
+
+            <input v-model="publishForm.title" placeholder="给动态起个吸睛的标题吧 (可选)" 
+                   class="w-full bg-white/5 border border-white/10 rounded-xl px-6 py-5 text-base text-white outline-none focus:border-orange-500 transition-all font-bold placeholder:font-normal" />
+            
+            <textarea v-model="publishForm.content" 
+                      class="w-full h-48 bg-white/5 border border-white/10 rounded-2xl p-6 text-base text-white outline-none focus:border-orange-500 transition-all leading-relaxed placeholder:font-normal" 
+                      placeholder="这一刻的想法..."></textarea>
+            
+            <!-- 上传预览区域 -->
+            <div class="relative group">
+              <div v-if="publishForm.image_url" class="relative rounded-2xl overflow-hidden border border-white/10 aspect-video bg-black/40 shadow-xl">
+                <video v-if="isVideo(publishForm.image_url)" :src="publishForm.image_url" class="w-full h-full object-contain"></video>
+                <img v-else :src="publishForm.image_url" class="w-full h-full object-cover" />
+                <button @click="publishForm.image_url = ''" class="absolute top-4 right-4 p-2 bg-black/60 text-white rounded-full hover:bg-red-500 transition-all opacity-0 group-hover:opacity-100">
+                  <X :size="18" />
+                </button>
+              </div>
+              
+              <div v-else @click="triggerUpload" 
+                   class="w-full py-16 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-orange-500/50 hover:bg-white/5 transition-all group">
+                <div class="p-5 bg-white/5 rounded-full group-hover:scale-110 transition-all">
+                  <Upload v-if="!isUploading" class="text-gray-500 group-hover:text-orange-500" :size="32" />
+                  <Loader2 v-else class="text-orange-500 animate-spin" :size="32" />
+                </div>
+                <div class="text-center">
+                  <p class="text-sm font-black text-gray-500 uppercase tracking-widest group-hover:text-gray-300">
+                    {{ isUploading ? '正在处理文件...' : '点击上传图片或视频' }}
+                  </p>
+                  <p class="text-xs text-gray-600 mt-2">支持 JPG, PNG, WebP, MP4, WebM (最大 50MB)</p>
+                </div>
+              </div>
+              
+              <input type="file" ref="fileInput" class="hidden" accept="image/*,video/*" @change="handleFileUpload" />
+            </div>
+
+            <button @click="handlePublish" :disabled="isPublishing || isUploading" 
+                    class="w-full bg-orange-500 text-white py-5 rounded-xl font-black text-xl hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex justify-center items-center gap-3 shadow-xl shadow-orange-500/20">
+              <Loader2 v-if="isPublishing" class="animate-spin" :size="24" />
+              {{ isEditing ? '确认修改' : '立即发布动态' }}
             </button>
           </div>
         </BaseCard>
@@ -385,4 +564,8 @@ onMounted(fetchPosts);
 /* @reference "tailwindcss"; */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+</style>
+
+<style scoped>
+/* @reference "tailwindcss"; */
 </style>

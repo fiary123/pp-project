@@ -7,13 +7,19 @@ from src.web.dependencies import get_current_user
 router = APIRouter(prefix="/api", tags=["uploads"])
 
 UPLOAD_DIR = Path("static/uploads")
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-ALLOWED_MIME_PREFIXES = ("image/jpeg", "image/png", "image/webp", "image/gif")
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB (支持视频上传)
+ALLOWED_MIME_PREFIXES = (
+    "image/jpeg", "image/png", "image/webp", "image/gif",
+    "video/mp4", "video/webm", "video/ogg"
+)
 MIME_TO_EXT = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
     "image/gif": ".gif",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/ogg": ".ogv",
 }
 
 # 通过文件魔数（magic bytes）检测真实类型，不依赖扩展名
@@ -23,6 +29,9 @@ MAGIC_SIGNATURES = {
     b"RIFF": "image/webp",   # RIFF....WEBP
     b"GIF87a": "image/gif",
     b"GIF89a": "image/gif",
+    b"\x00\x00\x00\x18ftypmp42": "video/mp4",
+    b"\x00\x00\x00\x20ftypmp42": "video/mp4",
+    b"\x1a\x45\xdf\xa3": "video/webm",
 }
 
 
@@ -33,6 +42,9 @@ def detect_mime_type(header: bytes) -> str | None:
     # WEBP 额外检测
     if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
         return "image/webp"
+    # MP4 更多变种检测 (简单粗暴的查找 ftyp 关键字)
+    if b"ftyp" in header[:20]:
+        return "video/mp4"
     return None
 
 

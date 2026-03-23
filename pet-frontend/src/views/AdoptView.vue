@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch, nextTick } from 'vue';
 import {
   Search, Heart, MapPin, Loader2, X, Wand2, ChevronRight, Edit3, Trash2, Upload,
-  CheckCircle2, AlertTriangle, XCircle, ClipboardList, BrainCircuit, ShieldCheck
+  CheckCircle2, AlertTriangle, XCircle, ClipboardList, BrainCircuit, ShieldCheck,
+  Mic, Send, Volume2
 } from 'lucide-vue-next';
 import { useAuthStore } from '../store/authStore';
 import axios from '../api/index';
@@ -55,6 +56,76 @@ const adoptForm = ref({
   housing_type: 'apartment' as 'apartment' | 'house' | 'other',
   existing_pets: ''
 });
+
+// 宠物语音聊天状态
+const petChatMsg = ref('');
+const petChatHistory = ref<Array<{role: string; content: string; create_time?: string}>>([]);
+const isPetChatLoading = ref(false);
+const petChatScrollRef = ref<HTMLElement | null>(null);
+
+const scrollChatToBottom = async () => {
+  await nextTick();
+  if (petChatScrollRef.value) {
+    petChatScrollRef.value.scrollTop = petChatScrollRef.value.scrollHeight;
+  }
+};
+
+const loadPetChatHistory = async (petName: string) => {
+  const uid = authStore.user?.id;
+  if (!uid) return;
+  try {
+    const res = await axios.get('/api/pet-chat/history', { params: { pet_name: petName, user_id: uid } });
+    petChatHistory.value = res.data || [];
+  } catch {
+    petChatHistory.value = [];
+  }
+  scrollChatToBottom();
+};
+
+const playAudioBase64 = (base64: string) => {
+  try {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: 'audio/mpeg' });
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.play();
+    audio.onended = () => URL.revokeObjectURL(url);
+  } catch (e) {
+    console.warn('语音播放失败', e);
+  }
+};
+
+const handlePetChat = async () => {
+  if (!petChatMsg.value.trim() || !selectedPet.value || isPetChatLoading.value) return;
+  const msgContent = petChatMsg.value;
+  petChatMsg.value = '';
+  // 先在本地追加用户消息
+  petChatHistory.value.push({ role: 'user', content: msgContent });
+  scrollChatToBottom();
+  isPetChatLoading.value = true;
+  try {
+    const res = await axios.post('/api/pet-chat', {
+      pet_name: selectedPet.value.name,
+      pet_species: selectedPet.value.species,
+      pet_desc: selectedPet.value.desc || '',
+      user_msg: msgContent,
+      user_id: authStore.user?.id || null
+    });
+    const replyText = res.data.text || '';
+    petChatHistory.value.push({ role: 'pet', content: replyText });
+    scrollChatToBottom();
+    if (res.data.audio_base64) {
+      playAudioBase64(res.data.audio_base64);
+    }
+  } catch {
+    petChatHistory.value.push({ role: 'pet', content: '喵～暂时无法回应，稍后再试吧' });
+    scrollChatToBottom();
+  } finally {
+    isPetChatLoading.value = false;
+  }
+};
 
 const openAdoptModal = (pet: any) => {
   adoptForm.value.target_species = pet.type === '狗狗' ? 'dog' : 'cat';
@@ -345,6 +416,13 @@ const filteredPets = computed(() => {
     });
   }
   return result.sort((a, b) => b.match - a.match);
+});
+
+// 切换宠物时重置聊天状态并加载历史
+watch(selectedPet, (pet) => {
+  petChatMsg.value = '';
+  petChatHistory.value = [];
+  if (pet) loadPetChatHistory(pet.name);
 });
 
 onMounted(fetchPets);
@@ -762,6 +840,54 @@ onMounted(fetchPets);
               </div>
               <p v-if="recommendedMatches[selectedPet.id]?.mitigation" class="text-xs text-blue-400 bg-blue-500/10 rounded-xl px-4 py-2">💡 {{ recommendedMatches[selectedPet.id].mitigation }}</p>
             </div>
+            <!-- 宠物语音聊天（拟人化互动 + TTS语音 + 长期记忆） -->
+            <div class="bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
+              <div class="flex items-center gap-2 px-5 py-3 border-b border-white/5">
+                <Volume2 class="text-orange-500" :size="14" />
+                <span class="text-xs font-black text-orange-500 uppercase tracking-wider">和 {{ selectedPet.name }} 说说话</span>
+                <span class="ml-auto text-[9px] text-gray-600 uppercase">Edge-TTS · 长期记忆</span>
+              </div>
+              <!-- 历史消息区域 -->
+              <div ref="petChatScrollRef" class="h-48 overflow-y-auto px-4 py-3 space-y-3 scrollbar-hide">
+                <div v-if="petChatHistory.length === 0" class="h-full flex items-center justify-center text-gray-600 text-xs">
+                  快跟 {{ selectedPet.name }} 打个招呼吧 👋
+                </div>
+                <div v-for="(msg, i) in petChatHistory" :key="i"
+                  :class="msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'"
+                  class="flex items-end gap-2">
+                  <div class="w-7 h-7 rounded-full overflow-hidden flex-shrink-0 border border-white/10">
+                    <img v-if="msg.role === 'pet'" :src="selectedPet.img" class="w-full h-full object-cover" />
+                    <img v-else :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${authStore.user?.username || 'me'}`" />
+                  </div>
+                  <div :class="msg.role === 'user'
+                    ? 'bg-orange-500 text-white rounded-tr-none'
+                    : 'bg-white/10 text-gray-200 rounded-tl-none border border-white/5'"
+                    class="max-w-[75%] px-3 py-2 rounded-2xl text-xs leading-relaxed">
+                    {{ msg.content }}
+                  </div>
+                </div>
+                <!-- 加载中气泡 -->
+                <div v-if="isPetChatLoading" class="flex items-end gap-2">
+                  <div class="w-7 h-7 rounded-full overflow-hidden flex-shrink-0 border border-white/10">
+                    <img :src="selectedPet.img" class="w-full h-full object-cover" />
+                  </div>
+                  <div class="bg-white/10 border border-white/5 px-4 py-2 rounded-2xl rounded-tl-none">
+                    <Loader2 class="animate-spin text-orange-500" :size="14" />
+                  </div>
+                </div>
+              </div>
+              <!-- 输入框 -->
+              <div class="flex gap-2 px-4 py-3 border-t border-white/5">
+                <input v-model="petChatMsg" @keyup.enter="handlePetChat" type="text"
+                  :placeholder="`跟${selectedPet.name}说...`"
+                  class="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-2 text-white text-xs outline-none focus:border-orange-500 transition-colors placeholder-gray-600" />
+                <button @click="handlePetChat" :disabled="isPetChatLoading || !petChatMsg.trim()"
+                  class="px-3 py-2 bg-orange-500 disabled:bg-orange-500/40 text-white rounded-2xl transition-all flex items-center">
+                  <Send :size="14" />
+                </button>
+              </div>
+            </div>
+
             <div class="flex gap-4 pt-4">
               <button @click="startAdopt(selectedPet)" class="flex-1 bg-white text-black py-6 rounded-[2rem] font-black text-xl hover:bg-orange-500 hover:text-white transition-all flex items-center justify-center gap-2"><ClipboardList :size="22" />智能申请领养</button>
               <button @click="openFeedbackModal(selectedPet)" class="p-6 bg-white/5 text-white rounded-[2rem] border border-white/10 hover:bg-green-500/20 hover:border-green-500/30 hover:text-green-400 transition-all" title="领养后回访"><Heart :size="28" /></button>
@@ -777,4 +903,6 @@ onMounted(fetchPets);
 /* @reference "tailwindcss"; */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 </style>

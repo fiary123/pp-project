@@ -9,7 +9,7 @@ import base64
 from io import BytesIO
 
 logger = logging.getLogger(__name__)
-from crewai import Agent, Task, Crew, Process
+from crewai import Agent, Task, Crew, Process, LLM
 from crewai.tools import tool
 from langchain_openai import ChatOpenAI # 修改：使用 OpenAI 适配器
 
@@ -60,6 +60,15 @@ llm_vision = ChatOpenAI(
     temperature=0.1   # 视觉分析要求准确，温度设低
 ) if _QWEN_API_KEY else None
 
+# CrewAI 原生 LLM（用于 run_pet_chat 等直接由 CrewAI 驱动的 Agent）
+# CrewAI 新版不再接受 langchain ChatOpenAI 对象，需使用自己的 LLM 类
+crewai_llm = LLM(
+    model="openai/deepseek-chat",
+    api_key=_DEEPSEEK_API_KEY,
+    base_url=_DEEPSEEK_BASE_URL,
+    temperature=0.3
+)
+
 # 连接本地向量库
 try:
     from src.database.db_config import CHROMA_DB_PATH
@@ -89,14 +98,24 @@ async def generate_edge_voice(text: str, pet_species: str):
             audio_data += chunk["data"]
     return audio_data
 
-def run_pet_chat(user_msg: str, pet_name: str, pet_species: str, pet_desc: str):
+def run_pet_chat(user_msg: str, pet_name: str, pet_species: str, pet_desc: str, history: list = None):
     """
     【新功能】宠物拟人化聊天 + 拟人化音色生成
+    history: [{"role": "user"/"pet", "content": "..."}, ...]  最近几轮对话
     """
-    persona_agent = get_pet_persona_agent(llm, pet_name, pet_species, pet_desc)
-    
+    persona_agent = get_pet_persona_agent(crewai_llm, pet_name, pet_species, pet_desc)
+
+    # 将历史记录格式化为上下文提示
+    history_context = ""
+    if history:
+        lines = []
+        for h in history[-6:]:  # 最多取最近6条
+            speaker = "主人" if h["role"] == "user" else pet_name
+            lines.append(f"{speaker}：{h['content']}")
+        history_context = "【之前的对话记录】\n" + "\n".join(lines) + "\n\n"
+
     task = Task(
-        description=f'用户对你说："{user_msg}"。请作为这只宠物进行回复。',
+        description=f'{history_context}用户对你说："{user_msg}"。请作为这只宠物进行回复。',
         expected_output='一段简短、软萌的宠物回复文字。',
         agent=persona_agent
     )

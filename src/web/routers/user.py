@@ -68,6 +68,67 @@ def get_messages(user_id: int, current_user: dict = Depends(get_current_user)):
         rows = [dict(r) for r in cursor.fetchall()]
     return rows
 
+@router.get("/messages/{user_id}/contacts")
+def get_contacts(user_id: int, current_user: dict = Depends(get_current_user)):
+    """获取当前用户的联系人列表（按最新消息时间排序，附带最后一条消息预览）"""
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="无权限查询他人联系人")
+    with get_db() as conn:
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                other_id,
+                u.username AS other_name,
+                last_msg,
+                last_time
+            FROM (
+                SELECT
+                    CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END AS other_id,
+                    content AS last_msg,
+                    create_time AS last_time,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END
+                        ORDER BY create_time DESC
+                    ) AS rn
+                FROM messages
+                WHERE sender_id = ? OR receiver_id = ?
+            ) t
+            LEFT JOIN users u ON u.id = t.other_id
+            WHERE t.rn = 1
+            ORDER BY last_time DESC
+            """,
+            (user_id, user_id, user_id, user_id),
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+    return rows
+
+
+@router.get("/messages/{user_id}/with/{other_id}")
+def get_conversation(user_id: int, other_id: int, current_user: dict = Depends(get_current_user)):
+    """获取与指定用户的对话记录"""
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="无权限查询他人消息")
+    with get_db() as conn:
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT m.*, su.username AS sender_name, ru.username AS receiver_name
+            FROM messages m
+            LEFT JOIN users su ON su.id = m.sender_id
+            LEFT JOIN users ru ON ru.id = m.receiver_id
+            WHERE (m.sender_id = ? AND m.receiver_id = ?)
+               OR (m.sender_id = ? AND m.receiver_id = ?)
+            ORDER BY m.create_time ASC
+            """,
+            (user_id, other_id, other_id, user_id),
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+    return rows
+
+
 @router.post("/messages/send")
 async def send_message(req: MessageCreate, current_user: dict = Depends(get_current_user)):
     # 只允许以自己身份发送消息

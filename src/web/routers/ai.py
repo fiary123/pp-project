@@ -14,6 +14,7 @@ from src.web.services.ai_service import (
     run_adoption_assessment_service,
     get_db
 )
+from src.agents.agents import run_pet_chat
 from src.web.services.assessment_service import AdoptionAssessmentService
 from src.web.dependencies import get_current_user
 from src.web.limiter import limiter
@@ -233,7 +234,11 @@ async def adoption_assess(
 
 @router.get("/pet-chat/history")
 async def get_pet_chat_history(pet_name: str, user_id: int):
+<<<<<<< Updated upstream
     """获取指定用户与指定宠物的历史聊天记录"""
+=======
+    """获取指定用户与指定宠物的历史聊天记录（最近 30 条）"""
+>>>>>>> Stashed changes
     with get_db() as conn:
         from src.web.services.db_service import ensure_tables
         ensure_tables(conn)
@@ -250,7 +255,14 @@ async def get_pet_chat_history(pet_name: str, user_id: int):
 @router.post("/pet-chat")
 @limiter.limit("10/minute")
 async def pet_chat(request: Request, req: PetChatRequest):
+<<<<<<< Updated upstream
     """宠物拟人化聊天 + Edge-TTS 语音，支持长期记忆"""
+=======
+    """
+    宠物拟人化聊天接口：以宠物口吻回复用户，并返回 Edge-TTS 语音 base64。
+    支持长期记忆：从数据库读取历史对话注入上下文，并将本轮对话存入数据库。
+    """
+>>>>>>> Stashed changes
     history = []
     if req.user_id:
         with get_db() as conn:
@@ -272,6 +284,10 @@ async def pet_chat(request: Request, req: PetChatRequest):
         history=history
     )
 
+<<<<<<< Updated upstream
+=======
+    # 存储本轮对话
+>>>>>>> Stashed changes
     if req.user_id:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -285,7 +301,14 @@ async def pet_chat(request: Request, req: PetChatRequest):
             )
             conn.commit()
 
+<<<<<<< Updated upstream
     return {"text": response_text, "audio_base64": audio_base64}
+=======
+    return {
+        "text": response_text,
+        "audio_base64": audio_base64
+    }
+>>>>>>> Stashed changes
 
 
 @router.get("/admin/assessment/report/{trace_id}")
