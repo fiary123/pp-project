@@ -23,13 +23,18 @@ import os
 router = APIRouter(prefix="/api", tags=["ai"])
 
 # 初始化子智能体
+# 使用 DEEPSEEK_API_KEY 和 DEEPSEEK_BASE_URL 明确标识供应商，避免与 OpenAI 混淆。
+# 用户输入将被发送至 DeepSeek 模型服务，请确保符合相关隐私与合规要求。
 class LLMWrapper:
     """为了兼容 CoordinatorAgent 的 llm.ask 接口"""
     def __init__(self):
+        api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("环境变量 DEEPSEEK_API_KEY 未设置，AI 功能无法启动。")
         self.llm = ChatOpenAI(
             model="deepseek-chat",
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
-            openai_api_base=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
+            openai_api_key=api_key,
+            openai_api_base=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
             temperature=0.3
         )
     async def ask(self, prompt: str) -> str:
@@ -228,17 +233,14 @@ async def get_assessment_report(trace_id: str, current_user: dict = Depends(get_
         raise HTTPException(status_code=403, detail="无权查阅 AI 审计日志")
         
     with get_db() as conn:
-        conn.row_factory = json.loads # 简单模拟 Row 转 Dict，实际可能需要处理
         cursor = conn.cursor()
-        # 兼容性处理列名
         cursor.execute("SELECT input_msg, output_msg FROM agent_trace_logs WHERE trace_id = ?", (trace_id,))
         row = cursor.fetchone()
-        
+
     if not row:
         raise HTTPException(status_code=404, detail="未找到相关评估记录")
-        
-    # 由于 sqlite 返回的是 tuple，手动处理
-    input_msg, output_msg = row
+
+    input_msg, output_msg = row[0], row[1]
     assessment_data = json.loads(output_msg)
     
     return {
