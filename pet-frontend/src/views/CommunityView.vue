@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import { 
-  MessageCircle, Heart, Plus, X, Loader2, MessageSquare, Edit3, Trash2
+import {
+  MessageCircle, Heart, Plus, X, Loader2, MessageSquare, Edit3, Trash2,
+  User, Send, Briefcase, Home, Star
 } from 'lucide-vue-next';
 import { useAuthStore } from '../store/authStore';
 import BaseCard from '../components/BaseCard.vue';
@@ -24,6 +25,26 @@ const isPublishing = ref(false);
 
 // 评论管理
 const activePostComments = ref<Record<number, any[]>>({});
+
+// 用户信息弹窗
+const showUserProfile = ref(false);
+const profileUser = ref<any>(null);
+const isLoadingProfile = ref(false);
+
+const openUserProfile = async (userId: number, fallback: any) => {
+  if (!userId || userId >= 1000) return; // 模拟帖子无真实用户
+  profileUser.value = fallback;
+  showUserProfile.value = true;
+  isLoadingProfile.value = true;
+  try {
+    const res = await axios.get(`/api/user/profile/${userId}`);
+    profileUser.value = res.data;
+  } catch {
+    // 保留 fallback 数据
+  } finally {
+    isLoadingProfile.value = false;
+  }
+};
 
 // 模拟帖子生成器
 const generateMockPosts = () => {
@@ -223,13 +244,21 @@ onMounted(fetchPosts);
         <!-- 头部 -->
         <div class="p-6 flex items-center justify-between">
           <div class="flex items-center gap-4">
-            <div class="w-10 h-10 rounded-full border-2 border-orange-500/20 overflow-hidden"><img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${post.username}`" /></div>
+            <button @click="openUserProfile(post.user_id, { id: post.user_id, username: post.username, role: post.role })"
+              class="w-10 h-10 rounded-full border-2 border-orange-500/20 overflow-hidden hover:border-orange-500 transition-all hover:scale-110 flex-shrink-0">
+              <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${post.username}`" />
+            </button>
             <div>
-              <h4 class="font-bold text-white text-sm flex items-center gap-2">{{ post.username }} <span class="text-[8px] bg-orange-500/10 text-orange-500 px-1.5 py-0.5 rounded border border-orange-500/20 uppercase">{{ ({individual:'爱宠人士',org_admin:'救助站',root:'管理员'} as Record<string,string>)[post.role] || post.role }}</span></h4>
+              <h4 class="font-bold text-white text-sm flex items-center gap-2">
+                <button @click="openUserProfile(post.user_id, { id: post.user_id, username: post.username, role: post.role })"
+                  class="hover:text-orange-500 transition-colors">{{ post.username }}</button>
+                <span class="text-[8px] bg-orange-500/10 text-orange-500 px-1.5 py-0.5 rounded border border-orange-500/20 uppercase">
+                  {{ ({individual:'爱宠人士',org_admin:'救助站',root:'管理员'} as Record<string,string>)[post.role] || post.role }}
+                </span>
+              </h4>
               <p class="text-[10px] text-gray-600 font-mono mt-0.5">{{ post.create_time }}</p>
             </div>
           </div>
-          <button @click="$router.push(`/chat?to=${post.user_id}`)" class="p-2 text-gray-500 hover:text-orange-500 transition-colors"><MessageSquare :size="18" /></button>
         </div>
 
         <!-- 内容 -->
@@ -284,8 +313,76 @@ onMounted(fetchPosts);
       </div>
     </Teleport>
   </div>
+
+  <!-- 用户信息弹窗 -->
+  <Teleport to="body">
+    <Transition name="fade">
+      <div v-if="showUserProfile" class="fixed inset-0 z-[600] flex items-center justify-center bg-black/80 backdrop-blur-md px-4"
+        @click.self="showUserProfile = false">
+        <div class="bg-[#111] border border-white/10 rounded-[3rem] w-full max-w-sm p-10 space-y-6 relative">
+          <button @click="showUserProfile = false" class="absolute top-6 right-6 text-gray-500 hover:text-white transition-colors">
+            <X :size="20" />
+          </button>
+
+          <!-- 加载中 -->
+          <div v-if="isLoadingProfile" class="flex justify-center py-8">
+            <Loader2 class="animate-spin text-orange-500" :size="32" />
+          </div>
+
+          <template v-else-if="profileUser">
+            <!-- 头像 + 名字 -->
+            <div class="flex flex-col items-center gap-4 text-center">
+              <div class="w-20 h-20 rounded-3xl border-2 border-orange-500/30 overflow-hidden">
+                <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${profileUser.username}`" class="w-full h-full" />
+              </div>
+              <div>
+                <h3 class="text-2xl font-black text-white">{{ profileUser.username }}</h3>
+                <span class="text-[10px] bg-orange-500/10 text-orange-500 px-2 py-0.5 rounded border border-orange-500/20 uppercase font-black">
+                  {{ ({individual:'爱宠人士', org_admin:'救助站', root:'管理员'} as Record<string,string>)[profileUser.role] || profileUser.role || '用户' }}
+                </span>
+              </div>
+            </div>
+
+            <!-- 用户信息 -->
+            <div class="space-y-3">
+              <div v-if="profileUser.occupation" class="flex items-center gap-3 text-sm text-gray-400">
+                <Briefcase class="text-orange-500 flex-shrink-0" :size="16" />
+                <span>{{ profileUser.occupation }}</span>
+              </div>
+              <div v-if="profileUser.living_env" class="flex items-center gap-3 text-sm text-gray-400">
+                <Home class="text-orange-500 flex-shrink-0" :size="16" />
+                <span>{{ profileUser.living_env }}</span>
+              </div>
+              <div v-if="profileUser.preference" class="flex items-center gap-3 text-sm text-gray-400">
+                <Star class="text-orange-500 flex-shrink-0" :size="16" />
+                <span>偏好：{{ profileUser.preference }}</span>
+              </div>
+              <div v-if="!profileUser.occupation && !profileUser.living_env && !profileUser.preference"
+                class="text-center text-gray-600 text-sm py-2">该用户暂未填写个人资料</div>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="flex gap-3 pt-2">
+              <!-- 不是自己才显示私信按钮 -->
+              <button v-if="authStore.user && authStore.user.id !== profileUser.id"
+                @click="$router.push(`/chat?to=${profileUser.id}`); showUserProfile = false"
+                class="flex-1 bg-orange-500 hover:bg-orange-600 text-white py-4 rounded-2xl font-black flex items-center justify-center gap-2 transition-all">
+                <MessageSquare :size="18" /> 发私信
+              </button>
+              <button @click="showUserProfile = false"
+                class="flex-1 bg-white/10 hover:bg-white/20 text-white py-4 rounded-2xl font-black transition-all">
+                关闭
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
 /* @reference "tailwindcss"; */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

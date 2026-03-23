@@ -132,6 +132,14 @@ class AdoptionAssessmentRequest(BaseModel):
     existing_pets: str = Field(default="", description="家中原住宠物情况，无则留空")
 
 
+class PetChatRequest(BaseModel):
+    pet_name: str
+    pet_species: str
+    pet_desc: str = ""
+    user_msg: str
+    user_id: Optional[int] = None
+
+
 class AdoptionRiskFactor(BaseModel):
     """单条风险因子"""
     dimension: str = Field(description="风险维度，如：经济、时间、经验、住房、动机")

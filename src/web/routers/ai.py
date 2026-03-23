@@ -4,8 +4,9 @@ import json
 from src.web.schemas import (
     ChatRequest, NutritionPlanRequest, SmartMatchRequest,
     NutritionFeedbackRequest, NutritionReplanRequest, AdoptionAssessmentRequest,
-    MatchFollowupRequest, AdoptionFeedbackRequest
+    MatchFollowupRequest, AdoptionFeedbackRequest, PetChatRequest
 )
+from src.agents.agents import run_pet_chat
 from src.web.services.ai_service import (
     get_agent_reply, get_triage_reply, generate_nutrition_plan,
     get_smart_match, get_match_followup_questions, submit_adoption_feedback,
@@ -229,6 +230,63 @@ async def adoption_assess(
         applicant_data=req.model_dump()
     )
     return result
+
+@router.get("/pet-chat/history")
+async def get_pet_chat_history(pet_name: str, user_id: int):
+    """获取指定用户与指定宠物的历史聊天记录"""
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT role, content, create_time FROM pet_chat_history "
+            "WHERE user_id=? AND pet_name=? ORDER BY create_time ASC LIMIT 30",
+            (user_id, pet_name)
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+    return rows
+
+
+@router.post("/pet-chat")
+@limiter.limit("10/minute")
+async def pet_chat(request: Request, req: PetChatRequest):
+    """宠物拟人化聊天 + Edge-TTS 语音，支持长期记忆"""
+    history = []
+    if req.user_id:
+        with get_db() as conn:
+            from src.web.services.db_service import ensure_tables
+            ensure_tables(conn)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT role, content FROM pet_chat_history "
+                "WHERE user_id=? AND pet_name=? ORDER BY create_time ASC LIMIT 10",
+                (req.user_id, req.pet_name)
+            )
+            history = [dict(r) for r in cursor.fetchall()]
+
+    response_text, audio_base64 = run_pet_chat(
+        user_msg=req.user_msg,
+        pet_name=req.pet_name,
+        pet_species=req.pet_species,
+        pet_desc=req.pet_desc,
+        history=history
+    )
+
+    if req.user_id:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO pet_chat_history (user_id, pet_name, role, content) VALUES (?,?,?,?)",
+                (req.user_id, req.pet_name, "user", req.user_msg)
+            )
+            cursor.execute(
+                "INSERT INTO pet_chat_history (user_id, pet_name, role, content) VALUES (?,?,?,?)",
+                (req.user_id, req.pet_name, "pet", response_text)
+            )
+            conn.commit()
+
+    return {"text": response_text, "audio_base64": audio_base64}
+
 
 @router.get("/admin/assessment/report/{trace_id}")
 async def get_assessment_report(trace_id: str, current_user: dict = Depends(get_current_user)):

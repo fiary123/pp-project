@@ -194,6 +194,17 @@ def ensure_tables(conn: sqlite3.Connection):
         FOREIGN KEY (user_id) REFERENCES users(id)
     )''')
 
+    # ── pet_chat_history ───────────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS pet_chat_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        pet_name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pet_chat_history_user_pet ON pet_chat_history(user_id, pet_name)")
+
     # ── adopt_records ──────────────────────────────────────────────────────
     cur.execute('''CREATE TABLE IF NOT EXISTS adopt_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
