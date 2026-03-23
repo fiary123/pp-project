@@ -1,163 +1,231 @@
 import json
+import logging
 from typing import Dict, Any
+
+logger = logging.getLogger(__name__)
+
 
 class CoordinatorAgent:
     """
-    顶层协调智能体 (The Brain)
-    负责意图识别、状态管理、消息路由以及智能体间的数据传递。
+    顶层协调智能体（The Brain）
+    负责：意图识别 → 会话状态管理 → 路由到对应子 Agent Crew → 返回结构化响应
+    所有 Mock 方法已替换为真实 Agent/Crew 调用。
     """
+
     def __init__(self, llm_service, db_session):
         self.llm = llm_service
         self.db = db_session
-        
-        # 假设我们已经有了以下专业子智能体 (后续可以按需导入实际类)
-        # self.demand_agent = DemandUnderstandingAgent(llm_service)
-        # self.match_agent = PetMatchingAgent(db_session)
-        # self.audit_agent = AdoptionAuditAgent(llm_service)
-        # self.wiki_agent = WikiAgent(llm_service)
+        if not hasattr(self, '_session_store'):
+            self._session_store: Dict[str, Dict] = {}
 
-    async def handle_user_input(self, session_id: str, user_id: int, user_message: str) -> Dict[str, Any]:
-        """核心处理管道"""
-        # 1. 读取当前会话状态
+    # ─────────────────────────────────────────────────────────────────
+    # 主入口
+    # ─────────────────────────────────────────────────────────────────
+
+    async def handle_user_input(
+        self,
+        session_id: str,
+        user_id: int,
+        user_message: str,
+        followup_answers: dict | None = None,
+        target_pet_name: str | None = None,
+        target_species: str | None = None,
+    ) -> Dict[str, Any]:
+        """核心处理管道：读状态 → 意图分类 → 路由子 Agent → 更新状态"""
         context = self._get_session_context(session_id)
-        
-        # 2. 意图分类与状态路由
-        if context.get("current_stage") == "auditing":
-            # 如果当前明确在审核阶段，直接路由给审核智能体
-            intent = "adoption_audit"
-        elif context.get("current_stage") == "profiling":
-            # 如果在偏好收集阶段，直接路由给需求智能体
+
+        # 将前端传入的补充信息写入上下文
+        if followup_answers:
+            prefs = context.get("preferences", {})
+            prefs["followup_answers"] = followup_answers
+            prefs["followup_done"] = True
+            context["preferences"] = prefs
+        if target_pet_name:
+            context["target_pet"] = target_pet_name
+        if target_species:
+            context["target_species"] = target_species
+
+        # 已处于明确阶段时直接路由，避免重复意图分类
+        stage = context.get("current_stage", "idle")
+        if stage == "profiling":
             intent = "preference_collection"
+        elif stage == "auditing":
+            intent = "adoption_audit"
         else:
-            # 自由对话阶段，调用 LLM 进行意图识别
             intent = await self._classify_intent(user_message)
 
-        # 3. 根据意图分发给特定的子智能体，并传递必要的结构化数据
         response_data = await self._route_to_agent(intent, user_message, context, user_id)
-        
-        # 4. 更新并持久化状态
         self._save_session_context(session_id, response_data["new_context"])
-        
-        # 返回给前端的最终响应
+
         return {
-            "reply": response_data["reply"],
-            "ui_actions": response_data.get("ui_actions", []), # 控制前端展现哪些卡片 (如宠物列表)
-            "stage": response_data["new_context"].get("current_stage", "idle")
+            "reply":      response_data["reply"],
+            "ui_actions": response_data.get("ui_actions", []),
+            "stage":      response_data["new_context"].get("current_stage", "idle"),
         }
+
+    # ─────────────────────────────────────────────────────────────────
+    # 意图识别
+    # ─────────────────────────────────────────────────────────────────
 
     async def _classify_intent(self, message: str) -> str:
-        """
-        [步骤一] 意图识别：将用户的话分类到不同的技能路径
-        """
-        prompt = f"""
-        你是一个宠物领养平台的中央调度员。请分析用户的输入，将其归类为以下意图之一：
-        - "preference_collection": 表达对宠物的喜好，或描述自己的生活状态（如“我想养只猫”、“我一个人住”）。
-        - "adoption_audit": 明确表达要申请领养某只具体的宠物。
-        - "knowledge_qa": 询问养宠相关的知识或问题（如“布偶猫怎么养”、“狗吃什么好”）。
-        - "general_chat": 无意义的闲聊或打招呼。
-        
-        用户输入: "{message}"
-        请仅返回上述意图的英文关键字。
-        """
-        response = await self.llm.ask(prompt)
-        return response.strip().lower()
+        prompt = f"""你是宠物领养平台的中央调度员。请将用户输入归类为以下意图之一：
+- preference_collection：表达对宠物的喜好，或描述自己的生活状态
+- adoption_audit：明确申请领养某只具体宠物
+- knowledge_qa：询问养宠相关知识
+- general_chat：无意义的闲聊或打招呼
 
-    async def _route_to_agent(self, intent: str, message: str, context: Dict, user_id: int) -> Dict:
-        """
-        [步骤二 & 三] 读取状态 -> 调用子智能体 -> 接收结构化输出
-        """
+用户输入："{message}"
+只返回上述意图的英文关键字，不要其他文字。"""
+        try:
+            response = await self.llm.ask(prompt)
+            intent = response.strip().lower()
+            valid = {"preference_collection", "adoption_audit", "knowledge_qa", "general_chat"}
+            return intent if intent in valid else "general_chat"
+        except Exception as e:
+            logger.warning(f"Intent classification failed: {e}")
+            return "general_chat"
+
+    # ─────────────────────────────────────────────────────────────────
+    # 路由分发
+    # ─────────────────────────────────────────────────────────────────
+
+    async def _route_to_agent(
+        self, intent: str, message: str, context: Dict, user_id: int
+    ) -> Dict:
         new_context = context.copy()
         reply_text = ""
-        ui_actions = []
+        ui_actions: list = []
 
+        # ── 偏好收集与宠物匹配 ───────────────────────────────────────
         if intent == "preference_collection":
-            # 路由到：需求理解智能体
             new_context["current_stage"] = "profiling"
-            # 模拟调用: result = await self.demand_agent.process(message, context.get("preferences", {}))
-            result = await self._mock_demand_agent(message, context)
-            
-            if result["is_complete"]:
-                # 如果需求收集完成，自动流转到：匹配推荐智能体
-                new_context["current_stage"] = "matching_done"
-                new_context["preferences"] = result["preferences"]
-                
-                # 模拟调用: match_result = self.match_agent.match(result["preferences"])
-                match_result = self._mock_match_agent(result["preferences"])
-                
-                reply_text = f"我已经完全了解您的需求了！结合您的画像（{result['preferences']['living_env']}，能陪伴{result['preferences']['time_budget']}），我为您找到了最匹配的几位毛孩子，请看推荐列表👇"
-                ui_actions.append({"type": "show_pet_list", "data": match_result["pets"]})
+            prefs = context.get("preferences", {})
+
+            # 第一轮：生成追问（NeedAnalyzer Agent + generate_followup_questions 工具）
+            if not prefs.get("followup_done"):
+                try:
+                    from src.agents.agents import run_match_followup
+                    questions = run_match_followup(message)
+                    new_context["preferences"] = {"initial_query": message}
+                    new_context["followup_questions"] = questions
+                    # 把追问拼成自然语言追问
+                    q_texts = [f"{i+1}. {q['question']}" for i, q in enumerate(questions)]
+                    reply_text = (
+                        f"好的！我来帮您找最合适的宠物 🐾\n\n"
+                        f"为了更精准地匹配，请回答以下几个问题：\n\n"
+                        + "\n".join(q_texts)
+                    )
+                    ui_actions.append({"type": "show_followup_questions", "data": questions})
+                except Exception as e:
+                    logger.warning(f"run_match_followup failed: {e}")
+                    reply_text = "您好！能告诉我您希望宠物是什么性格？以及您的居住环境大概是什么样的？"
+
+            # 第二轮：收到追问答案后执行匹配（MatchScorer + MatchAdvisor Crew）
             else:
-                # 需求还不完整，返回追问
-                new_context["preferences"] = result["preferences"]
-                reply_text = result["follow_up_question"]
+                initial_query = prefs.get("initial_query", message)
+                followup_answers = prefs.get("followup_answers", {})
+                try:
+                    # 从数据库查询待领养宠物
+                    pet_list = self._get_available_pets()
+                    from src.agents.agents import run_smart_match
+                    matches = run_smart_match(initial_query, pet_list, followup_answers)
+                    new_context["current_stage"] = "matching_done"
+                    new_context["last_matches"] = [m["id"] for m in matches]
+                    reply_text = (
+                        f"根据您的需求，我为您精选了以下宠物，请看推荐列表 👇\n"
+                        f"（每只都附有匹配度分析和潜在挑战说明）"
+                    )
+                    ui_actions.append({"type": "show_pet_list", "data": matches})
+                except Exception as e:
+                    logger.warning(f"run_smart_match failed: {e}")
+                    reply_text = "正在为您匹配合适的宠物，请稍候..."
 
-        elif intent == "adoption_audit":
-            # 路由到：资质审核智能体
-            new_context["current_stage"] = "auditing"
-            target_pet = context.get("target_pet", "未知宠物")
-            
-            # 模拟调用审核逻辑
-            reply_text = f"好的，您想要申请领养【{target_pet}】。为了对毛孩子负责，我们需要进行一个简短的评估。请问您家里封窗了吗？如果猫咪抓坏了沙发您会怎么处理？"
-
+        # ── 知识问答（KnowledgeRetriever + KnowledgeAdvisor Crew）────
         elif intent == "knowledge_qa":
-            # 路由到：百科知识智能体
-            # 模拟调用: reply_text = await self.wiki_agent.answer(message)
-            reply_text = "关于您问的知识，根据《宠物饲养百科》：..."
-            new_context["current_stage"] = "idle" # 问答结束回到空闲态
+            new_context["current_stage"] = "idle"
+            try:
+                from src.agents.agents import run_knowledge_expert
+                reply_text = run_knowledge_expert(message)
+            except Exception as e:
+                logger.warning(f"run_knowledge_expert failed: {e}")
+                reply_text = "知识库查询中，请稍候... 如急需帮助，可直接联系我们的客服。"
 
+        # ── 领养资质评估（五层架构 CrewAI）──────────────────────────
+        elif intent == "adoption_audit":
+            new_context["current_stage"] = "auditing"
+            target_pet = context.get("target_pet", "")
+            try:
+                from src.agents.agents import run_adoption_assessment
+                # 从会话上下文中取已收集到的信息
+                prefs = context.get("preferences", {})
+                result = run_adoption_assessment(
+                    applicant_info=message,
+                    target_species=context.get("target_species", "cat"),
+                    target_pet_name=target_pet or "未指定",
+                    monthly_budget=float(prefs.get("monthly_budget", 0)),
+                    daily_companion_hours=float(prefs.get("daily_companion_hours", 0)),
+                    has_pet_experience=bool(prefs.get("has_pet_experience", False)),
+                    housing_type=prefs.get("housing_type", "apartment"),
+                    existing_pets=prefs.get("existing_pets", ""),
+                )
+                score = result.get("readiness_score", 0)
+                decision = result.get("decision", "review_required")
+                decision_text = {
+                    "pass": "✅ 初步评估通过",
+                    "conditional_pass": "⚠️ 条件通过（需补充材料）",
+                    "review_required": "📋 需要人工复核",
+                    "reject": "❌ 暂不建议领养"
+                }.get(decision, "📋 需要人工复核")
+                reply_text = (
+                    f"**领养资质评估结果**\n\n"
+                    f"准备度评分：**{score}/100**\n"
+                    f"评估结论：{decision_text}\n\n"
+                    f"{result.get('final_summary', '')}"
+                )
+                new_context["current_stage"] = "audit_done"
+                new_context["last_assessment"] = {"score": score, "decision": decision}
+                ui_actions.append({"type": "show_assessment_result", "data": result})
+            except Exception as e:
+                logger.warning(f"run_adoption_assessment failed: {e}")
+                reply_text = (
+                    f"正在对您申请领养【{target_pet or '该宠物'}】进行资质评估，请描述一下您的居住环境和养宠经历，"
+                    f"我们会尽快给出评估报告。"
+                )
+
+        # ── 通用对话 ─────────────────────────────────────────────────
         else:
-            reply_text = "您好！我是您的宠物领养匹配官。您可以告诉我您想养什么宠物，或者描述一下您的生活状态，我帮您推荐~"
+            new_context["current_stage"] = "idle"
+            reply_text = (
+                "您好！我是您的宠物领养匹配官 🐾\n\n"
+                "您可以：\n"
+                "• 告诉我您的生活情况，我帮您推荐合适的宠物\n"
+                "• 询问任何养宠相关的知识\n"
+                "• 说出您想领养的宠物名称，我为您进行资质评估"
+            )
 
-        return {
-            "reply": reply_text,
-            "ui_actions": ui_actions,
-            "new_context": new_context
-        }
+        return {"reply": reply_text, "ui_actions": ui_actions, "new_context": new_context}
 
-    # --- 以下为模拟子智能体行为的 Mock 方法（实际应替换为真实的 Agent 类调用） ---
-    
-    async def _mock_demand_agent(self, message: str, context: Dict):
-        """模拟需求理解智能体"""
-        prefs = context.get("preferences", {})
-        prompt = f"""
-        你是一个宠物需求提取器。用户输入: "{message}"
-        当前已有信息: {json.dumps(prefs)}
-        请提取新信息并与已有信息合并。如果已知信息包含了居住环境(living_env)和每日陪伴时间(time_budget)，则标记 is_complete 为 true，否则生成一个追问(follow_up_question)。
-        返回 JSON。
-        """
-        # 这里硬编码模拟 LLM 返回
-        if "一个人住" in message or "上班" in message:
-            return {
-                "is_complete": False,
-                "preferences": {"living_env": "公寓", "time_budget": "下班后"},
-                "follow_up_question": "明白了，您是上班族。那您周末有时间带它出去玩吗？还是更希望它能在家里安静陪伴您？"
-            }
-        else:
-            # 假设第二轮回答触发完成
-            return {
-                "is_complete": True,
-                "preferences": {"living_env": "公寓", "time_budget": "周末有空", "energy_level": "安静"},
-                "follow_up_question": ""
-            }
+    # ─────────────────────────────────────────────────────────────────
+    # 辅助方法
+    # ─────────────────────────────────────────────────────────────────
 
-    def _mock_match_agent(self, preferences: Dict):
-        """模拟匹配推荐智能体"""
-        return {
-            "pets": [
-                {"id": 1, "name": "布偶猫", "match_score": 92, "reason": "布偶猫性格安静，适合公寓饲养，能适应您上班时的独处。"},
-                {"id": 2, "name": "英国短毛猫", "match_score": 88, "reason": "独立性强，不需要过多运动，非常契合您的时间预算。"}
-            ]
-        }
+    def _get_available_pets(self) -> list:
+        """从数据库查询所有待领养宠物"""
+        try:
+            with self.db() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, name, species, energy_level, is_shedding, description "
+                    "FROM pets WHERE status = '待领养' LIMIT 30"
+                )
+                rows = cursor.fetchall()
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.warning(f"_get_available_pets failed: {e}")
+            return []
 
-    # --- 状态持久化存取 ---
     def _get_session_context(self, session_id: str) -> Dict:
-        # 实际项目中应从 Redis 或 数据库 (sessions 表) 读取
-        # 这里用内存临时模拟
-        if not hasattr(self, '_session_store'):
-            self._session_store = {}
         return self._session_store.get(session_id, {"current_stage": "idle"})
 
     def _save_session_context(self, session_id: str, context: Dict):
-        if not hasattr(self, '_session_store'):
-            self._session_store = {}
         self._session_store[session_id] = context

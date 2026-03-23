@@ -139,24 +139,28 @@ def get_encyclopedia_agent(llm):
     return Agent(
         role='宠物品种百科专家',
         goal='从知识库中精确提取目标宠物品种的标准养护需求，输出结构化 Baseline 供后续专家使用。',
-        backstory='''你是一名拥有 20 年从业经验的宠物行为学家与品种研究专家，
-        熟悉各品种宠物的空间需求、运动量等级、陪伴依赖性、健康风险与日常养护成本。
-
-        你的输出必须包含以下六个维度，以 JSON 格式返回：
-        {
-          "space_requirement": "适合的居住环境（公寓可/需独立院子/均可）",
-          "exercise_level": "低/中/高，每日建议运动时长（分钟）",
-          "companionship_need": "独处耐受度（高/中/低），是否有分离焦虑风险",
-          "monthly_cost_range": "月均养护成本区间（元/月），含食物/医疗/美容",
-          "beginner_friendly": true或false，以及理由说明,
-          "special_notes": "该品种特有的健康风险、行为特点或照护难点"
-        }
-
-        如果知识库中无法检索到该品种的详细信息，请基于你的专业知识给出合理估算，并注明"基于专业知识估算"。''',
+        backstory=(
+            '你是一名拥有 20 年从业经验的宠物行为学家与品种研究专家，\n'
+            '熟悉各品种宠物的空间需求、运动量等级、陪伴依赖性、健康风险与日常养护成本。\n\n'
+            '【工具调用规则】\n'
+            '第一步：调用 pet_health_knowledge_search，以品种名称为关键词检索知识库。\n'
+            '第二步：检查结果是否包含该品种的具体养护数据。\n'
+            '  - 如果首次检索结果不相关（无品种特异性内容），换用品种的别名或英文名重新检索，最多尝试两次。\n'
+            '  - 两次均无结果时，基于专业知识给出合理估算，并在 special_notes 中注明"基于专业知识估算"。\n\n'
+            '你的输出必须包含以下六个维度，以 JSON 格式返回：\n'
+            '{\n'
+            '  "space_requirement": "适合的居住环境（公寓可/需独立院子/均可）",\n'
+            '  "exercise_level": "低/中/高，每日建议运动时长（分钟）",\n'
+            '  "companionship_need": "独处耐受度（高/中/低），是否有分离焦虑风险",\n'
+            '  "monthly_cost_range": "月均养护成本区间（元/月），含食物/医疗/美容",\n'
+            '  "beginner_friendly": true或false，以及理由说明,\n'
+            '  "special_notes": "该品种特有的健康风险、行为特点或照护难点"\n'
+            '}'
+        ),
         llm=llm,
         tools=[pet_health_knowledge_search],
         verbose=True,
-        max_iter=2,
+        max_iter=3,
         allow_delegation=False
     )
 
@@ -251,6 +255,6 @@ def get_cohabitation_risk_agent(llm):
         llm=llm,
         tools=[pet_health_knowledge_search],
         verbose=True,
-        max_iter=2,
+        max_iter=3,
         allow_delegation=False
     )

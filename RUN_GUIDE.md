@@ -97,15 +97,65 @@ ipconfig
 
 ---
 
-## 6. 注意事项
+## 6. 安全配置（必读）
 
-- **AI 功能**：智能匹配、宠物专家等功能依赖 LLM，请确保根目录 `.env` 文件中已正确配置 `OPENAI_API_KEY`。
-- **知识库**：ChromaDB 知识库位于 `src/database/data/knowledge`，如需更新请运行 `python src/database/sync_data.py`。
-- **智能接口降级**：AI 接口不可用时自动降级为规则/模板回复，保证系统基本可用性。
+### 6.1 JWT 密钥
+
+`JWT_SECRET_KEY` **必须**设置，否则后端启动时会直接报错退出。
+请用以下命令生成一个高强度随机密钥，填入 `.env`：
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+### 6.2 AI 模型配置（DeepSeek）
+
+本项目使用 **DeepSeek** 模型服务（兼容 OpenAI 接口），在 `.env` 中配置：
+
+```env
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
+
+> **隐私说明**：用户在聊天、分诊、营养方案、领养评估等功能中输入的文字内容会被发送至 DeepSeek 模型服务进行处理。
+> 请在实际部署前确认：
+> - 是否符合所在组织/学校的数据合规要求
+> - 是否需要向用户展示数据处理声明
+> - DeepSeek 服务隐私政策：https://www.deepseek.com/privacy
+
+如需替换为其他模型（如本地 Ollama、其他 API），修改以下两个环境变量即可：
+```env
+DEEPSEEK_BASE_URL=http://localhost:11434/v1   # Ollama 示例
+DEEPSEEK_API_KEY=ollama                        # Ollama 不需要真实 key
+```
+
+### 6.3 CORS 跨域白名单
+
+默认仅允许本地开发端口，**生产部署时必须修改**：
+
+```env
+CORS_ALLOWED_ORIGINS=https://your-domain.com,https://www.your-domain.com
+```
+
+### 6.4 Token 有效期
+
+默认 60 分钟，调试时可临时改为 1440（24 小时）：
+
+```env
+ACCESS_TOKEN_EXPIRE_MINUTES=1440
+```
 
 ---
 
-## 7. 已有接口清单
+## 7. 注意事项
+
+- **知识库**：ChromaDB 知识库位于 `src/database/data/knowledge`，如需更新请运行 `python src/database/sync_data.py`。
+- **智能接口降级**：AI 接口不可用时自动降级为规则/模板回复，保证系统基本可用性。
+- **`.env` 文件**：包含敏感密钥，已加入 `.gitignore`，请勿提交到版本库。
+
+---
+
+## 8. 已有接口清单
 
 - 认证：`/api/register`, `/api/login`
 - 宠物：`/api/pets`, `/api/pets/{id}`, `/api/pets/smart-match`
@@ -117,7 +167,7 @@ ipconfig
 
 ---
 
-## 8. 功能模块说明
+## 9. 功能模块说明
 
 | 模块 | 前端路径 | 说明 |
 | :--- | :--- | :--- |

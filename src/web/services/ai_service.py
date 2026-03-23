@@ -6,6 +6,7 @@ import json
 import logging
 from typing import List, Optional, Tuple
 from src.agents.nutrition_planner import build_nutrition_plan, render_nutrition_markdown
+from src.agents.agents import run_nutrition_expert, run_nutrition_replan
 from src.web.services.db_service import get_db
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
@@ -16,10 +17,11 @@ logger = logging.getLogger(__name__)
 class AIService:
     """统一的 AI 服务接口"""
     def __init__(self):
+        api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
         self.llm = ChatOpenAI(
             model="deepseek-chat",
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
-            openai_api_base=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
+            openai_api_key=api_key,
+            openai_api_base=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
             temperature=0.3
         )
 
@@ -68,202 +70,78 @@ def get_agent_reply(user_msg: str) -> Tuple[str, str]:
     _log_agent_trace(trace_id, "chat", agent_name, user_msg, reply, latency, fallback)
     return reply, trace_id
 
-def get_triage_reply(symptom: str) -> Tuple[str, str]:
-    """调用分诊专家 Agent，返回 (reply, trace_id)"""
+def get_triage_reply(symptom: str, image_bytes: bytes | None = None) -> Tuple[str, str]:
+    """
+    调用分诊专家 Agent，返回 (reply, trace_id)。
+    image_bytes 不为空时，先由 Qwen-VL 分析图片，再交给 DeepSeek MedicalExpert 推理。
+    """
     trace_id = str(uuid.uuid4())
     start_time = time.time()
     fallback = False
-    agent_name = "TriageExpert"
-    
+    agent_name = "TriageExpert(DeepSeek)" if not image_bytes else "TriageExpert(QwenVL+DeepSeek)"
+
     try:
         from src.agents.agents import run_triage_expert
-        reply = run_triage_expert(symptom)
+        reply = run_triage_expert(symptom, image_bytes=image_bytes)
     except Exception as e:
         logger.warning(f"Triage Service Error (fallback activated): {e}")
         reply = f"医生智能系统正在诊断中，针对您的症状：{symptom}，我们建议您观察 2-4 小时。"
         fallback = True
-    
+
     latency = int((time.time() - start_time) * 1000)
     _log_agent_trace(trace_id, "triage", agent_name, symptom, reply, latency, fallback)
     return reply, trace_id
 
 def get_match_followup_questions(user_query: str) -> List[dict]:
     """
-    创新点1：基于用户的初始描述，由 LLM 生成 2-3 个针对性追问。
-    用于将模糊的情感表达转化为结构化偏好维度（活跃度/空间/时间/经验等）。
-    返回追问列表：[{"key": "activity_level", "question": "...", "options": [...]}]
+    创新点1：需求显化 Agent（CrewAI）。
+    调用 run_match_followup，由 NeedAnalyzer Agent 通过 generate_followup_questions 工具
+    识别用户描述中的信息缺口，生成 2-3 个结构化追问，将模糊偏好转化为可量化维度。
     """
     try:
-        import os
-        from langchain_openai import ChatOpenAI
-        from dotenv import load_dotenv
-        load_dotenv()
-        llm = ChatOpenAI(
-            model="deepseek-chat",
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
-            openai_api_base=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
-            temperature=0.4
-        )
-        prompt = f"""用户正在寻找宠物，他们说："{user_query}"
-
-基于这段描述，你需要提出 2-3 个追问，帮助更准确地了解他们的需求。
-每个追问都应该针对他们描述中的模糊点或隐性偏好。
-
-请用 JSON 数组格式输出，每个元素包含：
-- key: 偏好维度标识符（如 activity_level / living_space / time_availability / experience_level / allergic）
-- question: 中文追问问题（15-25字，口语化，友好）
-- options: 2-4个选项的字符串数组（简洁，5字以内）
-
-示例输出：
-[
-  {{"key": "activity_level", "question": "您希望这只宠物平时是活泼好动还是安静陪伴型的？", "options": ["活泼爱玩", "温和安静", "都可以"]}},
-  {{"key": "living_space", "question": "您住的地方大概有多大，方便宠物活动吗？", "options": ["小公寓(60㎡以下)", "中等户型(60-120㎡)", "大户型/别墅"]}}
-]
-
-只输出 JSON 数组，不要其他文字。"""
-        response = llm.invoke(prompt)
-        content = response.content.strip()
-        # 提取 JSON
-        import re
-        json_match = re.search(r'\[[\s\S]*\]', content)
-        if json_match:
-            questions = json.loads(json_match.group())
-            return questions[:3]
+        from src.agents.agents import run_match_followup
+        return run_match_followup(user_query)
     except Exception as e:
-        logger.warning(f"Followup question generation failed: {e}")
-    # 降级：返回默认追问
+        logger.warning(f"run_match_followup failed, using default questions: {e}")
     return [
-        {"key": "activity_level", "question": "您更希望宠物是活泼好动还是安静乖巧的？", "options": ["活泼好动", "安静乖巧", "都可以"]},
-        {"key": "living_space", "question": "您的居住空间大概是什么情况？", "options": ["小型公寓", "中等户型", "带院子的大户型"]},
-        {"key": "time_availability", "question": "平时每天能陪伴宠物大概多长时间？", "options": ["2小时以内", "2-4小时", "4小时以上"]}
+        {"key": "activity_level",   "question": "您更希望宠物是活泼好动还是安静乖巧的？", "options": ["活泼好动", "安静乖巧", "都可以"]},
+        {"key": "living_space",     "question": "您的居住空间大概是什么情况？",             "options": ["小型公寓", "中等户型", "带院子的大户型"]},
+        {"key": "time_availability","question": "平时每天能陪伴宠物大概多长时间？",          "options": ["2小时以内", "2-4小时", "4小时以上"]}
     ]
 
 
 def get_smart_match(user_query: str, pet_list: List[dict], followup_answers: Optional[dict] = None) -> List[dict]:
     """
-    创新点1+3：LLM 语义匹配 + 结构化可解释推荐。
-    当 followup_answers 不为空时，将追问答案合并到偏好上下文，由 LLM 生成
-    结构化匹配理由（适配优势 / 潜在挑战 / 弥合建议），替代原关键词匹配。
+    创新点1+3：两 Agent 串联 CrewAI（工具评分 + 语义解读）。
+    - MatchScorer Agent：调用 score_pet_match 工具，基于用户偏好画像进行多维结构化评分
+    - MatchAdvisor Agent：读取评分数据，生成人性化推荐理由（适配优势/潜在挑战/弥合建议）
+    LLM 不能自行决定分数，评分结果来自工具，推荐理由基于工具数据生成，保证可解释性。
     """
-    # 构建完整的偏好描述
-    context_parts = [f"用户需求：{user_query}"]
-    if followup_answers:
-        for key, answer in followup_answers.items():
-            key_labels = {
-                "activity_level": "活跃度偏好",
-                "living_space": "居住空间",
-                "time_availability": "可陪伴时长",
-                "experience_level": "养宠经验",
-                "allergic": "过敏情况"
-            }
-            label = key_labels.get(key, key)
-            context_parts.append(f"{label}：{answer}")
-    full_context = "；".join(context_parts)
-
-    # 尝试 LLM 语义匹配
     try:
-        import os
-        from langchain_openai import ChatOpenAI
-        from dotenv import load_dotenv
-        load_dotenv()
-        llm = ChatOpenAI(
-            model="deepseek-chat",
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
-            openai_api_base=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
-            temperature=0.3
-        )
-        # 构建宠物摘要列表（避免 token 过多）
-        pet_summaries = []
-        for p in pet_list[:30]:  # 限制数量
-            tags = p.get('tags', [])
-            tags_str = "、".join(tags) if isinstance(tags, list) else str(tags)
-            pet_summaries.append({
-                "id": p.get("id"),
-                "name": p.get("name", ""),
-                "species": p.get("species", ""),
-                "type": p.get("type", ""),
-                "tags": tags_str,
-                "desc": (p.get("desc") or "")[:50]
-            })
-
-        prompt = f"""你是一个宠物匹配专家。用户画像：{full_context}
-
-以下是可选宠物列表（JSON）：
-{json.dumps(pet_summaries, ensure_ascii=False)}
-
-请从中挑选最合适的 5 只，为每只生成结构化的个性化推荐理由。
-
-输出 JSON 数组，每个元素：
-- id: 宠物ID（整数）
-- fit_score: 契合度分数（0-100整数）
-- reason: 一句话推荐理由（20字内，口语化）
-- fit_advantages: 适配优势（数组，每项10-15字，列2-3条）
-- potential_challenges: 潜在挑战（数组，每项10-15字，列1-2条，没有则为空数组）
-- mitigation: 弥合建议（一句话，针对挑战，没挑战可不填，为空字符串）
-
-只输出 JSON 数组，不要其他文字。"""
-
-        response = llm.invoke(prompt)
-        content = response.content.strip()
-        import re
-        json_match = re.search(r'\[[\s\S]*\]', content)
-        if json_match:
-            matches = json.loads(json_match.group())
-            # 验证并清洗结果
-            result = []
-            for m in matches[:5]:
-                if m.get("id") is not None:
-                    result.append({
-                        "id": m["id"],
-                        "fit_score": m.get("fit_score", 80),
-                        "reason": m.get("reason", "综合推荐"),
-                        "fit_advantages": m.get("fit_advantages", []),
-                        "potential_challenges": m.get("potential_challenges", []),
-                        "mitigation": m.get("mitigation", "")
-                    })
-            if result:
-                return result
+        from src.agents.agents import run_smart_match
+        return run_smart_match(user_query, pet_list, followup_answers)
     except Exception as e:
-        logger.warning(f"LLM smart match failed, falling back to keyword match: {e}")
+        logger.warning(f"run_smart_match failed, falling back to keyword match: {e}")
 
     # 降级：关键词匹配（兜底）
-    WEIGHTS = {"species": 3, "tags": 2, "desc": 1, "name": 1}
-    keywords = [w.strip() for w in full_context.replace('，', ',').replace(' ', ',').split(',') if w.strip()]
+    context_parts = [user_query]
+    if followup_answers:
+        context_parts.extend(str(v) for v in followup_answers.values())
+    keywords = [w.strip() for w in "，".join(context_parts).replace(" ", "，").split("，") if w.strip()]
 
     scored = []
     for pet in pet_list:
-        score = 0
-        matched_reasons = []
-        species_text = (pet.get('species') or '').lower()
-        for kw in keywords:
-            if kw in species_text:
-                score += WEIGHTS["species"]
-                matched_reasons.append(f'物种匹配"{kw}"')
-        for tag in (pet.get('tags') or []):
-            for kw in keywords:
-                if kw in str(tag).lower():
-                    score += WEIGHTS["tags"]
-                    matched_reasons.append(f'标签匹配"{kw}"')
-        desc_text = (pet.get('desc') or '').lower()
-        for kw in keywords:
-            if kw in desc_text:
-                score += WEIGHTS["desc"]
-                matched_reasons.append(f'描述匹配"{kw}"')
-        reason_str = "、".join(matched_reasons[:3]) if matched_reasons else "综合推荐"
-        scored.append((score, pet, reason_str))
-
+        score = sum(
+            3 if kw in (pet.get("species") or "") else
+            1 if kw in (pet.get("desc") or pet.get("description") or "") else 0
+            for kw in keywords
+        )
+        scored.append((score, pet))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [
-        {
-            "id": p.get("id"),
-            "fit_score": min(95, 60 + s * 5),
-            "reason": f"与您的需求高度契合（{r}）",
-            "fit_advantages": [r] if r != "综合推荐" else ["综合条件匹配"],
-            "potential_challenges": [],
-            "mitigation": ""
-        }
-        for s, p, r in scored[:5]
-        if p.get("id") is not None
+        {"id": p.get("id"), "fit_score": min(95, 60 + s * 5),
+         "reason": "综合条件推荐", "fit_advantages": [], "potential_challenges": [], "mitigation": ""}
+        for s, p in scored[:5] if p.get("id") is not None
     ]
 
 
@@ -311,21 +189,28 @@ def submit_adoption_feedback(
     return feedback_id
 
 def generate_nutrition_plan(data: dict) -> Tuple[dict, str, str, int]:
-    """生成初始营养方案，并存入数据库"""
+    """生成初始营养方案（2-Agent 流水线：NutritionCalculator → NutritionPlanner），并存入数据库"""
     trace_id = str(uuid.uuid4())
     start_time = time.time()
-    
-    # 过滤掉 build_nutrition_plan 不支持的业务字段
-    logic_data = {k: v for k, v in data.items() if k not in ["user_id", "pet_name"]}
-    plan = build_nutrition_plan(**logic_data)
-    
+
+    # 调用 2-Agent CrewAI 流水线：
+    #   Agent1 NutritionCalculator 调用工具计算热量+禁忌清单
+    #   Agent2 NutritionPlanner    接收 context，输出解读 Markdown
+    try:
+        result = run_nutrition_expert(data)
+        plan = result["plan"]
+        markdown = result["explanation_markdown"]
+    except Exception as e:
+        logger.warning(f"run_nutrition_expert failed, fallback to math: {e}")
+        logic_data = {k: v for k, v in data.items() if k not in ["user_id", "pet_name"]}
+        plan = build_nutrition_plan(**logic_data)
+        markdown = render_nutrition_markdown(data.get('species', 'cat'), plan)
+
     # 增加精细化字段
-    plan["confidence_level"] = 0.95
-    plan["recheck_in_days"] = 14
-    plan["requires_vet"] = False
-    
-    markdown = render_nutrition_markdown(data.get('species', 'cat'), plan)
-    
+    plan.setdefault("confidence_level", 0.95)
+    plan.setdefault("recheck_in_days", 14)
+    plan.setdefault("requires_vet", False)
+
     # 持久化到数据库
     with get_db() as conn:
         cursor = conn.cursor()
@@ -335,10 +220,10 @@ def generate_nutrition_plan(data: dict) -> Tuple[dict, str, str, int]:
         )
         plan_id = cursor.lastrowid
         conn.commit()
-    
+
     latency = int((time.time() - start_time) * 1000)
-    _log_agent_trace(trace_id, "nutrition", "NutritionPlanner", str(data), "Initial Plan Generated", latency)
-    
+    _log_agent_trace(trace_id, "nutrition", "NutritionCalculator+NutritionPlanner", str(data), "Initial Plan Generated", latency)
+
     return plan, markdown, trace_id, plan_id
 
 def submit_nutrition_feedback(data: dict) -> int:
@@ -471,30 +356,68 @@ def replan_nutrition(plan_id: int, feedback_id: int) -> Tuple[dict, str, str]:
         raise ValueError(f"方案数据损坏，无法解析: {e}")
     feedback = dict(feedback_row)
     
-    # AI 优化逻辑 (模拟闭环调整)
+    # 规则引擎调整数值（保证数值可溯源）
     new_plan = old_plan.copy()
-    adjustment_reason = "基于您的反馈进行了优化。"
-    
-    # 简单的闭环规则引擎模拟（实际可调用 LLM 深度分析）
     if feedback["weight_change"] == "gain" and old_plan.get("goal") != "gain_weight":
-        new_plan["daily_kcal"] = max(200, new_plan["daily_kcal"] * 0.9)
-        adjustment_reason = "宠物体重增加过多，已适当调减每日卡路里摄入。"
+        new_plan["daily_kcal"] = max(200, int(new_plan["daily_kcal"] * 0.9))
     elif feedback["weight_change"] == "lose" and old_plan.get("goal") != "lose_weight":
-        new_plan["daily_kcal"] = min(5000, new_plan["daily_kcal"] * 1.1)
-        adjustment_reason = "宠物体重下降，已增加营养摄入。"
-        
+        new_plan["daily_kcal"] = min(5000, int(new_plan["daily_kcal"] * 1.1))
+
     if feedback["stool_status"] in ["soft", "diarrhea"]:
         new_plan["requires_vet"] = True
         new_plan["confidence_level"] = 0.7
-        adjustment_reason += " 观察到排便异常，建议咨询兽医。"
     else:
         new_plan["recheck_in_days"] = 30
         new_plan["confidence_level"] = 0.98
 
-    new_plan["adjustment_summary"] = adjustment_reason
-    
-    markdown = render_nutrition_markdown(old_plan_row["species"], new_plan)
-    markdown = f"### 🔄 再规划方案报告\n\n**调整原因**: {adjustment_reason}\n\n" + markdown
+    # ── 第三层：手动记忆注入 ────────────────────────────────────────
+    # 查询该宠物最近 3 次历史方案（含对应反馈），拼成趋势文本注入 Optimizer context
+    history_context = ''
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            # 取同一 pet_name 最近 3 条已归档方案（排除当前激活方案）
+            cursor.execute(
+                """SELECT np.id, np.plan_data, np.create_time,
+                          nf.weight_change, nf.appetite_status, nf.stool_status
+                   FROM nutrition_plans np
+                   LEFT JOIN nutrition_feedbacks nf ON nf.plan_id = np.id
+                   WHERE np.pet_name = ? AND np.user_id = ? AND np.is_active = 0
+                   ORDER BY np.create_time DESC LIMIT 3""",
+                (old_plan_row["pet_name"], old_plan_row["user_id"])
+            )
+            history_rows = cursor.fetchall()
+
+        if history_rows:
+            lines = []
+            for i, row in enumerate(history_rows, 1):
+                try:
+                    p = json.loads(row["plan_data"])
+                    kcal = p.get("daily_kcal", "?")
+                except Exception:
+                    kcal = "?"
+                wc   = row["weight_change"] or "未记录"
+                apt  = row["appetite_status"] or "未记录"
+                st   = row["stool_status"] or "未记录"
+                ts   = row["create_time"] or ""
+                lines.append(
+                    f'第{i}次（{ts[:10]}）：daily_kcal={kcal} kcal，'
+                    f'反馈：体重变化={wc}，食欲={apt}，排便={st}'
+                )
+            history_context = '\n'.join(lines)
+    except Exception as e:
+        logger.warning(f"历史方案查询失败，跳过记忆注入: {e}")
+
+    # NutritionOptimizer Agent：基于反馈 + 历史趋势生成闭环评审
+    try:
+        optimizer_markdown = run_nutrition_replan(new_plan, feedback, old_plan_row["species"], history_context)
+    except Exception as e:
+        logger.warning(f"run_nutrition_replan failed, fallback: {e}")
+        optimizer_markdown = render_nutrition_markdown(old_plan_row["species"], new_plan)
+
+    new_plan["adjustment_summary"] = optimizer_markdown[:200]  # 摘要存入 plan 供前端展示
+
+    markdown = f"### 🔄 再规划方案报告（NutritionOptimizer Agent 解读）\n\n{optimizer_markdown}"
     
     # 保存新方案
     with get_db() as conn:

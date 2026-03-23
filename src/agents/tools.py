@@ -193,3 +193,125 @@ def pet_food_forbidden_list(species: str):
     if s == 'dog':
         common += ['熟骨头', '夏威夷果']
     return '\n'.join(common)
+
+
+# ==========================================
+# 7. 宠物偏好追问生成工具（智能匹配第一步）
+# ==========================================
+@tool("generate_followup_questions")
+def generate_followup_questions(user_query: str) -> str:
+    """
+    分析用户的初始宠物需求描述，识别其中的信息缺口（活跃度/居住空间/陪伴时长/经验/过敏等），
+    生成 2-3 个结构化追问，帮助用户将模糊偏好转化为可量化的匹配维度。
+    参数 user_query: 用户的原始需求描述，例如"想养一只适合公寓的宠物"
+    返回 JSON 数组字符串，每项含 key、question、options 三个字段。
+    """
+    # 基于关键词启发式生成追问，作为 LLM 的结构化输入补充
+    questions = []
+    q = user_query.lower()
+
+    if not any(k in q for k in ['活跃', '安静', '好动', '懒']):
+        questions.append({
+            "key": "activity_level",
+            "question": "您希望宠物平时是活泼好动还是安静陪伴型的？",
+            "options": ["活泼爱玩", "温和安静", "都可以"]
+        })
+    if not any(k in q for k in ['公寓', '别墅', '院子', '平方', '㎡']):
+        questions.append({
+            "key": "living_space",
+            "question": "您的居住空间大概是什么情况？",
+            "options": ["小型公寓(60㎡以下)", "中等户型(60-120㎡)", "大户型/有院子"]
+        })
+    if not any(k in q for k in ['时间', '陪伴', '上班', '在家']):
+        questions.append({
+            "key": "time_availability",
+            "question": "平时每天能陪伴宠物大概多长时间？",
+            "options": ["2小时以内", "2-4小时", "4小时以上"]
+        })
+    if not any(k in q for k in ['经验', '养过', '第一次', '新手']):
+        questions.append({
+            "key": "experience_level",
+            "question": "您之前有养宠物的经验吗？",
+            "options": ["完全没有", "有一些经验", "资深宠主"]
+        })
+
+    import json as _json
+    return _json.dumps(questions[:3], ensure_ascii=False)
+
+
+# ==========================================
+# 8. 宠物语义匹配评分工具（智能匹配第二步）
+# ==========================================
+@tool("score_pet_match")
+def score_pet_match(user_profile_json: str, pet_list_json: str) -> str:
+    """
+    基于用户完整偏好画像（含追问答案），对宠物列表进行多维度结构化匹配评分。
+    参数 user_profile_json: JSON 字符串，含 query、activity_level、living_space 等字段
+    参数 pet_list_json: JSON 字符串，宠物列表（含 id、name、species、energy_level、is_shedding、description）
+    返回评分结果 JSON 字符串，每项含 id、fit_score、matched_dims、mismatch_dims。
+    """
+    import json as _json
+    try:
+        profile = _json.loads(user_profile_json)
+        pets    = _json.loads(pet_list_json)
+    except Exception as e:
+        return f"参数解析失败: {e}"
+
+    activity_map = {"活泼爱玩": "高", "温和安静": "低", "都可以": None}
+    space_map    = {"小型公寓(60㎡以下)": "low", "中等户型(60-120㎡)": "medium", "大户型/有院子": "high"}
+
+    desired_activity = activity_map.get(profile.get("activity_level", ""), None)
+    desired_space    = space_map.get(profile.get("living_space", ""), None)
+    time_avail       = profile.get("time_availability", "")
+    experience       = profile.get("experience_level", "")
+    query            = profile.get("query", "")
+
+    results = []
+    for pet in pets[:20]:
+        score = 60
+        matched, mismatch = [], []
+
+        pet_energy = (pet.get("energy_level") or "").lower()
+        pet_shed   = (pet.get("is_shedding") or "").lower()
+        pet_species = (pet.get("species") or "").lower()
+        pet_desc   = (pet.get("description") or "").lower()
+
+        # 活跃度匹配
+        if desired_activity == "高" and pet_energy in ["高", "极高", "high"]:
+            score += 15; matched.append("活跃度匹配")
+        elif desired_activity == "低" and pet_energy in ["低", "安静", "low", "quiet"]:
+            score += 15; matched.append("活跃度匹配")
+        elif desired_activity and pet_energy:
+            score -= 10; mismatch.append("活跃度不匹配")
+
+        # 空间适配
+        if desired_space == "low" and pet_energy in ["低", "安静", "medium"]:
+            score += 10; matched.append("适合小空间")
+        elif desired_space == "low" and pet_energy in ["高", "极高"]:
+            score -= 15; mismatch.append("空间需求过大")
+
+        # 经验匹配
+        if experience == "完全没有" and any(k in pet_desc for k in ["温和", "乖巧", "友善", "新手"]):
+            score += 10; matched.append("适合新手")
+        elif experience == "完全没有" and any(k in (pet.get("species","")) for k in ["边境", "哈士奇", "柯基"]):
+            score -= 10; mismatch.append("品种难度较高")
+
+        # 时间匹配
+        if "2小时以内" in time_avail and pet_energy in ["安静", "低"]:
+            score += 5; matched.append("低陪伴需求")
+
+        # 关键词命中
+        for kw in query.split()[:5]:
+            if len(kw) > 1 and (kw in pet_species or kw in pet_desc):
+                score += 5; matched.append(f"关键词匹配:{kw}")
+
+        results.append({
+            "id": pet.get("id"),
+            "name": pet.get("name"),
+            "fit_score": min(98, max(30, score)),
+            "matched_dims": matched[:3],
+            "mismatch_dims": mismatch[:2]
+        })
+
+    results.sort(key=lambda x: x["fit_score"], reverse=True)
+    return _json.dumps(results[:5], ensure_ascii=False)
