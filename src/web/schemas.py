@@ -64,6 +64,11 @@ class NutritionReplanRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    # 追问答案（第二轮对话时由前端传入，key 对应 generate_followup_questions 返回的 key 字段）
+    followup_answers: Optional[dict] = None
+    # 目标宠物信息（用户点击"申请领养"时传入）
+    target_pet_name: Optional[str] = None
+    target_species: Optional[str] = None
 
 class TriageRequest(BaseModel):
     symptom: str

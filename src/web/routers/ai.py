@@ -120,7 +120,10 @@ async def chat(request: Request, req: ChatRequest, current_user: dict = Depends(
     result = await coordinator.handle_user_input(
         session_id=session_id,
         user_id=current_user["id"],
-        user_message=req.message
+        user_message=req.message,
+        followup_answers=req.followup_answers,
+        target_pet_name=req.target_pet_name,
+        target_species=req.target_species,
     )
     return {
         "reply": result["reply"],
@@ -132,7 +135,11 @@ async def chat(request: Request, req: ChatRequest, current_user: dict = Depends(
 @router.post("/triage/analyze")
 @limiter.limit("15/minute")
 async def triage_analyze(request: Request, symptom: str = Form(...), file: UploadFile = File(None)):
-    reply, trace_id = get_triage_reply(symptom)
+    # 读取上传的图片/视频内容（有文件时传给 Qwen-VL 分析，无文件时走纯文本 DeepSeek 链路）
+    image_bytes = None
+    if file and file.filename:
+        image_bytes = await file.read()
+    reply, trace_id = get_triage_reply(symptom, image_bytes=image_bytes)
     return {"reply": reply, "trace_id": trace_id}
 
 @router.post("/nutrition/plan")
