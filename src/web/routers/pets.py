@@ -23,7 +23,7 @@ async def update_pet(pet_id: int, req: PetUpdate, current_user: dict = Depends(g
         pet = cursor.fetchone()
         if not pet:
             raise HTTPException(status_code=404, detail="宠物不存在")
-        if pet["owner_id"] != current_user["id"] and current_user.get("role") not in ["org_admin", "root"]:
+        if pet["owner_id"] != current_user["id"] and current_user.get("role") not in ["org_admin"]:
             raise HTTPException(status_code=403, detail="无权限修改该宠物信息")
         cursor.execute(
             "UPDATE pets SET name=COALESCE(?,name), species=COALESCE(?,species), image_url=COALESCE(?,image_url), description=COALESCE(?,description) WHERE id=?",
@@ -41,7 +41,7 @@ async def delete_pet(pet_id: int, current_user: dict = Depends(get_current_user)
         pet = cursor.fetchone()
         if not pet:
             raise HTTPException(status_code=404, detail="宠物不存在")
-        if pet["owner_id"] != current_user["id"] and current_user.get("role") not in ["org_admin", "root"]:
+        if pet["owner_id"] != current_user["id"] and current_user.get("role") not in ["org_admin"]:
             raise HTTPException(status_code=403, detail="无权限删除该宠物")
         cursor.execute("DELETE FROM pets WHERE id = ?", (pet_id,))
         conn.commit()

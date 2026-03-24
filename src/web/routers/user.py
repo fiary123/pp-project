@@ -28,7 +28,7 @@ async def change_password(req: ChangePasswordRequest, current_user: dict = Depen
 @router.get("/applications/{user_id}")
 def get_user_applications(user_id: int, current_user: dict = Depends(get_current_user)):
     # 只允许查询自己的申请（管理员除外）
-    if current_user["id"] != user_id and current_user.get("role") not in ["org_admin", "root"]:
+    if current_user["id"] != user_id and current_user.get("role") not in ["org_admin"]:
         raise HTTPException(status_code=403, detail="无权限查询他人申请")
     with get_db() as conn:
         ensure_tables(conn)

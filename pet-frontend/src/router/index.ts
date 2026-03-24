@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../store/authStore'
 import HomeView from '../views/HomeView.vue'
-import TriageView from '../views/TriageView.vue'
+import MutualAidView from '../views/MutualAidView.vue'
 import WikiView from '../views/WikiView.vue'
 import AdoptView from '../views/AdoptView.vue'
 import CommunityView from '../views/CommunityView.vue'
@@ -15,7 +15,7 @@ const routes = [
   { path: '/login', name: 'login', component: LoginView },
   { path: '/profile', name: 'profile', component: ProfileView },
   { path: '/', name: 'home', component: HomeView },
-  { path: '/triage', name: 'triage', component: TriageView },
+  { path: '/mutual-aid', name: 'mutualAid', component: MutualAidView },
   { path: '/wiki', name: 'wiki', component: WikiView },
   { path: '/nutrition', name: 'nutrition', component: NutritionView },
   { path: '/adopt', name: 'adopt', component: AdoptView },

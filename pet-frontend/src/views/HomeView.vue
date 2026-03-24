@@ -32,7 +32,7 @@ const fetchAnnouncements = async () => {
   }
 };
 
-const isAdmin = computed(() => authStore.user?.role === 'org_admin' || authStore.user?.role === 'root');
+const isAdmin = computed(() => authStore.user?.role === 'org_admin');
 
 const handlePublishAnnounce = async () => {
   if (!announceForm.value.title) return;

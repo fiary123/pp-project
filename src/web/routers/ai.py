@@ -4,14 +4,16 @@ import json
 from src.web.schemas import (
     ChatRequest, NutritionPlanRequest, SmartMatchRequest,
     NutritionFeedbackRequest, NutritionReplanRequest, AdoptionAssessmentRequest,
-    MatchFollowupRequest, AdoptionFeedbackRequest, PetChatRequest
+    MatchFollowupRequest, AdoptionFeedbackRequest, PetChatRequest,
+    MutualAidTaskCreate, MutualAidMatchRequest, MutualAidAcceptRequest,
+    MutualAidReportRequest
 )
 from src.agents.agents import run_pet_chat
 from src.web.services.ai_service import (
-    get_agent_reply, get_triage_reply, generate_nutrition_plan,
+    get_agent_reply, generate_nutrition_plan,
     get_smart_match, get_match_followup_questions, submit_adoption_feedback,
     submit_nutrition_feedback, replan_nutrition,
-    run_adoption_assessment_service,
+    run_adoption_assessment_service, get_mutual_aid_match,
     get_db
 )
 from src.web.services.assessment_service import AdoptionAssessmentService
@@ -133,15 +135,6 @@ async def chat(request: Request, req: ChatRequest, current_user: dict = Depends(
         "trace_id": "coord_" + session_id
     }
 
-@router.post("/triage/analyze")
-@limiter.limit("15/minute")
-async def triage_analyze(request: Request, symptom: str = Form(...), file: UploadFile = File(None)):
-    # 读取上传的图片/视频内容（有文件时传给 Qwen-VL 分析，无文件时走纯文本 DeepSeek 链路）
-    image_bytes = None
-    if file and file.filename:
-        image_bytes = await file.read()
-    reply, trace_id = get_triage_reply(symptom, image_bytes=image_bytes)
-    return {"reply": reply, "trace_id": trace_id}
 
 @router.post("/nutrition/plan")
 @limiter.limit("10/minute")
@@ -295,13 +288,167 @@ async def pet_chat(request: Request, req: PetChatRequest):
     }
 
 
+@router.post("/mutual-aid/tasks")
+async def create_mutual_aid_task(req: MutualAidTaskCreate, current_user: dict = Depends(get_current_user)):
+    """发布互助任务"""
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT INTO mutual_aid_tasks
+               (user_id, task_type, pet_name, pet_species, start_time, end_time, location, description, status)
+               VALUES (?,?,?,?,?,?,?,?,'open')""",
+            (current_user["id"], req.task_type, req.pet_name, req.pet_species,
+             req.start_time, req.end_time, req.location, req.description)
+        )
+        task_id = cursor.lastrowid
+        conn.commit()
+    return {"status": "success", "task_id": task_id}
+
+
+@router.get("/mutual-aid/tasks")
+async def list_mutual_aid_tasks(status: str = "open", limit: int = 20):
+    """获取互助任务列表"""
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM mutual_aid_tasks WHERE status=? ORDER BY create_time DESC LIMIT ?",
+            (status, limit)
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+    return rows
+
+
+@router.post("/mutual-aid/tasks/{task_id}/accept")
+async def accept_mutual_aid_task(task_id: int, req: MutualAidAcceptRequest, current_user: dict = Depends(get_current_user)):
+    """接单"""
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        cursor.execute("SELECT status, user_id FROM mutual_aid_tasks WHERE id=?", (task_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        if row["status"] != "open":
+            raise HTTPException(status_code=400, detail="该任务已被接单")
+        if row["user_id"] == current_user["id"]:
+            raise HTTPException(status_code=400, detail="不能接自己发布的任务")
+        cursor.execute("UPDATE mutual_aid_tasks SET status='accepted' WHERE id=?", (task_id,))
+        cursor.execute(
+            "INSERT INTO mutual_aid_orders (task_id, helper_id, status) VALUES (?,?,'accepted')",
+            (task_id, current_user["id"])
+        )
+        conn.commit()
+    return {"status": "success"}
+
+
+@router.post("/mutual-aid/match")
+@limiter.limit("10/minute")
+async def mutual_aid_match(request: Request, req: MutualAidMatchRequest, current_user: dict = Depends(get_current_user)):
+    """AI 多智能体互助匹配推荐"""
+    reply, trace_id = get_mutual_aid_match(req.query, current_user["id"])
+    return {"reply": reply, "trace_id": trace_id}
+
+
+@router.post("/mutual-aid/tasks/{task_id}/complete")
+async def complete_mutual_aid_task(task_id: int, current_user: dict = Depends(get_current_user)):
+    """完成任务：发布人或接单人均可标记完成"""
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        cursor.execute("SELECT status, user_id FROM mutual_aid_tasks WHERE id=?", (task_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        if row["status"] not in ("accepted",):
+            raise HTTPException(status_code=400, detail="只有已接单的任务才能标记完成")
+        # 验证操作人是发布人或接单人
+        cursor.execute("SELECT helper_id FROM mutual_aid_orders WHERE task_id=? AND status='accepted'", (task_id,))
+        order = cursor.fetchone()
+        allowed = [row["user_id"]]
+        if order:
+            allowed.append(order["helper_id"])
+        if current_user["id"] not in allowed:
+            raise HTTPException(status_code=403, detail="无权操作此任务")
+        cursor.execute("UPDATE mutual_aid_tasks SET status='completed' WHERE id=?", (task_id,))
+        if order:
+            cursor.execute("UPDATE mutual_aid_orders SET status='completed' WHERE task_id=?", (task_id,))
+        conn.commit()
+    return {"status": "success"}
+
+
+@router.get("/mutual-aid/tasks/mine")
+async def get_my_mutual_aid_tasks(current_user: dict = Depends(get_current_user)):
+    """我的互助：我发布的任务 + 我接的单（含接单人信息）"""
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        # 我发布的任务，带接单人信息
+        cursor.execute(
+            """SELECT t.*, u.username as helper_name, u.email as helper_email
+               FROM mutual_aid_tasks t
+               LEFT JOIN mutual_aid_orders o ON t.id = o.task_id AND o.status != 'cancelled'
+               LEFT JOIN users u ON o.helper_id = u.id
+               WHERE t.user_id=?
+               ORDER BY t.create_time DESC""",
+            (current_user["id"],)
+        )
+        published = [dict(r) for r in cursor.fetchall()]
+        # 我接的单，带任务详情
+        cursor.execute(
+            """SELECT t.*, o.status as order_status
+               FROM mutual_aid_orders o
+               JOIN mutual_aid_tasks t ON o.task_id = t.id
+               WHERE o.helper_id=?
+               ORDER BY o.create_time DESC""",
+            (current_user["id"],)
+        )
+        accepted = [dict(r) for r in cursor.fetchall()]
+    return {"published": published, "accepted": accepted}
+
+
+@router.post("/mutual-aid/tasks/{task_id}/report")
+async def report_mutual_aid_task(
+    task_id: int,
+    req: MutualAidReportRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """举报互助任务"""
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM mutual_aid_tasks WHERE id=?", (task_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="任务不存在")
+        # 防重复举报
+        cursor.execute(
+            "SELECT id FROM mutual_aid_reports WHERE task_id=? AND reporter_id=? AND status='pending'",
+            (task_id, current_user["id"])
+        )
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="您已举报过该任务，请等待处理")
+        cursor.execute(
+            "INSERT INTO mutual_aid_reports (task_id, reporter_id, reason) VALUES (?,?,?)",
+            (task_id, current_user["id"], req.reason)
+        )
+        conn.commit()
+    return {"status": "success"}
+
+
 @router.get("/admin/assessment/report/{trace_id}")
 async def get_assessment_report(trace_id: str, current_user: dict = Depends(get_current_user)):
     """
     [管理员专享] 获取结构化的 AI 审核详情报告。
     用于解决 AI 黑盒决策问题，提供审计追踪依据。
     """
-    if current_user.get("role") not in ["org_admin", "root"]:
+    if current_user.get("role") not in ["org_admin"]:
         raise HTTPException(status_code=403, detail="无权查阅 AI 审计日志")
         
     with get_db() as conn:

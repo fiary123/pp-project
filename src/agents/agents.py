@@ -15,14 +15,12 @@ from langchain_openai import ChatOpenAI # 修改：使用 OpenAI 适配器
 
 # 导入专项 Agent 构造函数
 from .audit_expert import get_audit_expert_agent
-from .medical_expert import get_medical_expert_agent
-from .navigator import get_navigator_agent
 from .pet_expert import get_pet_expert_agent
 from .pet_persona import get_pet_persona_agent
 from .nutrition_expert import get_nutrition_expert_agent, get_nutrition_planner_agent, get_nutrition_optimizer_agent
 from .nutrition_planner import build_nutrition_plan, render_nutrition_markdown
 from .adoption_profiler import get_encyclopedia_agent, get_adoption_profiler_agent, get_cohabitation_risk_agent
-from .tools import generate_followup_questions, score_pet_match
+from .tools import generate_followup_questions, score_pet_match, search_mutual_aid_tasks
 
 # ==========================================
 # 1. 环境与模型配置 (改为 OpenAI/DeepSeek 兼容模式)
@@ -34,31 +32,6 @@ load_dotenv()
 
 _DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
 _DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-
-_QWEN_API_KEY  = os.getenv("QWEN_API_KEY")
-_QWEN_BASE_URL = os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-
-# ── 模型分配策略 ────────────────────────────────────────────────────
-# llm      : DeepSeek-Chat  → 所有纯文本 Agent（匹配/营养/评估/知识问答/聊天）
-# llm_vision: Qwen-VL-Plus  → 仅分诊模块有图片/视频输入时的 VisionAgent
-# 两者均兼容 OpenAI 接口，无需引入额外依赖
-# ────────────────────────────────────────────────────────────────────
-
-# 通用文本 LLM（DeepSeek）
-llm = ChatOpenAI(
-    model="deepseek-chat",
-    openai_api_key=_DEEPSEEK_API_KEY,
-    openai_api_base=_DEEPSEEK_BASE_URL,
-    temperature=0.3
-)
-
-# 视觉多模态 LLM（Qwen-VL，仅分诊图片分析使用）
-llm_vision = ChatOpenAI(
-    model="qwen-vl-plus",
-    openai_api_key=_QWEN_API_KEY or _DEEPSEEK_API_KEY,  # 未配置时降级，避免启动报错
-    openai_api_base=_QWEN_BASE_URL,
-    temperature=0.1   # 视觉分析要求准确，温度设低
-) if _QWEN_API_KEY else None
 
 # CrewAI 原生 LLM（所有 CrewAI Agent 使用此对象）
 # CrewAI 新版不再接受 langchain ChatOpenAI 对象，需使用自己的 LLM 类
@@ -558,113 +531,6 @@ def run_nutrition_replan(old_plan: dict, feedback: dict, species: str, history_c
     return f'{planner_md}\n\n---\n\n### NutritionOptimizer 评审\n\n{optimizer_md}'
 
 
-def _analyze_image_with_vision(image_bytes: bytes, symptom_text: str) -> str:
-    """
-    用 Qwen-VL（llm_vision）分析宠物图片，返回视觉观察描述。
-    若 llm_vision 未配置（QWEN_API_KEY 未设置），返回空字符串，由调用方降级处理。
-    """
-    if llm_vision is None:
-        return ''
-    try:
-        import base64
-        b64 = base64.b64encode(image_bytes).decode()
-        # Qwen-VL 多模态消息格式（兼容 OpenAI vision 格式）
-        from langchain_core.messages import HumanMessage
-        msg = HumanMessage(content=[
-            {"type": "text",
-             "text": (
-                 f'这是一张宠物照片，宠主描述的症状是："{symptom_text}"。\n'
-                 f'请从视觉角度描述图中宠物的外观状态：\n'
-                 f'1. 可见的异常体征（皮毛、眼睛、姿态、伤口、肿胀等）\n'
-                 f'2. 精神状态（活跃/萎靡/痛苦表情等）\n'
-                 f'3. 是否与宠主描述症状相符\n'
-                 f'输出简洁客观的视觉观察报告，不做医疗诊断。'
-             )},
-            {"type": "image_url",
-             "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
-        ])
-        response = llm_vision.invoke([msg])
-        return response.content
-    except Exception as e:
-        logger.warning(f"Qwen-VL 图片分析失败: {e}")
-        return ''
-
-
-def run_triage_expert(symptom: str, location: str | None = None, image_bytes: bytes | None = None) -> str:
-    """
-    医疗分诊：MedicalExpert + NavigatorAgent 两 Agent 串联 Crew。
-    - 有图片时：先用 Qwen-VL（llm_vision）分析图片，将视觉描述拼入症状文本
-    - MedicalExpert（DeepSeek）：调用知识库工具检索，输出结构化 JSON（risk_level/need_navigation）+ Markdown 报告
-    - NavigatorAgent（DeepSeek）：读取 JSON 字段自主决定是否调用地图工具
-    图片分析用 Qwen-VL，文本推理用 DeepSeek，各司其职。
-    """
-    # ── 图片预处理：Qwen-VL 视觉分析（若有图片且已配置） ────────────
-    vision_desc = ''
-    if image_bytes:
-        vision_desc = _analyze_image_with_vision(image_bytes, symptom)
-        if vision_desc:
-            logger.info("Qwen-VL 视觉分析完成，结果已注入分诊上下文")
-
-    # 将视觉描述拼入症状文本，供 MedicalExpert 使用
-    full_symptom = symptom
-    if vision_desc:
-        full_symptom = (
-            f'{symptom}\n\n'
-            f'【图片视觉分析（Qwen-VL）】\n{vision_desc}'
-        )
-    medical_expert   = get_medical_expert_agent(llm)
-    navigator_agent  = get_navigator_agent(llm)
-
-    task_triage = Task(
-        description=(
-            f'请对以下宠物症状进行分诊：\n"{full_symptom}"\n\n'
-            f'步骤：\n'
-            f'1. 调用 pet_health_knowledge_search 工具，检索该症状的相关知识（可多次检索）。\n'
-            f'2. 若上文包含【图片视觉分析】内容，结合视觉观察与文字症状综合判断。\n'
-            f'3. 综合所有信息确定风险等级，按格式要求输出 JSON + Markdown 报告。'
-        ),
-        expected_output=(
-            '两部分内容：\n'
-            '第一部分：```json 代码块，包含字段：\n'
-            '  risk_level（枚举：Low/Medium/High/Emergency）、\n'
-            '  diagnosis_summary（一句话摘要）、\n'
-            '  need_navigation（布尔值，High/Emergency 时为 true）。\n'
-            '第二部分：完整 Markdown 分诊报告，含症状分析、护理建议、风险等级说明。'
-        ),
-        agent=medical_expert
-    )
-
-    task_navigate = Task(
-        description=(
-            f'你已收到分诊专家的报告（含 JSON 结构化字段和 Markdown 详情）作为 context。\n'
-            f'请读取 JSON 中的 need_navigation 和 risk_level 字段，自主决定是否导航：\n'
-            f'  - need_navigation 为 true，或 risk_level 为 "High"/"Emergency"：\n'
-            f'    调用 nearby_hospital_search 工具，坐标：{location or "116.4074,39.9042"}。\n'
-            f'  - 否则：直接输出"本次症状无需紧急就医，请按分诊建议居家观察或预约门诊。"'
-        ),
-        expected_output=(
-            '若触发导诊：5公里内宠物医院列表（含名称、距离、地址）。\n'
-            '若无需导诊：一句话告知用户无需立即就医。'
-        ),
-        agent=navigator_agent,
-        context=[task_triage]
-    )
-
-    crew = Crew(
-        agents=[medical_expert, navigator_agent],
-        tasks=[task_triage, task_navigate],
-        process=Process.sequential,
-        verbose=True
-    )
-    result = crew.kickoff()
-
-    # 拼合两个 Agent 的输出作为完整响应
-    task_outputs = result.tasks_output if hasattr(result, 'tasks_output') else []
-    triage_report  = str(task_outputs[0]) if len(task_outputs) > 0 else str(result)
-    navigate_info  = str(task_outputs[1]) if len(task_outputs) > 1 else ""
-    if navigate_info and "无需紧急就医" not in navigate_info:
-        return f"{triage_report}\n\n---\n### 📍 附近宠物医院\n{navigate_info}"
-    return triage_report
 
 
 def run_adoption_assessment(
@@ -1063,3 +929,85 @@ def run_smart_match(user_query: str, pet_list: list, followup_answers: dict | No
          "fit_advantages": [], "potential_challenges": [], "mitigation": ""}
         for p in pet_summaries[:5] if p.get("id") is not None
     ]
+
+
+def run_mutual_aid_match(user_query: str) -> str:
+    """
+    互助平台智能匹配：TaskAnalyzer + HelperMatcher 两 Agent 串联 Crew。
+    - TaskAnalyzer：解析用户互助需求，提取任务类型/时间/地点/宠物种类等结构化信息，
+      并调用 search_mutual_aid_tasks 工具检索当前开放任务。
+    - HelperMatcher：基于检索结果和用户需求，生成个性化的互助方案推荐报告。
+    """
+    task_analyzer = Agent(
+        role='互助需求解析专员',
+        goal='精确解析用户的互助需求描述，提取关键信息并检索匹配的开放任务。',
+        backstory=(
+            '你是互助平台的需求分析专员，擅长从用户描述中提取结构化信息。\n\n'
+            '【工具调用规则】\n'
+            '第一步：分析用户描述，识别以下信息：\n'
+            '  - 任务类型（上门喂养/上门铲屎/代遛狗/宠物陪伴/其他互助）\n'
+            '  - 时间范围（开始/结束日期）\n'
+            '  - 地点关键词（城市/区域/小区）\n'
+            '  - 宠物种类（猫/狗/其他）\n'
+            '第二步：调用 search_mutual_aid_tasks 工具，传入提取的任务类型和地点关键词检索任务。\n'
+            '  - 若检索无结果，换用更宽泛的关键词重试一次（如地点改为城市名）。\n'
+            '第三步：输出结构化的需求摘要和检索到的任务列表原文。'
+        ),
+        llm=llm,
+        tools=[search_mutual_aid_tasks],
+        verbose=True,
+        max_iter=4,
+        allow_delegation=False
+    )
+
+    helper_matcher = Agent(
+        role='互助方案推荐专家',
+        goal='基于用户需求和任务检索结果，生成清晰实用的互助方案推荐报告。',
+        backstory=(
+            '你是互助平台的匹配推荐专家，擅长将任务数据转化为用户友好的推荐方案。\n'
+            '你的推荐报告必须包含：\n'
+            '1. 需求解读：用一句话概括用户的核心需求\n'
+            '2. 匹配任务推荐：若有匹配任务，列出最相关的1-3个，说明匹配原因\n'
+            '3. 发布建议：若无匹配任务或任务不理想，给出发布互助任务的具体建议\n'
+            '   （建议内容包括：任务类型选择、时间填写、描述要点）\n'
+            '4. 互助贴士：1-2条与本次互助类型相关的实用小建议\n'
+            '语气亲切友好，简洁易读。'
+        ),
+        llm=llm,
+        tools=[],
+        verbose=True,
+        max_iter=2,
+        allow_delegation=False
+    )
+
+    task_analyze = Task(
+        description=(
+            f'用户互助需求："{user_query}"\n\n'
+            f'请按工具调用规则提取需求信息，调用 search_mutual_aid_tasks 工具检索开放任务，'
+            f'输出需求摘要和检索结果。'
+        ),
+        expected_output='需求结构化摘要（任务类型/时间/地点/宠物种类）+ search_mutual_aid_tasks 工具检索结果原文。',
+        agent=task_analyzer
+    )
+
+    task_match = Task(
+        description=(
+            f'根据需求解析专员提供的用户需求摘要和任务检索结果，'
+            f'为用户生成互助方案推荐报告。\n'
+            f'用户原始描述："{user_query}"'
+        ),
+        expected_output='Markdown 格式互助推荐报告，含需求解读、匹配任务推荐（或发布建议）、互助贴士。',
+        agent=helper_matcher,
+        context=[task_analyze]
+    )
+
+    crew = Crew(
+        agents=[task_analyzer, helper_matcher],
+        tasks=[task_analyze, task_match],
+        process=Process.sequential,
+        verbose=True
+    )
+    result = crew.kickoff()
+
+    task_outputs = result.tasks_output if hasattr(result, 'tasks_output') else []
+    return str(task_outputs[1]) if len(task_outputs) > 1 else str(result)

@@ -84,7 +84,7 @@ const generateMockPosts = () => {
     id: 9000 + i,
     user_id: 0,
     username: users[i % users.length],
-    role: i % 2 === 0 ? 'root' : 'individual',
+    role: i % 2 === 0 ? 'org_admin' : 'individual',
     title: c.title,
     content: c.content,
     image_url: c.img,
@@ -235,10 +235,10 @@ const filteredPosts = computed(() => {
 
 const isAdmin = computed(() => {
   const role = authStore.user?.role;
-  return role === 'admin' || role === 'root' || role === 'org_admin';
+  return role === 'org_admin';
 });
 
-const roleLabel: Record<string, string> = { individual: '爱宠人士', org_admin: '救助站', root: '管理员' };
+const roleLabel: Record<string, string> = { individual: '爱宠人士', org_admin: '救助站' };
 
 onMounted(fetchPosts);
 </script>

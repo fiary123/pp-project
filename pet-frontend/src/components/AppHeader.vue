@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { useRouter, useRoute } from 'vue-router'
-import { PawPrint, Heart, BookOpen, Search, ShieldCheck, Users, Salad } from 'lucide-vue-next'
+import { PawPrint, Handshake, BookOpen, Search, ShieldCheck, Users, Salad } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
 const emit = defineEmits(['open-command'])
 
 const navItems = [
-  { name: '智能分诊', path: '/triage', icon: Heart },
+  { name: '宠物互助', path: '/mutual-aid', icon: Handshake },
   { name: '百科指南', path: '/wiki', icon: BookOpen },
   { name: '营养喂养', path: '/nutrition', icon: Salad },
   { name: '宠物领养', path: '/adopt', icon: Search },
@@ -57,7 +57,7 @@ const navigate = (path: string) => {
         <button
           @click="emit('open-command')"
           class="p-2 rounded-full bg-white/5 border border-white/10 text-gray-400 hover:text-orange-400 hover:bg-white/10 transition-all"
-          title="AI 智能分诊 (Ctrl+K)"
+          title="智能搜索 (Ctrl+K)"
         >
           <Search :size="20" />
         </button>

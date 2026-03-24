@@ -14,13 +14,12 @@ export const useAuthStore = defineStore('auth', {
 
   getters: {
     // 判断是否为管理员
-    isAdmin: (state) => ['root', 'org_admin'].includes(state.user?.role),
+    isAdmin: (state) => ['org_admin'].includes(state.user?.role),
     // 获取当前角色名（中文显示）
     roleName: (state) => {
       const roles: Record<string, string> = {
         'individual': '爱宠人士',
         'org_admin': '救助站管理员',
-        'root': '系统超级管理员'
       }
       return roles[state.user?.role] || '游客'
     }

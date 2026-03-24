@@ -6,7 +6,7 @@ import json
 import logging
 from typing import List, Optional, Tuple
 from src.agents.nutrition_planner import build_nutrition_plan, render_nutrition_markdown
-from src.agents.agents import run_nutrition_expert, run_nutrition_replan
+from src.agents.agents import run_nutrition_expert, run_nutrition_replan, run_mutual_aid_match
 from src.web.services.db_service import get_db
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
@@ -70,27 +70,6 @@ def get_agent_reply(user_msg: str) -> Tuple[str, str]:
     _log_agent_trace(trace_id, "chat", agent_name, user_msg, reply, latency, fallback)
     return reply, trace_id
 
-def get_triage_reply(symptom: str, image_bytes: bytes | None = None) -> Tuple[str, str]:
-    """
-    调用分诊专家 Agent，返回 (reply, trace_id)。
-    image_bytes 不为空时，先由 Qwen-VL 分析图片，再交给 DeepSeek MedicalExpert 推理。
-    """
-    trace_id = str(uuid.uuid4())
-    start_time = time.time()
-    fallback = False
-    agent_name = "TriageExpert(DeepSeek)" if not image_bytes else "TriageExpert(QwenVL+DeepSeek)"
-
-    try:
-        from src.agents.agents import run_triage_expert
-        reply = run_triage_expert(symptom, image_bytes=image_bytes)
-    except Exception as e:
-        logger.warning(f"Triage Service Error (fallback activated): {e}")
-        reply = f"医生智能系统正在诊断中，针对您的症状：{symptom}，我们建议您观察 2-4 小时。"
-        fallback = True
-
-    latency = int((time.time() - start_time) * 1000)
-    _log_agent_trace(trace_id, "triage", agent_name, symptom, reply, latency, fallback)
-    return reply, trace_id
 
 def get_match_followup_questions(user_query: str) -> List[dict]:
     """
@@ -432,3 +411,19 @@ def replan_nutrition(plan_id: int, feedback_id: int) -> Tuple[dict, str, str]:
     _log_agent_trace(trace_id, "nutrition_replan", "NutritionOptimizer", str(feedback), "Replanning Done", latency)
     
     return new_plan, markdown, trace_id
+
+
+def get_mutual_aid_match(query: str, user_id: int = None) -> Tuple[str, str]:
+    """调用互助平台多智能体匹配，返回 (reply, trace_id)"""
+    trace_id = str(uuid.uuid4())
+    start_time = time.time()
+    fallback = False
+    try:
+        reply = run_mutual_aid_match(query)
+    except Exception as e:
+        logger.warning(f"MutualAidMatch failed (fallback): {e}")
+        reply = "AI 匹配服务暂时无法响应，请稍后重试，或直接浏览互助大厅中的开放任务。"
+        fallback = True
+    latency = int((time.time() - start_time) * 1000)
+    _log_agent_trace(trace_id, "mutual_aid_match", "TaskAnalyzer+HelperMatcher", query, reply, latency, fallback)
+    return reply, trace_id

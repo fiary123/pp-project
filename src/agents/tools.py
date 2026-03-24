@@ -196,6 +196,57 @@ def pet_food_forbidden_list(species: str):
 
 
 # ==========================================
+# 6. 互助任务检索工具
+# ==========================================
+@tool("search_mutual_aid_tasks")
+def search_mutual_aid_tasks(task_type: str = "", location_keyword: str = "", pet_species: str = "") -> str:
+    """
+    检索当前开放中的互助任务列表。
+    参数 task_type: 任务类型关键词，例如 "上门喂养"、"代遛狗"，为空则不过滤
+    参数 location_keyword: 地点关键词，例如 "浦东"，为空则不过滤
+    参数 pet_species: 宠物种类，例如 "猫"、"狗"，为空则不过滤
+    """
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='mutual_aid_tasks'")
+        if not cursor.fetchone():
+            conn.close()
+            return "互助任务表尚未初始化，暂无数据。"
+
+        conditions = ["status = 'open'"]
+        params = []
+        if task_type:
+            conditions.append("task_type LIKE ?")
+            params.append(f"%{task_type}%")
+        if location_keyword:
+            conditions.append("location LIKE ?")
+            params.append(f"%{location_keyword}%")
+        if pet_species:
+            conditions.append("pet_species LIKE ?")
+            params.append(f"%{pet_species}%")
+
+        query = f"SELECT id, task_type, pet_name, pet_species, start_time, end_time, location, description FROM mutual_aid_tasks WHERE {' AND '.join(conditions)} ORDER BY create_time DESC LIMIT 10"
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            return "当前暂无符合条件的互助任务。"
+
+        result = []
+        for r in rows:
+            result.append(
+                f"任务ID:{r[0]} | 类型:{r[1]} | 宠物:{r[2]}({r[3]}) | "
+                f"时间:{r[4]}~{r[5] or '待定'} | 地点:{r[6]}" +
+                (f" | 说明:{r[7]}" if r[7] else "")
+            )
+        return "\n".join(result)
+    except Exception as e:
+        return f"检索互助任务失败: {str(e)}"
+
+
+# ==========================================
 # 7. 宠物偏好追问生成工具（智能匹配第一步）
 # ==========================================
 @tool("generate_followup_questions")

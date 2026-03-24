@@ -9,7 +9,7 @@ const query = ref('')
 // 模拟 Agent 联想结果
 const suggestions = [
   { id: 1, text: '我想领养一只在上海的柯基', category: '智能搜索' },
-  { id: 2, text: '我家猫咪不爱吃粮怎么办？', category: '分诊建议' },
+  { id: 2, text: '下周出差三天，需要有人帮我喂猫', category: '宠物互助' },
   { id: 3, text: '如何训练狗狗定点排便', category: '百科知识' }
 ]
 

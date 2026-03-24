@@ -52,7 +52,7 @@ async def update_post(post_id: int, req: PostUpdate, current_user: dict = Depend
         post = cursor.fetchone()
         if not post:
             raise HTTPException(status_code=404, detail="帖子不存在")
-        if post["user_id"] != current_user["id"] and current_user.get("role") not in ["org_admin", "root"]:
+        if post["user_id"] != current_user["id"] and current_user.get("role") not in ["org_admin"]:
             raise HTTPException(status_code=403, detail="无权限修改他人帖子")
         cursor.execute(
             "UPDATE posts SET title=COALESCE(?,title), content=COALESCE(?,content), image_url=COALESCE(?,image_url) WHERE id=?",
@@ -71,7 +71,7 @@ async def delete_post(post_id: int, current_user: dict = Depends(get_current_use
         post = cursor.fetchone()
         if not post:
             raise HTTPException(status_code=404, detail="帖子不存在")
-        if post["user_id"] != current_user["id"] and current_user.get("role") not in ["org_admin", "root"]:
+        if post["user_id"] != current_user["id"] and current_user.get("role") not in ["org_admin"]:
             raise HTTPException(status_code=403, detail="无权限删除他人帖子")
         cursor.execute("DELETE FROM posts WHERE id = ?", (post_id,))
         cursor.execute(

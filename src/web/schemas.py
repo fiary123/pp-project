@@ -9,7 +9,7 @@ class RegisterRequest(BaseModel):
     username: str
     email: str
     password: str
-    role: Literal["individual", "org_admin", "root"] = "individual"
+    role: Literal["individual", "org_admin"] = "individual"
 
 class PostCreate(BaseModel):
     user_id: int
@@ -145,6 +145,28 @@ class AdoptionRiskFactor(BaseModel):
     dimension: str = Field(description="风险维度，如：经济、时间、经验、住房、动机")
     description: str = Field(description="风险描述")
     severity: Literal["low", "medium", "high"] = Field(description="严重程度")
+
+
+class MutualAidTaskCreate(BaseModel):
+    user_id: int
+    task_type: str = "上门喂养"
+    pet_name: str
+    pet_species: str = "猫"
+    start_time: str
+    end_time: Optional[str] = None
+    location: str
+    description: Optional[str] = None
+
+class MutualAidMatchRequest(BaseModel):
+    query: str
+    user_id: Optional[int] = None
+
+class MutualAidAcceptRequest(BaseModel):
+    helper_id: int
+
+class MutualAidReportRequest(BaseModel):
+    reporter_id: int
+    reason: str
 
 
 class AdoptionAssessmentResponse(BaseModel):

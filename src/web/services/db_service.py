@@ -213,6 +213,48 @@ def ensure_tables(conn: sqlite3.Connection):
         adopt_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
 
+    # ── mutual_aid_tasks ───────────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS mutual_aid_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        task_type TEXT NOT NULL,        -- 上门喂养/上门铲屎/代遛狗/宠物陪伴/其他互助
+        pet_name TEXT NOT NULL,
+        pet_species TEXT DEFAULT '猫',
+        start_time TEXT NOT NULL,
+        end_time TEXT,
+        location TEXT NOT NULL,
+        description TEXT,
+        status TEXT DEFAULT 'open',     -- open, accepted, completed, cancelled
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # ── mutual_aid_orders ──────────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS mutual_aid_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER REFERENCES mutual_aid_tasks(id) ON DELETE CASCADE,
+        helper_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        status TEXT DEFAULT 'accepted', -- accepted, completed, cancelled
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mutual_aid_tasks_user_id ON mutual_aid_tasks(user_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mutual_aid_tasks_status ON mutual_aid_tasks(status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mutual_aid_orders_task_id ON mutual_aid_orders(task_id)")
+
+    # ── mutual_aid_reports ─────────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS mutual_aid_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER REFERENCES mutual_aid_tasks(id) ON DELETE CASCADE,
+        reporter_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        reason TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',   -- pending, resolved_cancel, resolved_dismiss
+        resolve_note TEXT,
+        admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolve_time DATETIME
+    )''')
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mutual_aid_reports_status ON mutual_aid_reports(status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mutual_aid_reports_task_id ON mutual_aid_reports(task_id)")
+
     # ── 高频查询索引 ───────────────────────────────────────────────────────
     cur.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id)")
