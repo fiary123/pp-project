@@ -117,7 +117,7 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-> **隐私说明**：用户在聊天、分诊、营养方案、领养评估等功能中输入的文字内容会被发送至 DeepSeek 模型服务进行处理。
+> **隐私说明**：用户在聊天、营养方案、领养评估、互助匹配等功能中输入的文字内容会被发送至 DeepSeek 模型服务进行处理。
 > 请在实际部署前确认：
 > - 是否符合所在组织/学校的数据合规要求
 > - 是否需要向用户展示数据处理声明
@@ -160,9 +160,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES=1440
 - 认证：`/api/register`, `/api/login`
 - 宠物：`/api/pets`, `/api/pets/{id}`, `/api/pets/smart-match`
 - 社区：`/api/posts`, `/api/posts/{id}/like`, `/api/posts/{id}/comments`
-- 智能：`/api/chat`, `/api/triage/analyze`, `/api/nutrition/plan`, `/api/adoption/assess`
+- 智能：`/api/chat`, `/api/nutrition/plan`, `/api/adoption/assess`, `/api/mutual-aid/tasks`, `/api/mutual-aid/match`
 - 用户：`/api/user/change-password`, `/api/user/applications/{user_id}`
-- 管理：`/api/admin/users`, `/api/admin/users/sanction`, `/api/admin/users/reactivate`, `/api/admin/applications`, `/api/admin/applications/update`, `/api/admin/moderation/logs`
+- 管理：`/api/admin/users`, `/api/admin/users/sanction`, `/api/admin/users/reactivate`, `/api/admin/applications`, `/api/admin/applications/update`, `/api/admin/moderation/logs`, `/api/admin/mutual-aid/stats`, `/api/admin/mutual-aid/reports`
 - 其他：`/api/announcements`, `/api/upload`
 
 ---
@@ -175,7 +175,18 @@ ACCESS_TOKEN_EXPIRE_MINUTES=1440
 | 领养中心 | `/adopt` | 宠物列表、AI 智能匹配、领养资质评估 |
 | 社区 | `/community` | 帖子发布、点赞、评论 |
 | 百科 | `/wiki` | 宠物养护知识、AI 专家问答 |
-| 智能分诊 | `/triage` | 上传症状图片/描述，AI 预诊 |
+| 宠物互助 | `/mutual-aid` | 发布/接单互助任务，AI 双智能体匹配推荐 |
 | 营养规划 | `/nutrition` | 输入宠物参数，生成个性化喂养方案 |
 | 个人中心 | `/profile` | 修改密码、查看领养申请记录 |
-| 管理后台 | `/dashboard` | 审核申请、用户管理、发布公告（管理员专属） |
+| 管理后台 | `/dashboard` | 审核申请、用户管理、发布公告、互助监控（管理员专属） |
+
+---
+
+## 10. 演示账号
+
+| 账号 | 密码 | 角色 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `admin@demo.com` | `admin123` | org_admin | 管理员，可访问后台 |
+| `demo@demo.com` | `demo123` | individual | 普通用户 |
+
+> 如需重建演示账号，运行：`python scripts/create_demo_accounts.py`
