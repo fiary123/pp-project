@@ -60,7 +60,7 @@ llm_vision = ChatOpenAI(
     temperature=0.1   # 视觉分析要求准确，温度设低
 ) if _QWEN_API_KEY else None
 
-# CrewAI 原生 LLM（用于 run_pet_chat 等直接由 CrewAI 驱动的 Agent）
+# CrewAI 原生 LLM（所有 CrewAI Agent 使用此对象）
 # CrewAI 新版不再接受 langchain ChatOpenAI 对象，需使用自己的 LLM 类
 crewai_llm = LLM(
     model="openai/deepseek-chat",
@@ -68,6 +68,8 @@ crewai_llm = LLM(
     base_url=_DEEPSEEK_BASE_URL,
     temperature=0.3
 )
+# 统一使用 CrewAI 原生 LLM，覆盖旧的 langchain llm 引用
+llm = crewai_llm
 
 # 连接本地向量库
 try:

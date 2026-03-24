@@ -199,11 +199,7 @@ def ensure_tables(conn: sqlite3.Connection):
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
         pet_name TEXT NOT NULL,
-<<<<<<< Updated upstream
-        role TEXT NOT NULL,
-=======
         role TEXT NOT NULL,        -- 'user' or 'pet'
->>>>>>> Stashed changes
         content TEXT NOT NULL,
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
