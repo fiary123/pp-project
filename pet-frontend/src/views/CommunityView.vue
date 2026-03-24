@@ -312,14 +312,14 @@ onMounted(fetchPosts);
           <button @click="loadComments(post.id)" class="flex items-center gap-3 text-base font-black text-gray-500 hover:text-blue-500 group">
             <MessageCircle :size="24" class="group-hover:scale-110 transition-transform" />
             评论
-            <span v-if="activePostComments[post.id]?.length" class="text-xs text-gray-600">{{ activePostComments[post.id].length }}</span>
+            <span v-if="activePostComments[post.id]?.length" class="text-xs text-gray-600">{{ activePostComments[post.id]?.length }}</span>
           </button>
         </div>
 
         <!-- 评论区 -->
         <div v-if="activePostComments[post.id] !== undefined" class="bg-black/20 border-t border-white/5">
           <div class="px-8 pt-6 space-y-4">
-            <div v-if="activePostComments[post.id].length === 0" class="text-center text-gray-600 text-sm py-4">
+            <div v-if="(activePostComments[post.id]?.length ?? 0) === 0" class="text-center text-gray-600 text-sm py-4">
               暂无评论，来发表第一条吧 👋
             </div>
             <div v-for="c in activePostComments[post.id]" :key="c.id" class="flex gap-4">

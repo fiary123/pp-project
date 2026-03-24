@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import {
   Users, CheckCircle2, XCircle, Loader2,
   ShieldAlert, MicOff, UserX, UserCheck, ShieldCheck,
-  Handshake, Flag, BarChart2, AlertTriangle, Ban, X
+  Handshake, Flag, BarChart2, Ban, X
 } from 'lucide-vue-next'
 import { useAuthStore } from '../store/authStore'
 import BaseCard from '../components/BaseCard.vue'
@@ -296,7 +296,7 @@ onMounted(fetchData)
                       'bg-blue-500/20 text-blue-400': task.status === 'accepted',
                       'bg-gray-500/20 text-gray-400': task.status === 'completed',
                       'bg-red-500/20 text-red-400': task.status === 'cancelled',
-                    }]">{{ { open:'待接单', accepted:'已接单', completed:'已完成', cancelled:'已下架' }[task.status] || task.status }}</span>
+                    }]">{{ ({ open:'待接单', accepted:'已接单', completed:'已完成', cancelled:'已下架' } as Record<string,string>)[task.status] || task.status }}</span>
                     <span class="text-gray-500">发布人：{{ task.publisher_name }}</span>
                   </div>
                   <p class="text-white font-bold text-sm truncate">{{ task.pet_name }}（{{ task.pet_species }}）· {{ task.location }}</p>

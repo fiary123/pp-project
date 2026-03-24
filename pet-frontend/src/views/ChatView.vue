@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../store/authStore';
-import { Send, ChevronLeft, Loader2, Sparkles, MessageCircle, User } from 'lucide-vue-next';
+import { Send, ChevronLeft, Loader2, MessageCircle } from 'lucide-vue-next';
 import BaseCard from '../components/BaseCard.vue';
 import api from '../api';
 

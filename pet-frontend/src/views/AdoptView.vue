@@ -3,7 +3,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue';
 import {
   Search, Heart, MapPin, Loader2, X, Wand2, ChevronRight, Edit3, Trash2, Upload,
   CheckCircle2, AlertTriangle, XCircle, ClipboardList, BrainCircuit, ShieldCheck,
-  Mic, Send, Volume2
+  Send, Volume2
 } from 'lucide-vue-next';
 import { useAuthStore } from '../store/authStore';
 import axios from '../api/index';

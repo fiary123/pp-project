@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import {
   Handshake, PlusCircle, ListChecks, BrainCircuit, Loader2,
   CheckCircle2, MapPin, Clock, Cat, Star, Flag, X,
