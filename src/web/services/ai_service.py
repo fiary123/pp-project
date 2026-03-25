@@ -26,9 +26,14 @@ class AIService:
         )
 
     async def ask(self, prompt: str) -> str:
-        """简单的问答接口"""
+        """结构化消息问答接口（SystemMessage + HumanMessage）"""
+        from langchain_core.messages import SystemMessage, HumanMessage
         try:
-            res = await self.llm.ainvoke(prompt)
+            messages = [
+                SystemMessage(content="你是宠物养护平台的专业AI助手，回答简洁、准确、友好。"),
+                HumanMessage(content=prompt),
+            ]
+            res = await self.llm.ainvoke(messages)
             return res.content
         except Exception as e:
             logger.error(f"AIService error: {e}")

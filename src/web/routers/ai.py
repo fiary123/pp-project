@@ -41,7 +41,12 @@ class LLMWrapper:
             temperature=0.3
         )
     async def ask(self, prompt: str) -> str:
-        res = await self.llm.ainvoke(prompt)
+        from langchain_core.messages import SystemMessage, HumanMessage
+        messages = [
+            SystemMessage(content="你是宠物领养平台的中央调度AI，负责意图分类与会话路由。请严格按照指令格式输出，不要添加多余文字。"),
+            HumanMessage(content=prompt),
+        ]
+        res = await self.llm.ainvoke(messages)
         return res.content
 
 coordinator = CoordinatorAgent(LLMWrapper(), get_db)

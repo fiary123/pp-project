@@ -37,8 +37,13 @@ async def publish_post(req: PostCreate, current_user: dict = Depends(get_current
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO posts (user_id, title, content, image_url, type) VALUES (?, ?, ?, ?, ?)",
-            (req.user_id, req.title, req.content, req.image_url, req.type),
+            """INSERT INTO posts
+               (user_id, title, content, image_url, image_urls, type,
+                pet_name, pet_gender, pet_age, pet_breed, adopt_reason, location)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (req.user_id, req.title, req.content, req.image_url, req.image_urls,
+             req.type, req.pet_name, req.pet_gender, req.pet_age,
+             req.pet_breed, req.adopt_reason, req.location),
         )
         conn.commit()
     return {"status": "success"}
@@ -55,8 +60,16 @@ async def update_post(post_id: int, req: PostUpdate, current_user: dict = Depend
         if post["user_id"] != current_user["id"] and current_user.get("role") not in ["org_admin"]:
             raise HTTPException(status_code=403, detail="无权限修改他人帖子")
         cursor.execute(
-            "UPDATE posts SET title=COALESCE(?,title), content=COALESCE(?,content), image_url=COALESCE(?,image_url) WHERE id=?",
-            (req.title, req.content, req.image_url, post_id),
+            """UPDATE posts SET
+               title=COALESCE(?,title), content=COALESCE(?,content),
+               image_url=COALESCE(?,image_url), image_urls=COALESCE(?,image_urls),
+               pet_name=COALESCE(?,pet_name), pet_gender=COALESCE(?,pet_gender),
+               pet_age=COALESCE(?,pet_age), pet_breed=COALESCE(?,pet_breed),
+               adopt_reason=COALESCE(?,adopt_reason), location=COALESCE(?,location)
+               WHERE id=?""",
+            (req.title, req.content, req.image_url, req.image_urls,
+             req.pet_name, req.pet_gender, req.pet_age, req.pet_breed,
+             req.adopt_reason, req.location, post_id),
         )
         conn.commit()
     return {"status": "success"}

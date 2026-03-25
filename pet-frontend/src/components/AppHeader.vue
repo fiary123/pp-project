@@ -53,7 +53,7 @@ const navigate = (path: string) => {
 
       <!-- 搜索和个人资料 -->
       <div class="flex items-center gap-4">
-        <!-- 搜索按钮 AI 分诊功能 -->
+        <!-- 搜索按钮 -->
         <button
           @click="emit('open-command')"
           class="p-2 rounded-full bg-white/5 border border-white/10 text-gray-400 hover:text-orange-400 hover:bg-white/10 transition-all"

@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import {
   Users, CheckCircle2, XCircle, Loader2,
   ShieldAlert, MicOff, UserX, UserCheck, ShieldCheck,
-  Handshake, Flag, BarChart2, Ban, X
+  Handshake, Flag, BarChart2, Ban, X, PlusCircle, Trash2, ClipboardList
 } from 'lucide-vue-next'
 import { useAuthStore } from '../store/authStore'
 import BaseCard from '../components/BaseCard.vue'
@@ -12,7 +12,7 @@ import axios from '../api/index'
 const authStore = useAuthStore()
 
 // 1. 状态管理
-const activeMainTab = ref<'audit' | 'announcement' | 'logs' | 'users' | 'mutual_aid'>('audit')
+const activeMainTab = ref<'audit' | 'announcement' | 'logs' | 'users' | 'mutual_aid' | 'batch_pets'>('audit')
 const applications = ref<any[]>([])
 const announcements = ref<any[]>([])
 const moderationLogs = ref<any[]>([])
@@ -32,6 +32,31 @@ const mutualAidReports = ref<any[]>([])
 const mutualAidTaskFilter = ref('')
 const isMutualAidLoading = ref(false)
 const cancellingTaskId = ref<number | null>(null)
+
+// 批量录入状态
+type PetRow = { name: string; species: string; age: number; gender: string; description: string; image_url: string; location: string }
+const batchPets = ref<PetRow[]>([{ name: '', species: '猫', age: 1, gender: 'unknown', description: '', image_url: '', location: '' }])
+const isBatchSubmitting = ref(false)
+const batchResult = ref<any>(null)
+
+const addPetRow = () => batchPets.value.push({ name: '', species: '猫', age: 1, gender: 'unknown', description: '', image_url: '', location: '' })
+const removePetRow = (i: number) => { if (batchPets.value.length > 1) batchPets.value.splice(i, 1) }
+const submitBatch = async () => {
+  const valid = batchPets.value.filter(p => p.name.trim())
+  if (!valid.length) return alert('请至少填写一条动物姓名')
+  isBatchSubmitting.value = true
+  batchResult.value = null
+  try {
+    const res = await axios.post('/api/pets/batch', {
+      owner_id: authStore.user?.id,
+      pets: valid.map(p => ({ ...p, tags: '[]' }))
+    })
+    batchResult.value = res.data
+    batchPets.value = [{ name: '', species: '猫', age: 1, gender: 'unknown', description: '', image_url: '', location: '' }]
+  } catch (e: any) {
+    alert(e.response?.data?.detail || '提交失败')
+  } finally { isBatchSubmitting.value = false }
+}
 
 // 仲裁弹窗
 const resolveTarget = ref<any>(null)
@@ -144,6 +169,9 @@ onMounted(fetchData)
       <button @click="switchMainTab('mutual_aid')" :class="activeMainTab === 'mutual_aid' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500'" class="px-4 py-2 font-black uppercase tracking-widest text-xs transition-all flex items-center gap-1">
         <Handshake :size="12" />互助监控
         <span v-if="mutualAidStats?.pending_reports > 0" class="ml-1 px-1.5 py-0.5 bg-red-500 text-white text-[10px] font-black rounded-full">{{ mutualAidStats.pending_reports }}</span>
+      </button>
+      <button @click="switchMainTab('batch_pets')" :class="activeMainTab === 'batch_pets' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500'" class="px-4 py-2 font-black uppercase tracking-widest text-xs transition-all flex items-center gap-1">
+        <ClipboardList :size="12" />批量录入动物
       </button>
     </div>
 
@@ -312,6 +340,80 @@ onMounted(fetchData)
             </BaseCard>
           </div>
         </template>
+      </div>
+
+      <!-- 6. 批量录入动物 -->
+      <div v-else-if="activeMainTab === 'batch_pets'" class="space-y-6">
+        <div class="flex items-center justify-between">
+          <h2 class="text-2xl font-black text-white flex items-center gap-3">
+            <div class="p-2 bg-orange-500/10 text-orange-500 rounded-lg"><ClipboardList :size="20" /></div>
+            批量录入流浪动物
+          </h2>
+          <button @click="addPetRow" class="flex items-center gap-2 px-4 py-2 bg-orange-500/10 text-orange-500 rounded-xl text-xs font-black hover:bg-orange-500 hover:text-white transition-all">
+            <PlusCircle :size="14" /> 添加一行
+          </button>
+        </div>
+
+        <!-- 成功提示 -->
+        <BaseCard v-if="batchResult" class="!p-5 border-green-500/30 bg-green-500/5">
+          <p class="text-green-400 font-bold flex items-center gap-2"><CheckCircle2 :size="16" /> 成功录入 {{ batchResult.count }} 只动物，已自动生成送养帖子</p>
+          <p class="text-gray-500 text-xs mt-1">{{ batchResult.created.map((c: any) => c.name).join('、') }}</p>
+        </BaseCard>
+
+        <!-- 表格输入区 -->
+        <BaseCard class="!p-0 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="border-b border-white/5 text-gray-500 uppercase tracking-widest">
+                  <th class="px-4 py-3 text-left font-black">名字 *</th>
+                  <th class="px-4 py-3 text-left font-black">物种</th>
+                  <th class="px-4 py-3 text-left font-black">年龄(岁)</th>
+                  <th class="px-4 py-3 text-left font-black">性别</th>
+                  <th class="px-4 py-3 text-left font-black">所在地</th>
+                  <th class="px-4 py-3 text-left font-black">简介</th>
+                  <th class="px-4 py-3 text-left font-black">图片URL</th>
+                  <th class="px-4 py-3 text-center font-black">删除</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, i) in batchPets" :key="i" class="border-b border-white/5 hover:bg-white/2 transition-colors">
+                  <td class="px-3 py-2"><input v-model="row.name" placeholder="如：小橘" class="w-28 bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-orange-500 transition-all" /></td>
+                  <td class="px-3 py-2">
+                    <select v-model="row.species" class="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-orange-500 transition-all">
+                      <option>猫</option><option>狗</option><option>兔</option><option>其他</option>
+                    </select>
+                  </td>
+                  <td class="px-3 py-2"><input v-model.number="row.age" type="number" min="0" max="30" class="w-16 bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-orange-500 transition-all" /></td>
+                  <td class="px-3 py-2">
+                    <select v-model="row.gender" class="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-orange-500 transition-all">
+                      <option value="unknown">未知</option><option value="male">雄</option><option value="female">雌</option>
+                    </select>
+                  </td>
+                  <td class="px-3 py-2"><input v-model="row.location" placeholder="如：北京朝阳" class="w-28 bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-orange-500 transition-all" /></td>
+                  <td class="px-3 py-2"><input v-model="row.description" placeholder="简短描述" class="w-36 bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-orange-500 transition-all" /></td>
+                  <td class="px-3 py-2"><input v-model="row.image_url" placeholder="https://..." class="w-36 bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-orange-500 transition-all" /></td>
+                  <td class="px-3 py-2 text-center">
+                    <button @click="removePetRow(i)" :disabled="batchPets.length === 1" class="p-1.5 rounded-lg text-red-500/50 hover:bg-red-500/10 hover:text-red-400 transition-all disabled:opacity-20">
+                      <Trash2 :size="14" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </BaseCard>
+
+        <div class="flex justify-end gap-4">
+          <button @click="addPetRow" class="px-6 py-3 bg-white/5 text-gray-400 rounded-xl text-sm font-bold hover:bg-white/10 transition-all flex items-center gap-2">
+            <PlusCircle :size="16" /> 再加一行
+          </button>
+          <button @click="submitBatch" :disabled="isBatchSubmitting" class="px-8 py-3 bg-orange-500 text-white rounded-xl text-sm font-black hover:bg-orange-600 transition-all shadow-lg shadow-orange-500/20 flex items-center gap-2 disabled:opacity-50">
+            <Loader2 v-if="isBatchSubmitting" class="animate-spin" :size="16" />
+            <CheckCircle2 v-else :size="16" />
+            {{ isBatchSubmitting ? '提交中...' : `一键提交 ${batchPets.filter(p=>p.name.trim()).length} 条记录` }}
+          </button>
+        </div>
       </div>
 
     </div>

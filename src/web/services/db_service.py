@@ -67,10 +67,31 @@ def ensure_tables(conn: sqlite3.Connection):
         title TEXT,
         content TEXT NOT NULL,
         image_url TEXT,
-        type TEXT DEFAULT 'daily',  -- daily, experience, adopt_help, seek_help
+        image_urls TEXT,
+        type TEXT DEFAULT 'daily',
+        pet_name TEXT,
+        pet_gender TEXT,
+        pet_age TEXT,
+        pet_breed TEXT,
+        adopt_reason TEXT,
+        location TEXT,
         likes INTEGER DEFAULT 0,
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
+    # 迁移：为旧数据库动态加列
+    for col, definition in [
+        ('image_urls', 'TEXT'),
+        ('pet_name', 'TEXT'),
+        ('pet_gender', 'TEXT'),
+        ('pet_age', 'TEXT'),
+        ('pet_breed', 'TEXT'),
+        ('adopt_reason', 'TEXT'),
+        ('location', 'TEXT'),
+    ]:
+        try:
+            cur.execute(f'ALTER TABLE posts ADD COLUMN {col} {definition}')
+        except Exception:
+            pass
 
     # ── comments ───────────────────────────────────────────────────────────
     cur.execute('''CREATE TABLE IF NOT EXISTS comments (

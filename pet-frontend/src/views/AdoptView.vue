@@ -15,6 +15,7 @@ const pets = ref<any[]>([]);
 const isLoading = ref(true);
 const searchQuery = ref('');
 const activeFilter = ref('全部');
+const sourceFilter = ref('全部'); // 全部 / 机构 / 个人
 const selectedPet = ref<any>(null);
 
 // AI 匹配状态 - 创新点1：多轮对话式需求显化
@@ -22,6 +23,7 @@ const aiQuery = ref('');
 const isAiMatching = ref(false);
 const isLoadingFollowup = ref(false);
 const recommendedMatches = ref<Record<number, any>>({});
+const matchedCount = computed(() => Object.keys(recommendedMatches.value).length);
 
 // 多轮对话状态
 type MatchStep = 'input' | 'followup' | 'result';
@@ -59,7 +61,7 @@ const adoptForm = ref({
 
 // 宠物语音聊天状态
 const petChatMsg = ref('');
-const petChatHistory = ref<Array<{role: string; content: string; create_time?: string}>>([]);
+const petChatHistory = ref<Array<{role: string; content: string; create_time?: string; audio_base64?: string}>>([]);
 const isPetChatLoading = ref(false);
 const petChatScrollRef = ref<HTMLElement | null>(null);
 
@@ -82,18 +84,22 @@ const loadPetChatHistory = async (petName: string) => {
   scrollChatToBottom();
 };
 
-const playAudioBase64 = (base64: string) => {
+const playAudioBase64 = async (base64str: string) => {
   try {
-    const binary = atob(base64);
+    const binary = atob(base64str);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     const blob = new Blob([bytes], { type: 'audio/mpeg' });
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
-    audio.play();
     audio.onended = () => URL.revokeObjectURL(url);
-  } catch (e) {
-    console.warn('语音播放失败', e);
+    await audio.play();
+  } catch (e: any) {
+    if (e?.name === 'NotAllowedError') {
+      console.warn('浏览器自动播放被阻止，请先与页面交互后再试');
+    } else {
+      console.warn('语音播放失败', e);
+    }
   }
 };
 
@@ -114,11 +120,12 @@ const handlePetChat = async () => {
       user_id: authStore.user?.id || null
     });
     const replyText = res.data.text || '';
-    petChatHistory.value.push({ role: 'pet', content: replyText });
+    petChatHistory.value.push({
+      role: 'pet',
+      content: replyText,
+      audio_base64: res.data.audio_base64 || undefined
+    });
     scrollChatToBottom();
-    if (res.data.audio_base64) {
-      playAudioBase64(res.data.audio_base64);
-    }
   } catch {
     petChatHistory.value.push({ role: 'pet', content: '喵～暂时无法回应，稍后再试吧' });
     scrollChatToBottom();
@@ -143,7 +150,7 @@ const handleAdoptAssess = async () => {
     const res = await axios.post('/api/adoption/assess', {
       ...adoptForm.value,
       target_pet_name: adoptingPet.value?.name || '未知宠物'
-    }, { headers: { Authorization: `Bearer ${token}` } });
+    }, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 });
     assessmentResult.value = res.data;
   } catch (err: any) {
     assessmentResult.value = {
@@ -265,6 +272,7 @@ const fetchPets = async () => {
         img: p.image_url || `https://images.unsplash.com/photo-1543466835-00a7907e9de1?sig=${p.id}&auto=format&fit=crop&w=800&q=80`,
         desc: p.description || '暂无详细介绍',
         type: p.type || (p.id % 2 === 0 ? '狗狗' : '猫咪'),
+        owner_type: p.owner_type || 'org',
         distance: (Math.random() * 5).toFixed(1),
         tags: p.tags ? p.tags.split(',') : ['温顺', '粘人'],
         match: 80 + (p.id % 20)
@@ -340,29 +348,41 @@ const handleAiMatchStart = async () => {
 const handleAiMatch = async () => {
   if (!aiQuery.value.trim()) return;
   isAiMatching.value = true;
-  matchStep.value = 'result';
   try {
+    const petSummaries = pets.value.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      species: p.species || p.type,
+      description: p.desc || p.description || '',
+    }));
     const res = await axios.post('/api/pets/smart-match', {
       user_query: aiQuery.value,
-      pet_list: pets.value,
+      pet_list: petSummaries,
       followup_answers: Object.keys(followupAnswers.value).length ? followupAnswers.value : null
-    });
+    }, { timeout: 180000 });
     const matchMap: Record<number, any> = {};
-    if (res.data?.matches) {
+    console.log('[SmartMatch] 后端返回:', res.data);
+    if (res.data?.matches && res.data.matches.length > 0) {
       res.data.matches.forEach((m: any) => {
-        matchMap[m.id] = {
-          fit_score: m.fit_score || 80,
-          reason: m.reason || '综合推荐',
-          fit_advantages: m.fit_advantages || [],
-          potential_challenges: m.potential_challenges || [],
-          mitigation: m.mitigation || ''
-        };
+        if (m.id != null) {
+          matchMap[Number(m.id)] = {
+            fit_score: m.fit_score || 80,
+            reason: m.reason || '综合推荐',
+            fit_advantages: m.fit_advantages || [],
+            potential_challenges: m.potential_challenges || [],
+            mitigation: m.mitigation || ''
+          };
+        }
       });
     }
     recommendedMatches.value = matchMap;
     activeFilter.value = '全部';
     searchQuery.value = '';
-  } catch (err) {}
+    matchStep.value = 'result';
+  } catch (err) {
+    console.error('智能匹配失败', err);
+    matchStep.value = 'followup';
+  }
   finally { isAiMatching.value = false; }
 };
 
@@ -406,12 +426,15 @@ const filteredPets = computed(() => {
     const nameMatch = p.name.toLowerCase().includes(search);
     const speciesMatch = p.species.toLowerCase().includes(search);
     const matchesType = activeFilter.value === '全部' || p.type === activeFilter.value;
-    return (nameMatch || speciesMatch) && matchesType;
+    const matchesSource = sourceFilter.value === '全部'
+      || (sourceFilter.value === '机构' && p.owner_type === 'org')
+      || (sourceFilter.value === '个人' && p.owner_type === 'personal');
+    return (nameMatch || speciesMatch) && matchesType && matchesSource;
   });
   if (recIds.length > 0) {
     return result.sort((a, b) => {
-      const aScore = recommendedMatches.value[a.id]?.fit_score || 0;
-      const bScore = recommendedMatches.value[b.id]?.fit_score || 0;
+      const aScore = recommendedMatches.value[Number(a.id)]?.fit_score || 0;
+      const bScore = recommendedMatches.value[Number(b.id)]?.fit_score || 0;
       return bScore - aScore;
     });
   }
@@ -482,7 +505,7 @@ onMounted(fetchPets);
           <div class="bg-orange-500/10 border border-orange-500/20 rounded-3xl px-8 py-4 flex items-center justify-between">
             <div class="flex items-center gap-3">
               <BrainCircuit class="text-orange-500" :size="20" />
-              <span class="text-orange-400 text-sm font-bold">已为您找到 {{ Object.keys(recommendedMatches).length }} 只匹配宠物，排列在前面</span>
+              <span class="text-orange-400 text-sm font-bold">已为您找到 {{ matchedCount }} 只匹配宠物，已排列在前面</span>
             </div>
             <button @click="resetAiMatch" class="text-gray-500 hover:text-white text-xs transition-colors flex items-center gap-1"><X :size="14" />重新搜索</button>
           </div>
@@ -491,16 +514,33 @@ onMounted(fetchPets);
     </div>
 
     <!-- 过滤器 -->
-    <div class="flex flex-col md:flex-row items-center justify-between gap-6 px-4">
-      <div class="flex items-center gap-2 bg-white/5 p-1.5 rounded-2xl border border-white/5">
-        <button v-for="cat in ['全部', '猫咪', '狗狗', '异宠']" :key="cat" @click="activeFilter = cat"
-          :class="activeFilter === cat ? 'bg-orange-500 text-white' : 'text-gray-400 hover:text-white'" class="px-8 py-3 rounded-xl font-bold transition-all text-sm">
-          {{ cat }}
-        </button>
+    <div class="flex flex-col gap-4 px-4">
+      <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+        <div class="flex items-center gap-2 bg-white/5 p-1.5 rounded-2xl border border-white/5">
+          <button v-for="cat in ['全部', '猫咪', '狗狗', '异宠']" :key="cat" @click="activeFilter = cat"
+            :class="activeFilter === cat ? 'bg-orange-500 text-white' : 'text-gray-400 hover:text-white'" class="px-8 py-3 rounded-xl font-bold transition-all text-sm">
+            {{ cat }}
+          </button>
+        </div>
+        <div class="relative w-full md:w-96 group">
+          <Search class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-orange-500 transition-colors" :size="18" />
+          <input v-model="searchQuery" type="text" placeholder="搜索品种或名字..." class="w-full bg-white/5 border border-white/5 rounded-2xl py-4 pl-14 pr-6 text-white outline-none focus:bg-white/10 transition-all shadow-inner" />
+        </div>
       </div>
-      <div class="relative w-full md:w-96 group">
-        <Search class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-orange-500 transition-colors" :size="18" />
-        <input v-model="searchQuery" type="text" placeholder="搜索品种或名字..." class="w-full bg-white/5 border border-white/5 rounded-2xl py-4 pl-14 pr-6 text-white outline-none focus:bg-white/10 transition-all shadow-inner" />
+      <!-- 来源筛选 -->
+      <div class="flex items-center gap-3">
+        <span class="text-[10px] text-gray-600 font-black uppercase tracking-widest">来源</span>
+        <div class="flex items-center gap-2">
+          <button v-for="src in ['全部', '机构', '个人']" :key="src" @click="sourceFilter = src"
+            :class="sourceFilter === src
+              ? (src === '机构' ? 'bg-blue-500/20 text-blue-400 border-blue-500/40' : src === '个人' ? 'bg-green-500/20 text-green-400 border-green-500/40' : 'bg-white/10 text-white border-white/20')
+              : 'bg-white/5 text-gray-500 border-white/5 hover:border-white/20'"
+            class="px-4 py-1.5 rounded-xl text-xs font-black border transition-all">
+            <span v-if="src === '机构'">🏠 救助机构</span>
+            <span v-else-if="src === '个人'">👤 个人送养</span>
+            <span v-else>全部来源</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -518,6 +558,15 @@ onMounted(fetchPets);
           <div @click="selectedPet = pet" class="relative aspect-square overflow-hidden">
             <img :src="pet.img" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
             <div class="absolute inset-0 bg-gradient-to-t from-[#1a1a1a]/80 via-transparent to-transparent"></div>
+            <!-- 来源标签 -->
+            <div class="absolute top-3 left-3">
+              <span v-if="pet.owner_type === 'org'" class="flex items-center gap-1 px-2 py-1 bg-blue-500/80 backdrop-blur-sm text-white text-[9px] font-black rounded-lg uppercase tracking-wider">
+                🏠 救助机构
+              </span>
+              <span v-else class="flex items-center gap-1 px-2 py-1 bg-green-500/80 backdrop-blur-sm text-white text-[9px] font-black rounded-lg uppercase tracking-wider">
+                👤 个人送养
+              </span>
+            </div>
             <h4 class="absolute bottom-4 left-5 font-black text-xl text-white">{{ pet.name }}</h4>
           </div>
           <div @click="selectedPet = pet" class="p-5 space-y-3 flex-1">
@@ -811,13 +860,21 @@ onMounted(fetchPets);
 
     <!-- 详情弹窗 -->
     <Transition name="fade">
-      <div v-if="selectedPet" class="fixed inset-0 z-[100] flex items-center justify-center p-4 backdrop-blur-2xl">
-        <div class="absolute inset-0 bg-black/80" @click="selectedPet = null"></div>
-        <div class="relative bg-[#111] border border-white/10 rounded-[4rem] max-w-6xl w-full flex flex-col lg:flex-row overflow-hidden shadow-2xl">
-          <div class="lg:w-3/5 group overflow-hidden"><img :src="selectedPet.img" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-1000" /></div>
-          <div class="lg:w-2/5 p-12 space-y-8 text-left">
-            <div><span class="bg-orange-500/20 text-orange-500 px-4 py-1 rounded-full text-[10px] font-black uppercase">{{ selectedPet.type }}</span><h3 class="text-6xl font-black text-white mt-4">{{ selectedPet.name }}</h3></div>
-            <p class="text-gray-400 text-lg leading-relaxed">{{ selectedPet.desc }}</p>
+      <div v-if="selectedPet" class="fixed inset-0 z-[100] flex items-center justify-center p-6 backdrop-blur-xl">
+        <div class="absolute inset-0 bg-black/70" @click="selectedPet = null"></div>
+        <div class="relative bg-[#111] border border-white/10 rounded-3xl max-w-lg w-full shadow-2xl max-h-[90vh] flex flex-col overflow-hidden">
+          <!-- 顶栏：缩略图 + 名称 + 关闭 -->
+          <div class="flex items-center gap-4 px-6 py-4 border-b border-white/5 flex-shrink-0">
+            <img :src="selectedPet.img" class="w-14 h-14 rounded-2xl object-cover flex-shrink-0" />
+            <div class="flex-1 min-w-0">
+              <span class="bg-orange-500/20 text-orange-500 px-2 py-0.5 rounded-full text-[9px] font-black uppercase">{{ selectedPet.type }}</span>
+              <h3 class="text-2xl font-black text-white mt-1 truncate">{{ selectedPet.name }}</h3>
+            </div>
+            <button @click="selectedPet = null" class="w-9 h-9 bg-white/5 hover:bg-white/15 border border-white/10 rounded-full flex items-center justify-center text-gray-400 hover:text-white transition-all flex-shrink-0"><X :size="16" /></button>
+          </div>
+          <!-- 可滚动内容区 -->
+          <div class="overflow-y-auto flex-1 p-6 space-y-5 scrollbar-hide">
+            <p class="text-gray-400 text-sm leading-relaxed">{{ selectedPet.desc }}</p>
             <!-- 创新点3：详情页内联显示结构化推荐解释 -->
             <div v-if="recommendedMatches[selectedPet.id]" class="bg-orange-500/10 border border-orange-500/20 rounded-3xl p-6 space-y-4">
               <div class="flex items-center gap-2 mb-1">
@@ -859,11 +916,20 @@ onMounted(fetchPets);
                     <img v-if="msg.role === 'pet'" :src="selectedPet.img" class="w-full h-full object-cover" />
                     <img v-else :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${authStore.user?.username || 'me'}`" />
                   </div>
-                  <div :class="msg.role === 'user'
-                    ? 'bg-orange-500 text-white rounded-tr-none'
-                    : 'bg-white/10 text-gray-200 rounded-tl-none border border-white/5'"
-                    class="max-w-[75%] px-3 py-2 rounded-2xl text-xs leading-relaxed">
-                    {{ msg.content }}
+                  <div class="flex items-end gap-1 max-w-[75%]">
+                    <div :class="msg.role === 'user'
+                      ? 'bg-orange-500 text-white rounded-tr-none'
+                      : 'bg-white/10 text-gray-200 rounded-tl-none border border-white/5'"
+                      class="px-3 py-2 rounded-2xl text-xs leading-relaxed">
+                      {{ msg.content }}
+                    </div>
+                    <!-- 宠物消息播放按钮 -->
+                    <button v-if="msg.role === 'pet' && msg.audio_base64"
+                      @click="playAudioBase64(msg.audio_base64!)"
+                      class="shrink-0 p-1.5 rounded-full bg-orange-500/20 text-orange-400 hover:bg-orange-500 hover:text-white transition-all"
+                      title="播放语音">
+                      <Volume2 :size="11" />
+                    </button>
                   </div>
                 </div>
                 <!-- 加载中气泡 -->
@@ -888,9 +954,9 @@ onMounted(fetchPets);
               </div>
             </div>
 
-            <div class="flex gap-4 pt-4">
-              <button @click="startAdopt(selectedPet)" class="flex-1 bg-white text-black py-6 rounded-[2rem] font-black text-xl hover:bg-orange-500 hover:text-white transition-all flex items-center justify-center gap-2"><ClipboardList :size="22" />智能申请领养</button>
-              <button @click="openFeedbackModal(selectedPet)" class="p-6 bg-white/5 text-white rounded-[2rem] border border-white/10 hover:bg-green-500/20 hover:border-green-500/30 hover:text-green-400 transition-all" title="领养后回访"><Heart :size="28" /></button>
+            <div class="flex gap-3 pt-2">
+              <button @click="startAdopt(selectedPet)" class="flex-1 bg-white text-black py-4 rounded-2xl font-black text-sm hover:bg-orange-500 hover:text-white transition-all flex items-center justify-center gap-2"><ClipboardList :size="16" />智能申请领养</button>
+              <button @click="openFeedbackModal(selectedPet)" class="px-4 py-4 bg-white/5 text-white rounded-2xl border border-white/10 hover:bg-green-500/20 hover:border-green-500/30 hover:text-green-400 transition-all" title="领养后回访"><Heart :size="18" /></button>
             </div>
           </div>
         </div>

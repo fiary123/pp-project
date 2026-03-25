@@ -2047,7 +2047,7 @@ onMounted(fetchAnnouncements);
         <h2 class="text-8xl md:text-9xl font-black text-white italic tracking-tighter leading-[0.8] uppercase">心灵 <br/> <span class="text-orange-500">相连接</span></h2>
         <p class="text-xl text-gray-400 font-medium max-w-2xl mx-auto leading-relaxed">利用先进的 AI 技术，为您与生命中的另一半建立深厚的情感连接。</p>
         <div class="flex flex-wrap justify-center gap-6 pt-8">
-          <button @click="$router.push('/triage')" class="bg-orange-500 hover:bg-orange-600 text-white px-12 py-6 rounded-3xl font-black text-xl transition-all hover:scale-105 shadow-2xl flex items-center gap-3 uppercase italic">立即开始 <ArrowRight :size="24" /></button>
+          <button @click="$router.push('/adopt')" class="bg-orange-500 hover:bg-orange-600 text-white px-12 py-6 rounded-3xl font-black text-xl transition-all hover:scale-105 shadow-2xl flex items-center gap-3 uppercase italic">立即开始 <ArrowRight :size="24" /></button>
           <button @click="$router.push('/wiki')" class="bg-white/5 hover:bg-white/10 text-white px-12 py-6 rounded-3xl font-black text-xl border border-white/10 backdrop-blur-xl transition-all uppercase italic">了解更多</button>
         </div>
       </div>
@@ -2110,7 +2110,7 @@ onMounted(fetchAnnouncements);
     <!-- 特色板块 (保持原样) -->
     <section class="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-12">
       <div v-for="feat in [
-        { i: Zap, t: 'AI 智能匹配', d: '深度神经网络分析，为您匹配性格最契合的伴侣。', to: '/triage' },
+        { i: Zap, t: 'AI 智能匹配', d: '深度神经网络分析，为您匹配性格最契合的伴侣。', to: '/adopt' },
         { i: ShieldCheck, t: '机构认证', d: '严格的救助机构资质审核，确保每一条信息的真实性。', to: '/adopt' },
         { i: Heart, t: '全程陪伴', d: '全生命周期的养护指导，从医疗到行为纠正一应俱全。', to: '/chat' }
       ]" :key="feat.t" @click="$router.push(feat.to)" class="space-y-6 p-8 rounded-[3rem] bg-gradient-to-b from-white/5 to-transparent border border-white/5 hover:border-orange-500/30 transition-all group cursor-pointer">

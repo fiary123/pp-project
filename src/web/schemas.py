@@ -16,12 +16,27 @@ class PostCreate(BaseModel):
     title: Optional[str] = None
     content: str
     type: str = "daily"
-    image_url: Optional[str] = None
+    image_url: Optional[str] = None          # 兼容旧字段（单图）
+    image_urls: Optional[str] = None         # 多图，JSON 数组字符串
+    # 送养帖专属字段
+    pet_name: Optional[str] = None
+    pet_gender: Optional[str] = None         # male / female / unknown
+    pet_age: Optional[str] = None            # 如 "2岁3个月"
+    pet_breed: Optional[str] = None          # 品种
+    adopt_reason: Optional[str] = None       # 送养原因
+    location: Optional[str] = None           # 所在地址
 
 class PostUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     image_url: Optional[str] = None
+    image_urls: Optional[str] = None
+    pet_name: Optional[str] = None
+    pet_gender: Optional[str] = None
+    pet_age: Optional[str] = None
+    pet_breed: Optional[str] = None
+    adopt_reason: Optional[str] = None
+    location: Optional[str] = None
 
 class CommentCreate(BaseModel):
     post_id: int
@@ -33,6 +48,20 @@ class PetUpdate(BaseModel):
     species: Optional[str] = None
     image_url: Optional[str] = None
     description: Optional[str] = None
+
+class PetBatchItem(BaseModel):
+    name: str
+    species: str = "猫"
+    age: int = 1
+    gender: str = "unknown"          # male / female / unknown
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    location: Optional[str] = None
+    tags: Optional[str] = "[]"
+
+class PetBatchCreate(BaseModel):
+    owner_id: int
+    pets: List[PetBatchItem]
 
 class AnnouncementCreate(BaseModel):
     title: str

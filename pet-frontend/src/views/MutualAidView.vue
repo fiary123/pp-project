@@ -133,7 +133,7 @@ const runAIMatch = async () => {
   setTimeout(() => { matchThoughts.value.push('[TaskAnalyzer] 需求结构化完成，识别任务类型与时间要求...'); matchProgress.value = 50 }, 800)
   setTimeout(() => { matchThoughts.value.push('[HelperMatcher] 正在检索开放任务，计算匹配度...'); matchProgress.value = 75 }, 1800)
   try {
-    const res = await axios.post('/api/mutual-aid/match', { query: matchQuery.value, user_id: authStore.user?.id })
+    const res = await axios.post('/api/mutual-aid/match', { query: matchQuery.value, user_id: authStore.user?.id }, { timeout: 180000 })
     matchProgress.value = 100
     matchResult.value = res.data.reply
     matchThoughts.value.push('[HelperMatcher] 匹配完成，推荐方案已生成。')

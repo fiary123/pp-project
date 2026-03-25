@@ -32,10 +32,6 @@ def test_frontend_missing_endpoints_now_available():
     assert chat.status_code == 200
     assert 'reply' in chat.json()
 
-    triage = client.post('/api/triage/analyze', data={'symptom': '呕吐'})
-    assert triage.status_code == 200
-    assert 'reply' in triage.json()
-
     messages = client.get('/api/messages/1')
     assert messages.status_code == 200
     assert isinstance(messages.json(), list)
