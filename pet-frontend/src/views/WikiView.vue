@@ -1697,6 +1697,124 @@ const allPosts = [
   }
 ]
 
+const defaultThemeImage = 'https://images.pexels.com/photos/406014/pexels-photo-406014.jpeg?auto=compress&cs=tinysrgb&w=1200'
+
+const themeImagePools: Record<string, string[]> = {
+  cat: [
+    'https://images.pexels.com/photos/45201/kitty-cat-kitten-pet-45201.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/2071873/pexels-photo-2071873.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/1276553/pexels-photo-1276553.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  ],
+  dog: [
+    'https://images.pexels.com/photos/4587997/pexels-photo-4587997.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/1108099/pexels-photo-1108099.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/5731866/pexels-photo-5731866.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  ],
+  fish: [
+    'https://images.pexels.com/photos/128756/pexels-photo-128756.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/213399/pexels-photo-213399.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/322098/pexels-photo-322098.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  ],
+  reptile: [
+    'https://images.pexels.com/photos/751689/pexels-photo-751689.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/80474/iguana-reptile-lizard-green-80474.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/45246/turtle-sea-underwater-diving-45246.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  ],
+  amphibian: [
+    'https://images.pexels.com/photos/733090/pexels-photo-733090.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/1462630/pexels-photo-1462630.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/3250638/pexels-photo-3250638.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  ],
+  bird: [
+    'https://images.pexels.com/photos/1661179/pexels-photo-1661179.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/349758/hummingbird-bird-birds-349758.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/56733/pexels-photo-56733.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  ],
+  small: [
+    'https://images.pexels.com/photos/372166/pexels-photo-372166.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/326012/pexels-photo-326012.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/1462637/pexels-photo-1462637.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  ],
+  general: [
+    defaultThemeImage,
+    'https://images.pexels.com/photos/1108099/pexels-photo-1108099.jpeg?auto=compress&cs=tinysrgb&w=1200',
+    'https://images.pexels.com/photos/2071873/pexels-photo-2071873.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  ]
+}
+
+const articleCoverOverrides: Array<{ keyword: string; cover: string }> = [
+  {
+    keyword: '12种令人印象深刻的大型淡水观赏鱼',
+    cover: 'https://images.pexels.com/photos/213399/pexels-photo-213399.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  },
+  {
+    keyword: '胡须龙完全指南',
+    cover: 'https://images.pexels.com/photos/751689/pexels-photo-751689.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  },
+  {
+    keyword: '宠物青蛙入门指南',
+    cover: 'https://images.pexels.com/photos/733090/pexels-photo-733090.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  },
+  {
+    keyword: '荷兰猪：温顺爱叫的"小肥猪"养护全攻略',
+    cover: 'https://images.pexels.com/photos/326012/pexels-photo-326012.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  },
+  {
+    keyword: '金鱼：最经典的观赏鱼完全养护指南',
+    cover: 'https://images.pexels.com/photos/128756/pexels-photo-128756.jpeg?auto=compress&cs=tinysrgb&w=1200'
+  }
+]
+
+const coverLoadErrors = ref<Record<number, boolean>>({})
+const blockImageLoadErrors = ref<Record<string, boolean>>({})
+
+const getPostTheme = (post: any) => {
+  const corpus = `${post.category || ''} ${post.title || ''} ${post.summary || ''} ${Array.isArray(post.content) ? post.content.map((block: any) => block.text || '').join(' ') : ''}`
+
+  if (/鱼|水族|海水缸|淡水|孔雀鱼|灯鱼|龙鱼|食人鱼|水下/.test(corpus)) return 'fish'
+  if (/青蛙|树蛙|角蛙|牛蛙|两栖/.test(corpus)) return 'amphibian'
+  if (/鸟|鹦鹉|玄凤|文鸟/.test(corpus)) return 'bird'
+  if (/爬|蜥蜴|乌龟|龟|守宫|蛇|冷血/.test(corpus)) return 'reptile'
+  if (/猫|幼猫|猫咪/.test(corpus)) return 'cat'
+  if (/狗|幼犬|犬|训犬/.test(corpus)) return 'dog'
+  if (/龙猫|仓鼠|兔|啮齿|荷兰猪/.test(corpus)) return 'small'
+  return 'general'
+}
+
+const getSpecificCoverOverride = (post: any) => {
+  if (!post?.title) return null
+  const matched = articleCoverOverrides.find((item) => post.title.includes(item.keyword))
+  return matched?.cover || null
+}
+
+const pickThemeImage = (theme: string, seed: number) => {
+  const pool = themeImagePools[theme] ?? themeImagePools.general ?? [defaultThemeImage]
+  return pool[Math.abs(seed) % pool.length] ?? defaultThemeImage
+}
+
+const getPostCover = (post: any) => {
+  if (!post) return defaultThemeImage
+  const specificCover = getSpecificCoverOverride(post)
+  const fallback = pickThemeImage(getPostTheme(post), Number(post.id || 0))
+  if (specificCover && !coverLoadErrors.value[post.id]) return specificCover
+  return !post.cover || coverLoadErrors.value[post.id] ? fallback : post.cover
+}
+
+const getBlockImage = (post: any, block: any, index: number) => {
+  const fallback = pickThemeImage(getPostTheme(post), Number(post?.id || 0) + index + 1)
+  const blockKey = `${post?.id ?? 'article'}-${index}`
+  return !block?.url || blockImageLoadErrors.value[blockKey] ? fallback : block.url
+}
+
+const markCoverError = (postId: number) => {
+  coverLoadErrors.value = { ...coverLoadErrors.value, [postId]: true }
+}
+
+const markBlockImageError = (postId: number | undefined, index: number) => {
+  const blockKey = `${postId ?? 'article'}-${index}`
+  blockImageLoadErrors.value = { ...blockImageLoadErrors.value, [blockKey]: true }
+}
+
 // 随机打乱数组（Fisher-Yates）
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr]
@@ -1804,15 +1922,15 @@ const handleAsk = async () => {
             <div v-for="post in filteredPosts" :key="post.id" @click="selectedArticleId = post.id"
                  class="group bg-[#1a1a1a] rounded-[2.5rem] overflow-hidden border border-white/5 hover:border-orange-500/40 transition-all cursor-pointer shadow-2xl">
               <div class="h-56 overflow-hidden relative">
-                <img :src="post.cover" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" />
+                <img :src="getPostCover(post)" @error="markCoverError(post.id)" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" />
                 <div class="absolute top-4 left-4 bg-orange-500 text-white text-[10px] font-black px-2 py-1 rounded-full uppercase">{{ categoryNames[post.category] || post.category }}</div>
               </div>
               <div class="p-8 space-y-4">
                 <h3 class="text-xl font-bold text-white group-hover:text-orange-400 leading-tight transition-colors">{{ post.title }}</h3>
                 <p class="text-xs text-gray-500 leading-relaxed line-clamp-2">{{ post.summary }}</p>
-                <div class="flex items-center justify-between pt-4 border-t border-white/5 text-gray-600 text-[10px] font-bold">
-                  <span class="flex items-center gap-1"><Eye :size="12"/> {{ post.views }} 阅读</span>
-                  <span class="text-orange-500 uppercase tracking-widest">阅读全文</span>
+                <div class="flex items-center justify-between pt-4 border-t border-white/5 text-gray-500 text-xs md:text-sm font-bold">
+                  <span class="flex items-center gap-1.5"><Eye :size="14"/> {{ post.views }} 阅读</span>
+                  <span class="text-orange-500 uppercase tracking-[0.18em] text-sm md:text-base">阅读全文</span>
                 </div>
               </div>
             </div>
@@ -1821,7 +1939,7 @@ const handleAsk = async () => {
 
         <div v-else key="reader" class="bg-white rounded-[3.5rem] text-gray-900 overflow-hidden shadow-2xl">
           <div class="relative h-[400px]">
-            <img :src="currentArticle?.cover" class="w-full h-full object-cover" />
+            <img :src="getPostCover(currentArticle)" @error="currentArticle && markCoverError(currentArticle.id)" class="w-full h-full object-cover" />
             <div class="absolute inset-0 bg-gradient-to-t from-white/20 via-transparent to-transparent"></div>
             <button @click="selectedArticleId = null" class="absolute top-10 left-10 p-4 bg-black/10 backdrop-blur-xl rounded-full text-white hover:bg-black/30 transition-all">
               <ChevronLeft :size="24" />
@@ -1841,7 +1959,7 @@ const handleAsk = async () => {
                 <div v-else-if="block.type === 'quote'" class="bg-orange-50 p-8 rounded-[2rem] border-l-[6px] border-orange-500 my-8">
                   <p class="text-lg font-bold text-orange-900">{{ block.text }}</p>
                 </div>
-                <img v-else-if="block.type === 'img'" :src="block.url" class="rounded-[2.5rem] shadow-xl my-10 w-full" />
+                <img v-else-if="block.type === 'img'" :src="getBlockImage(currentArticle, block, i)" @error="markBlockImageError(currentArticle?.id, i)" class="rounded-[2.5rem] shadow-xl my-10 w-full object-cover" />
               </div>
             </div>
           </article>

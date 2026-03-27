@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends
 from typing import Optional
 import json
+import logging
 from src.web.schemas import (
     ChatRequest, NutritionPlanRequest, SmartMatchRequest,
     NutritionFeedbackRequest, NutritionReplanRequest, AdoptionAssessmentRequest,
@@ -8,7 +9,7 @@ from src.web.schemas import (
     MutualAidTaskCreate, MutualAidMatchRequest, MutualAidAcceptRequest,
     MutualAidReportRequest
 )
-from src.agents.agents import run_pet_chat
+from src.agents.agents import analyze_pet_interview, run_pet_chat
 from src.web.services.ai_service import (
     get_agent_reply, generate_nutrition_plan,
     get_smart_match, get_match_followup_questions, submit_adoption_feedback,
@@ -24,6 +25,7 @@ from langchain_openai import ChatOpenAI
 import os
 
 router = APIRouter(prefix="/api", tags=["ai"])
+logger = logging.getLogger(__name__)
 
 # 初始化子智能体
 # 使用 DEEPSEEK_API_KEY 和 DEEPSEEK_BASE_URL 明确标识供应商，避免与 OpenAI 混淆。
@@ -245,6 +247,40 @@ async def get_pet_chat_history(pet_name: str, user_id: int):
     return rows
 
 
+@router.get("/pet-chat/profile")
+async def get_pet_chat_profile(pet_name: str, user_id: int):
+    """获取用户与指定宠物聊天过程中形成的隐式领养画像。"""
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT profile_json, summary, updated_at FROM pet_chat_profiles WHERE user_id=? AND pet_name=?",
+            (user_id, pet_name)
+        )
+        row = cursor.fetchone()
+    if not row:
+        return {
+            "profile": {
+                "user_traits": [],
+                "strengths": [],
+                "risk_flags": [],
+                "missing_topics": [],
+                "next_probe": "",
+                "interview_stage": "early",
+                "summary": ""
+            },
+            "updated_at": None
+        }
+    try:
+        profile = json.loads(row["profile_json"] or "{}")
+    except Exception:
+        profile = {}
+    if not profile.get("summary") and row["summary"]:
+        profile["summary"] = row["summary"]
+    return {"profile": profile, "updated_at": row["updated_at"]}
+
+
 @router.post("/pet-chat")
 @limiter.limit("10/minute")
 async def pet_chat(request: Request, req: PetChatRequest):
@@ -253,43 +289,111 @@ async def pet_chat(request: Request, req: PetChatRequest):
     支持长期记忆：从数据库读取历史对话注入上下文，并将本轮对话存入数据库。
     """
     history = []
-    if req.user_id:
-        with get_db() as conn:
-            from src.web.services.db_service import ensure_tables
-            ensure_tables(conn)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT role, content FROM pet_chat_history "
-                "WHERE user_id=? AND pet_name=? ORDER BY create_time ASC LIMIT 10",
-                (req.user_id, req.pet_name)
-            )
-            history = [dict(r) for r in cursor.fetchall()]
+    observer_profile = {
+        "user_traits": [],
+        "strengths": [],
+        "risk_flags": [],
+        "missing_topics": [],
+        "next_probe": "你平时会怎么照顾我呀？",
+        "interview_stage": "early",
+        "summary": ""
+    }
+    response_text = "我刚刚有点紧张，不过我还是很想继续认识你。你愿意再和我说说你的生活节奏吗？"
+    audio_base64 = None
 
-    response_text, audio_base64 = run_pet_chat(
-        user_msg=req.user_msg,
-        pet_name=req.pet_name,
-        pet_species=req.pet_species,
-        pet_desc=req.pet_desc,
-        history=history
-    )
+    try:
+        if req.user_id:
+            with get_db() as conn:
+                from src.web.services.db_service import ensure_tables
+                ensure_tables(conn)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT role, content FROM pet_chat_history "
+                    "WHERE user_id=? AND pet_name=? ORDER BY create_time ASC LIMIT 10",
+                    (req.user_id, req.pet_name)
+                )
+                history = [dict(r) for r in cursor.fetchall()]
+                cursor.execute(
+                    "SELECT profile_json, summary FROM pet_chat_profiles WHERE user_id=? AND pet_name=?",
+                    (req.user_id, req.pet_name)
+                )
+                profile_row = cursor.fetchone()
+                if profile_row:
+                    try:
+                        observer_profile = json.loads(profile_row["profile_json"] or "{}")
+                    except Exception:
+                        observer_profile = {}
+                    if profile_row["summary"] and not observer_profile.get("summary"):
+                        observer_profile["summary"] = profile_row["summary"]
 
-    # 存储本轮对话
+        observer_profile = await analyze_pet_interview(
+            user_msg=req.user_msg,
+            pet_name=req.pet_name,
+            pet_species=req.pet_species,
+            pet_desc=req.pet_desc,
+            history=history,
+            previous_profile=observer_profile,
+        )
+
+        response_text, audio_base64 = await run_pet_chat(
+            user_msg=req.user_msg,
+            pet_name=req.pet_name,
+            pet_species=req.pet_species,
+            pet_desc=req.pet_desc,
+            history=history,
+            observer_profile=observer_profile,
+        )
+    except Exception:
+        logger.exception("pet_chat pipeline failed")
+        observer_profile = {
+            **observer_profile,
+            "summary": observer_profile.get("summary") or f"已记录你正在了解{req.pet_name}，系统会继续补充画像。"
+        }
+        if "猫" in req.pet_species:
+            response_text = "喵，我刚刚有点卡壳了，不过还是想继续认识你。你平时下班后能陪我多久呀？"
+        elif "狗" in req.pet_species or "犬" in req.pet_species:
+            response_text = "汪，我刚才没接上话，不过我还是很想了解你。你每天能带我出门和陪我玩吗？"
+        else:
+            response_text = "我刚刚有点紧张，不过还是想继续认识你。你愿意再和我说说你的照顾计划吗？"
+
     if req.user_id:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO pet_chat_history (user_id, pet_name, role, content) VALUES (?,?,?,?)",
-                (req.user_id, req.pet_name, "user", req.user_msg)
-            )
-            cursor.execute(
-                "INSERT INTO pet_chat_history (user_id, pet_name, role, content) VALUES (?,?,?,?)",
-                (req.user_id, req.pet_name, "pet", response_text)
-            )
-            conn.commit()
+        try:
+            with get_db() as conn:
+                from src.web.services.db_service import ensure_tables
+                ensure_tables(conn)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO pet_chat_history (user_id, pet_name, role, content) VALUES (?,?,?,?)",
+                    (req.user_id, req.pet_name, "user", req.user_msg)
+                )
+                cursor.execute(
+                    "INSERT INTO pet_chat_history (user_id, pet_name, role, content) VALUES (?,?,?,?)",
+                    (req.user_id, req.pet_name, "pet", response_text)
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO pet_chat_profiles (user_id, pet_name, profile_json, summary, updated_at)
+                    VALUES (?,?,?,?,CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id, pet_name) DO UPDATE SET
+                        profile_json=excluded.profile_json,
+                        summary=excluded.summary,
+                        updated_at=CURRENT_TIMESTAMP
+                    """,
+                    (
+                        req.user_id,
+                        req.pet_name,
+                        json.dumps(observer_profile, ensure_ascii=False),
+                        observer_profile.get("summary", "")
+                    )
+                )
+                conn.commit()
+        except Exception:
+            logger.exception("pet_chat persistence failed")
 
     return {
         "text": response_text,
-        "audio_base64": audio_base64
+        "audio_base64": audio_base64,
+        "observer_profile": observer_profile
     }
 
 

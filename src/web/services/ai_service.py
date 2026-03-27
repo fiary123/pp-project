@@ -140,24 +140,17 @@ def submit_adoption_feedback(
     free_feedback: str
 ) -> int:
     """
-    创新点3：领养后回访反馈存储。
-    将真实领养质量标注写入数据库，作为后续匹配模型的监督信号（数据飞轮闭环）。
+    创新点3：领养后回访反馈存储 + 向量记忆沉淀。
     """
     with get_db() as conn:
         cursor = conn.cursor()
-        # 确保表存在（首次调用时自动创建）
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS adoption_feedbacks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                pet_id INTEGER,
-                pet_name TEXT,
-                overall_satisfaction INTEGER,
-                bond_level TEXT,
-                unexpected_challenges TEXT,
-                would_recommend INTEGER,
-                free_feedback TEXT,
-                create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+                user_id INTEGER, pet_id INTEGER, pet_name TEXT,
+                overall_satisfaction INTEGER, bond_level TEXT,
+                unexpected_challenges TEXT, would_recommend INTEGER,
+                free_feedback TEXT, create_time DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
         cursor.execute(
@@ -170,6 +163,36 @@ def submit_adoption_feedback(
         )
         feedback_id = cursor.lastrowid
         conn.commit()
+
+    # --- 核心增强：写入 ChromaDB 经验库 ---
+    try:
+        from src.database.db_config import CHROMA_DB_PATH
+        import chromadb
+        chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+        collection = chroma_client.get_or_create_collection(name="adoption_experience")
+        
+        # 构建经验文档：将画像特征与反馈融合
+        # 注意：这里我们简单模拟从 pet_name 提取画像，实际可结合 applicant_info
+        experience_doc = (
+            f"领养宠物: {pet_name} | 满意度: {overall_satisfaction}/5 | "
+            f"亲密感: {bond_level} | 挑战: {unexpected_challenges or '无'} | "
+            f"评价: {free_feedback or '未填写'}"
+        )
+        
+        collection.add(
+            ids=[f"feedback_{feedback_id}"],
+            documents=[experience_doc],
+            metadatas=[{
+                "pet_id": pet_id,
+                "satisfaction": overall_satisfaction,
+                "challenges": unexpected_challenges or "无",
+                "recommendation": "推荐领养" if would_recommend else "谨慎建议"
+            }]
+        )
+        logger.info(f"Feedback {feedback_id} has been vectorized into adoption_experience memory.")
+    except Exception as e:
+        logger.error(f"Failed to vectorize feedback to memory: {e}")
+
     return feedback_id
 
 def generate_nutrition_plan(data: dict) -> Tuple[dict, str, str, int]:

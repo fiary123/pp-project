@@ -57,14 +57,65 @@ const taskTypes = ['上门喂养', '上门铲屎', '代遛狗', '宠物陪伴', 
 const isPublishing = ref(false)
 const publishSuccess = ref(false)
 
+// 日期时间拆分选择器辅助状态
+const genDateOptions = () => {
+  const opts: string[] = []
+  const now = new Date()
+  for (let i = 0; i < 60; i++) {
+    const d = new Date(now)
+    d.setDate(now.getDate() + i)
+    opts.push(d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', weekday: 'short' }).replace(/\//g, '-'))
+  }
+  return opts
+}
+const genTimeOptions = () => {
+  const opts: string[] = []
+  for (let h = 0; h < 24; h++) {
+    for (const m of ['00', '30']) {
+      opts.push(`${String(h).padStart(2, '0')}:${m}`)
+    }
+  }
+  return opts
+}
+
+const dateOptions = genDateOptions()
+const timeOptions = genTimeOptions()
+
+// 实际用于选择的中间状态
+const startDate = ref('') // e.g. "03-25(周二)"
+const startTime = ref('09:00')
+const endDate   = ref('')
+const endTime   = ref('18:00')
+
+// 把选项中的 "MM-DD(周X)" 转换为 "YYYY-MM-DDTHH:mm" 格式
+const buildDatetime = (dateLabel: string, time: string): string => {
+  if (!dateLabel) return ''
+  const now = new Date()
+  for (let i = 0; i < 60; i++) {
+    const d = new Date(now)
+    d.setDate(now.getDate() + i)
+    const label = d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', weekday: 'short' }).replace(/\//g, '-')
+    if (label === dateLabel) {
+      const y = d.getFullYear()
+      const mo = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${y}-${mo}-${day}T${time}`
+    }
+  }
+  return ''
+}
+
 const publishTask = async () => {
-  if (!form.value.pet_name || !form.value.location || !form.value.start_time) return
+  form.value.start_time = buildDatetime(startDate.value, startTime.value)
+  form.value.end_time   = buildDatetime(endDate.value, endTime.value)
+  if (!form.value.pet_name || !form.value.location || !startDate.value) return
   isPublishing.value = true
   publishSuccess.value = false
   try {
     await axios.post('/api/mutual-aid/tasks', { ...form.value, user_id: authStore.user?.id })
     publishSuccess.value = true
     form.value = { task_type: '上门喂养', pet_name: '', pet_species: '猫', start_time: '', end_time: '', location: '', description: '' }
+    startDate.value = ''; startTime.value = '09:00'; endDate.value = ''; endTime.value = '18:00'
     await fetchTasks()
     switchTab('list')
   } catch { } finally { isPublishing.value = false }
@@ -266,16 +317,34 @@ onMounted(fetchTasks)
               </select>
             </div>
           </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">开始时间 *</label>
-              <input v-model="form.start_time" type="datetime-local"
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all" />
+          <!-- 开始时间 -->
+          <div>
+            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">开始时间 *</label>
+            <div class="grid grid-cols-2 gap-3">
+              <select v-model="startDate"
+                class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all">
+                <option value="" disabled>选择日期</option>
+                <option v-for="d in dateOptions" :key="d" :value="d">{{ d }}</option>
+              </select>
+              <select v-model="startTime"
+                class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all">
+                <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
+              </select>
             </div>
-            <div>
-              <label class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">结束时间</label>
-              <input v-model="form.end_time" type="datetime-local"
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all" />
+          </div>
+          <!-- 结束时间 -->
+          <div>
+            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">结束时间 <span class="text-gray-600 normal-case font-normal">（选填）</span></label>
+            <div class="grid grid-cols-2 gap-3">
+              <select v-model="endDate"
+                class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all">
+                <option value="">不限结束日期</option>
+                <option v-for="d in dateOptions" :key="d" :value="d">{{ d }}</option>
+              </select>
+              <select v-model="endTime"
+                class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all">
+                <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
+              </select>
             </div>
           </div>
           <div>
@@ -288,11 +357,19 @@ onMounted(fetchTasks)
             <textarea v-model="form.description" rows="3" placeholder="例如：猫咪每天喂两次，饮水盆需加满..."
               class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all resize-none" />
           </div>
-          <button @click="publishTask" :disabled="isPublishing || !form.pet_name || !form.location || !form.start_time"
-            class="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-700 text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-2 transition-all">
+          <!-- 未填完提示 -->
+          <p v-if="!form.pet_name || !startDate || !form.location" class="text-xs text-yellow-500/80 text-center flex items-center justify-center gap-1">
+            <AlertTriangle :size="12" />
+            请填写：{{ [!form.pet_name && '宠物名称', !startDate && '开始日期', !form.location && '地点'].filter(Boolean).join('、') }}
+          </p>
+          <button @click="publishTask" :disabled="isPublishing"
+            :class="(!form.pet_name || !startDate || !form.location)
+              ? 'bg-white/10 text-gray-500 border border-white/10 cursor-not-allowed'
+              : 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/30 active:scale-95'"
+            class="w-full py-5 rounded-2xl font-black text-lg flex items-center justify-center gap-2 transition-all">
             <Loader2 v-if="isPublishing" class="animate-spin" :size="20" />
             <PlusCircle v-else :size="20" />
-            {{ isPublishing ? '发布中...' : '发布互助需求' }}
+            {{ isPublishing ? '发布中...' : '确认发布互助需求' }}
           </button>
         </BaseCard>
 

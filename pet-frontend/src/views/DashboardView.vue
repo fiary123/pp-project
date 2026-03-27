@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import {
   Users, CheckCircle2, XCircle, Loader2,
   ShieldAlert, MicOff, UserX, UserCheck, ShieldCheck,
-  Handshake, Flag, BarChart2, Ban, X, PlusCircle, Trash2, ClipboardList
+  Handshake, Flag, BarChart2, Ban, X, PlusCircle, Trash2, ClipboardList, FileText, Heart, Megaphone, Activity
 } from 'lucide-vue-next'
 import { useAuthStore } from '../store/authStore'
 import BaseCard from '../components/BaseCard.vue'
@@ -12,12 +12,16 @@ import axios from '../api/index'
 const authStore = useAuthStore()
 
 // 1. 状态管理
-const activeMainTab = ref<'audit' | 'announcement' | 'logs' | 'users' | 'mutual_aid' | 'batch_pets'>('audit')
+const activeMainTab = ref<'overview' | 'audit' | 'announcement' | 'logs' | 'users' | 'mutual_aid' | 'batch_pets'>('overview')
 const applications = ref<any[]>([])
 const announcements = ref<any[]>([])
 const moderationLogs = ref<any[]>([])
 const allUsers = ref<any[]>([])
+const overviewStats = ref<any>(null)
 const isLoading = ref(false)
+const auditFlowFilter = ref('全部')
+const auditRiskFilter = ref('全部')
+const auditNeedConflictOnly = ref(false)
 
 // 处罚表单
 const showSanctionModal = ref(false)
@@ -38,6 +42,51 @@ type PetRow = { name: string; species: string; age: number; gender: string; desc
 const batchPets = ref<PetRow[]>([{ name: '', species: '猫', age: 1, gender: 'unknown', description: '', image_url: '', location: '' }])
 const isBatchSubmitting = ref(false)
 const batchResult = ref<any>(null)
+
+const appStatusMap: Record<string, { label: string; color: string; bg: string }> = {
+  pending: { label: '待处理', color: 'text-gray-300', bg: 'bg-white/5' },
+  pending_owner_review: { label: '待送养方处理', color: 'text-orange-400', bg: 'bg-orange-500/10' },
+  approved: { label: '已通过', color: 'text-green-400', bg: 'bg-green-500/10' },
+  rejected: { label: '已拒绝', color: 'text-red-400', bg: 'bg-red-500/10' },
+  probing: { label: '追问中', color: 'text-orange-300', bg: 'bg-orange-500/10' },
+  human_review: { label: '人工复核中', color: 'text-blue-400', bg: 'bg-blue-500/10' },
+}
+
+const flowStatusMap: Record<string, { label: string; color: string; bg: string }> = {
+  submitted: { label: '已提交', color: 'text-gray-300', bg: 'bg-white/5' },
+  prechecked: { label: '规则预筛完成', color: 'text-yellow-300', bg: 'bg-yellow-500/10' },
+  expert_review: { label: '专家评估中', color: 'text-orange-300', bg: 'bg-orange-500/10' },
+  need_more_info: { label: '等待补充信息', color: 'text-orange-400', bg: 'bg-orange-500/10' },
+  waiting_publisher: { label: '等待发布者处理', color: 'text-blue-400', bg: 'bg-blue-500/10' },
+  approved: { label: '流程通过', color: 'text-green-400', bg: 'bg-green-500/10' },
+  rejected: { label: '流程拒绝', color: 'text-red-400', bg: 'bg-red-500/10' },
+  manual_review: { label: '进入人工复核', color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
+}
+
+const auditFlowCards = computed(() => {
+  const counts: Record<string, number> = {}
+  applications.value.forEach((app: any) => {
+    const key = app.flow_status || 'submitted'
+    counts[key] = (counts[key] || 0) + 1
+  })
+  return [
+    { key: 'submitted', label: '新提交', value: counts.submitted || 0, color: 'text-gray-300' },
+    { key: 'need_more_info', label: '待补充', value: counts.need_more_info || 0, color: 'text-orange-400' },
+    { key: 'waiting_publisher', label: '待发布者', value: counts.waiting_publisher || 0, color: 'text-blue-400' },
+    { key: 'manual_review', label: '待人工复核', value: counts.manual_review || 0, color: 'text-cyan-400' },
+    { key: 'approved', label: '流程通过', value: counts.approved || 0, color: 'text-green-400' },
+    { key: 'rejected', label: '流程拒绝', value: counts.rejected || 0, color: 'text-red-400' },
+  ]
+})
+
+const filteredAuditApplications = computed(() => {
+  return applications.value.filter((app: any) => {
+    const flowMatch = auditFlowFilter.value === '全部' || (app.flow_status || 'submitted') === auditFlowFilter.value
+    const riskMatch = auditRiskFilter.value === '全部' || (app.risk_level || 'Medium') === auditRiskFilter.value
+    const conflictMatch = !auditNeedConflictOnly.value || !!(app.conflict_notes?.length || app.followup_questions?.length)
+    return flowMatch && riskMatch && conflictMatch
+  })
+})
 
 const addPetRow = () => batchPets.value.push({ name: '', species: '猫', age: 1, gender: 'unknown', description: '', image_url: '', location: '' })
 const removePetRow = (i: number) => { if (batchPets.value.length > 1) batchPets.value.splice(i, 1) }
@@ -106,12 +155,14 @@ const submitResolve = async () => {
 const fetchData = async () => {
   isLoading.value = true
   try {
-    const [apps, notices, logs, users] = await Promise.all([
+    const [overview, apps, notices, logs, users] = await Promise.all([
+      axios.get('/api/admin/overview/stats'),
       axios.get('/api/admin/applications'),
       axios.get('/api/announcements'),
       axios.get('/api/admin/moderation/logs'),
       axios.get('/api/admin/users')
     ])
+    overviewStats.value = overview.data
     applications.value = apps.data
     announcements.value = notices.data
     moderationLogs.value = logs.data
@@ -159,9 +210,12 @@ onMounted(fetchData)
 </script>
 
 <template>
-  <div class="space-y-8 pb-20 px-4">
+  <div class="space-y-6 md:space-y-8 pb-16 md:pb-20 px-3 md:px-4">
     <!-- A. 顶部切换导航 -->
-    <div class="flex flex-wrap gap-4 border-b border-white/5 pb-4">
+    <div class="flex gap-3 md:gap-4 border-b border-white/5 pb-4 overflow-x-auto scrollbar-hide">
+      <button @click="switchMainTab('overview')" :class="activeMainTab === 'overview' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500'" class="px-4 py-2 font-black uppercase tracking-widest text-xs transition-all flex items-center gap-1">
+        <BarChart2 :size="12" />数据总览
+      </button>
       <button @click="switchMainTab('audit')" :class="activeMainTab === 'audit' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500'" class="px-4 py-2 font-black uppercase tracking-widest text-xs transition-all">领养审核中心</button>
       <button @click="switchMainTab('announcement')" :class="activeMainTab === 'announcement' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500'" class="px-4 py-2 font-black uppercase tracking-widest text-xs transition-all">全站公告发布</button>
       <button @click="switchMainTab('users')" :class="activeMainTab === 'users' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500'" class="px-4 py-2 font-black uppercase tracking-widest text-xs transition-all">全站用户治理</button>
@@ -180,9 +234,116 @@ onMounted(fetchData)
     </div>
 
     <div v-else class="animate-in fade-in duration-700">
-      
+      <div v-if="activeMainTab === 'overview'" class="space-y-6 md:space-y-8">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <h2 class="text-xl md:text-2xl font-black text-white flex items-center gap-3">
+            <div class="p-2 bg-orange-500/10 text-orange-500 rounded-lg"><BarChart2 :size="20" /></div>
+            平台运营总览
+          </h2>
+          <p class="text-[10px] md:text-xs text-gray-500 uppercase tracking-widest font-black">管理员可视化数据面板</p>
+        </div>
+
+        <div v-if="overviewStats?.summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+          <BaseCard v-for="card in [
+            { label: '总发帖数', value: overviewStats.summary.total_posts, icon: FileText, color: 'text-orange-400' },
+            { label: '领养成功数', value: overviewStats.summary.successful_adoptions, icon: Heart, color: 'text-green-400' },
+            { label: '总申请数', value: overviewStats.summary.total_applications, icon: ClipboardList, color: 'text-blue-400' },
+            { label: '总用户数', value: overviewStats.summary.total_users, icon: Users, color: 'text-yellow-400' },
+            { label: '待领养宠物', value: overviewStats.summary.pets_waiting, icon: Activity, color: 'text-pink-400' },
+            { label: '宠物总数', value: overviewStats.summary.total_pets, icon: Heart, color: 'text-cyan-400' },
+            { label: '公告总数', value: overviewStats.summary.total_announcements, icon: Megaphone, color: 'text-purple-400' },
+            { label: 'AI 运行记录', value: overviewStats.summary.total_ai_traces, icon: ShieldCheck, color: 'text-emerald-400' },
+            { label: '采纳 AI 建议', value: overviewStats.summary.owner_followed_ai, icon: CheckCircle2, color: 'text-lime-400' },
+            { label: '未采纳 AI 建议', value: overviewStats.summary.owner_rejected_ai, icon: XCircle, color: 'text-rose-400' },
+          ]" :key="card.label" class="!p-4 md:!p-5 space-y-2 md:space-y-3">
+            <div class="flex items-center justify-between">
+              <component :is="card.icon" :size="20" :class="card.color" />
+              <span class="text-[10px] text-gray-600 uppercase tracking-widest font-black">{{ card.label }}</span>
+            </div>
+            <p :class="['text-2xl md:text-3xl font-black break-words', card.color]">{{ card.value }}</p>
+          </BaseCard>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <BaseCard class="!p-4 md:!p-6 space-y-4 md:space-y-5">
+            <div class="flex items-center gap-2 text-white font-black">
+              <FileText :size="18" class="text-orange-400" /> 发帖类型分布
+            </div>
+            <div class="space-y-4">
+              <div v-for="item in [
+                { label: '日常分享', value: overviewStats?.post_breakdown?.daily || 0, color: 'bg-orange-500' },
+                { label: '经验攻略', value: overviewStats?.post_breakdown?.experience || 0, color: 'bg-blue-500' },
+                { label: '送养帖子', value: overviewStats?.post_breakdown?.adopt_help || 0, color: 'bg-green-500' }
+              ]" :key="item.label" class="space-y-1">
+                <div class="flex justify-between text-xs">
+                  <span class="text-gray-400 font-bold">{{ item.label }}</span>
+                  <span class="text-white font-black">{{ item.value }}</span>
+                </div>
+                <div class="h-3 rounded-full bg-white/5 overflow-hidden">
+                  <div class="h-full rounded-full transition-all" :class="item.color" :style="{ width: `${Math.max(8, (item.value / Math.max(1, overviewStats?.summary?.total_posts || 1)) * 100)}%` }"></div>
+                </div>
+              </div>
+            </div>
+          </BaseCard>
+
+          <BaseCard class="!p-4 md:!p-6 space-y-4 md:space-y-5">
+            <div class="flex items-center gap-2 text-white font-black">
+              <ClipboardList :size="18" class="text-orange-400" /> 领养申请状态
+            </div>
+            <div class="space-y-4">
+              <div v-for="item in [
+                { label: '待送养方处理', value: (overviewStats?.application_breakdown?.pending_owner_review || 0) + (overviewStats?.application_breakdown?.pending || 0), color: 'bg-yellow-500' },
+                { label: '已通过', value: overviewStats?.application_breakdown?.approved || 0, color: 'bg-green-500' },
+                { label: '已拒绝', value: overviewStats?.application_breakdown?.rejected || 0, color: 'bg-red-500' },
+                { label: '平台拦截', value: overviewStats?.application_breakdown?.platform_blocked || 0, color: 'bg-gray-500' }
+              ]" :key="item.label" class="space-y-1">
+                <div class="flex justify-between text-xs">
+                  <span class="text-gray-400 font-bold">{{ item.label }}</span>
+                  <span class="text-white font-black">{{ item.value }}</span>
+                </div>
+                <div class="h-3 rounded-full bg-white/5 overflow-hidden">
+                  <div class="h-full rounded-full transition-all" :class="item.color" :style="{ width: `${Math.max(8, (item.value / Math.max(1, overviewStats?.summary?.total_applications || 1)) * 100)}%` }"></div>
+                </div>
+              </div>
+            </div>
+          </BaseCard>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <BaseCard class="!p-4 md:!p-6 space-y-4 md:space-y-5">
+            <div class="flex items-center gap-2 text-white font-black">
+              <BarChart2 :size="18" class="text-orange-400" /> 近 7 天发帖趋势
+            </div>
+            <div class="space-y-3">
+              <div v-for="row in overviewStats?.recent_posts || []" :key="row.d" class="grid grid-cols-[72px_1fr_32px] md:grid-cols-[88px_1fr_40px] items-center gap-2 md:gap-3">
+                <span class="text-[10px] md:text-xs text-gray-500 font-mono">{{ row.d }}</span>
+                <div class="h-3 rounded-full bg-white/5 overflow-hidden">
+                  <div class="h-full rounded-full bg-orange-500" :style="{ width: `${Math.max(10, (row.cnt / Math.max(1, Math.max(...((overviewStats?.recent_posts || []).map((i:any) => i.cnt)), 1))) * 100)}%` }"></div>
+                </div>
+                <span class="text-[10px] md:text-xs text-white font-black text-right">{{ row.cnt }}</span>
+              </div>
+            </div>
+          </BaseCard>
+
+          <BaseCard class="!p-4 md:!p-6 space-y-4 md:space-y-5">
+            <div class="flex items-center gap-2 text-white font-black">
+              <BarChart2 :size="18" class="text-green-400" /> 近 7 天申请趋势
+            </div>
+            <div class="space-y-3">
+              <div v-for="row in overviewStats?.recent_applications || []" :key="row.d" class="grid grid-cols-[72px_1fr_32px] md:grid-cols-[88px_1fr_40px] items-center gap-2 md:gap-3">
+                <span class="text-[10px] md:text-xs text-gray-500 font-mono">{{ row.d }}</span>
+                <div class="h-3 rounded-full bg-white/5 overflow-hidden">
+                  <div class="h-full rounded-full bg-green-500" :style="{ width: `${Math.max(10, (row.cnt / Math.max(1, Math.max(...((overviewStats?.recent_applications || []).map((i:any) => i.cnt)), 1))) * 100)}%` }"></div>
+                </div>
+                <span class="text-[10px] md:text-xs text-white font-black text-right">{{ row.cnt }}</span>
+              </div>
+            </div>
+          </BaseCard>
+        </div>
+      </div>
+
       <!-- 1. 用户治理中心 -->
-      <div v-if="activeMainTab === 'users'" class="space-y-6">
+      <div v-else-if="activeMainTab === 'users'" class="space-y-6">
         <div class="flex items-center justify-between mb-2">
           <h2 class="text-2xl font-black text-white flex items-center gap-3">
             <div class="p-2 bg-blue-500/10 text-blue-500 rounded-lg"><Users :size="20" /></div>
@@ -227,16 +388,142 @@ onMounted(fetchData)
 
       <!-- 2. 其它 Tab (略，保持逻辑) -->
       <div v-else-if="activeMainTab === 'audit'" class="space-y-4">
-        <!-- 领养审核代码... -->
-        <BaseCard v-for="app in applications" :key="app.id" class="!p-6 flex items-center justify-between">
-          <div class="flex items-center gap-6">
-            <div class="w-12 h-12 rounded-xl bg-orange-500/10 flex items-center justify-center text-orange-500"><Users :size="24"/></div>
-            <div><h4 class="text-lg font-bold text-white">{{ app.user_name }}</h4><p class="text-xs text-gray-400 mt-1">理由：{{ app.reason }}</p></div>
+        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4">
+          <BaseCard v-for="card in auditFlowCards" :key="card.key" class="!p-4 md:!p-5 space-y-2">
+            <p class="text-[10px] text-gray-500 font-black uppercase tracking-widest">{{ card.label }}</p>
+            <p :class="['text-2xl md:text-3xl font-black', card.color]">{{ card.value }}</p>
+          </BaseCard>
+        </div>
+
+        <BaseCard class="!p-4 md:!p-5">
+          <div class="flex flex-col xl:flex-row xl:items-center gap-4 xl:justify-between">
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="text-[10px] text-gray-500 font-black uppercase tracking-widest">流程筛选</span>
+              <div class="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+                <button
+                  v-for="item in ['全部', 'submitted', 'need_more_info', 'waiting_publisher', 'manual_review', 'approved', 'rejected']"
+                  :key="item"
+                  @click="auditFlowFilter = item"
+                  :class="auditFlowFilter === item ? 'bg-orange-500 text-white border-orange-500' : 'bg-white/5 text-gray-400 border-white/10 hover:border-orange-500/40'"
+                  class="px-3 py-2 rounded-xl text-[10px] font-black uppercase border transition-all"
+                >
+                  {{ item === '全部' ? '全部' : (flowStatusMap[item]?.label || item) }}
+                </button>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="text-[10px] text-gray-500 font-black uppercase tracking-widest">风险筛选</span>
+              <div class="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-1">
+                <button
+                  v-for="risk in ['全部', 'Low', 'Medium', 'High']"
+                  :key="risk"
+                  @click="auditRiskFilter = risk"
+                  :class="auditRiskFilter === risk ? 'bg-blue-500 text-white border-blue-500' : 'bg-white/5 text-gray-400 border-white/10 hover:border-blue-500/40'"
+                  class="px-3 py-2 rounded-xl text-[10px] font-black uppercase border transition-all"
+                >
+                  {{ risk === '全部' ? '全部风险' : risk }}
+                </button>
+              </div>
+              <button
+                @click="auditNeedConflictOnly = !auditNeedConflictOnly"
+                :class="auditNeedConflictOnly ? 'bg-red-500 text-white border-red-500' : 'bg-white/5 text-gray-400 border-white/10 hover:border-red-500/40'"
+                class="px-3 py-2 rounded-xl text-[10px] font-black uppercase border transition-all"
+              >
+                只看冲突/追问
+              </button>
+            </div>
           </div>
-          <div class="flex gap-2">
-            <button @click="handleAudit(app.id, '已通过')" class="p-2 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all"><CheckCircle2 :size="18"/></button>
-            <button @click="handleAudit(app.id, '已驳回')" class="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"><XCircle :size="18"/></button>
+          <div class="mt-4 text-[10px] text-gray-500 font-black uppercase tracking-widest">
+            当前结果：{{ filteredAuditApplications.length }} 条申请
           </div>
+        </BaseCard>
+
+        <BaseCard v-for="app in filteredAuditApplications" :key="app.id" class="!p-4 md:!p-6 space-y-5">
+          <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-5">
+            <div class="flex items-center gap-5">
+              <div class="w-14 h-14 rounded-2xl bg-orange-500/10 flex items-center justify-center text-orange-500">
+                <Users :size="24"/>
+              </div>
+              <div class="space-y-2">
+                <div class="flex flex-wrap items-center gap-2">
+                  <h4 class="text-lg font-bold text-white">{{ app.user_name }} → {{ app.pet_name || `宠物#${app.pet_id}` }}</h4>
+                  <span :class="[appStatusMap[app.status]?.bg, appStatusMap[app.status]?.color]" class="px-3 py-1 rounded-full text-[10px] font-black uppercase border border-white/5">
+                    {{ appStatusMap[app.status]?.label || app.status || '未知状态' }}
+                  </span>
+                  <span v-if="app.flow_status" :class="[flowStatusMap[app.flow_status]?.bg, flowStatusMap[app.flow_status]?.color]" class="px-3 py-1 rounded-full text-[10px] font-black uppercase border border-white/5">
+                    {{ flowStatusMap[app.flow_status]?.label || app.flow_status }}
+                  </span>
+                </div>
+                <p class="text-xs text-gray-400 leading-6">申请理由：{{ app.reason }}</p>
+                <p class="text-[10px] text-gray-500 uppercase tracking-widest">送养方：{{ app.owner_name || '未关联' }} · 风险：{{ app.risk_level || 'Medium' }} · 共识：{{ app.consensus_score ?? app.ai_readiness_score ?? 'N/A' }}</p>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 xl:min-w-[340px] w-full xl:w-auto">
+              <div class="bg-white/5 rounded-2xl p-4">
+                <p class="text-[10px] text-gray-500 font-black uppercase tracking-widest">AI评分</p>
+                <p class="text-2xl font-black text-orange-400 mt-1">{{ app.ai_readiness_score ?? 'N/A' }}</p>
+              </div>
+              <div class="bg-white/5 rounded-2xl p-4">
+                <p class="text-[10px] text-gray-500 font-black uppercase tracking-widest">当前动作</p>
+                <p class="text-sm font-black text-white mt-2">{{ app.flow_status || 'submitted' }}</p>
+              </div>
+              <div class="bg-white/5 rounded-2xl p-4">
+                <p class="text-[10px] text-gray-500 font-black uppercase tracking-widest">缺失字段</p>
+                <p class="text-sm font-black text-yellow-300 mt-2">{{ app.missing_fields?.length || 0 }}</p>
+              </div>
+              <div class="bg-white/5 rounded-2xl p-4">
+                <p class="text-[10px] text-gray-500 font-black uppercase tracking-widest">冲突数</p>
+                <p class="text-sm font-black text-red-300 mt-2">{{ app.conflict_notes?.length || 0 }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="app.ai_summary || app.publisher_feedback || app.manual_review_reason" class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <div v-if="app.ai_summary" class="bg-orange-500/5 border border-orange-500/10 rounded-2xl p-5">
+              <p class="text-[10px] font-black text-orange-400 uppercase tracking-widest mb-3">AI 摘要</p>
+              <p class="text-xs text-gray-300 leading-6 line-clamp-5">{{ app.ai_summary }}</p>
+            </div>
+            <div v-if="app.publisher_feedback" class="bg-blue-500/5 border border-blue-500/10 rounded-2xl p-5">
+              <p class="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-3">发布者反馈</p>
+              <p class="text-xs text-gray-300 leading-6">{{ app.publisher_feedback }}</p>
+            </div>
+            <div v-if="app.manual_review_reason" class="bg-cyan-500/5 border border-cyan-500/10 rounded-2xl p-5">
+              <p class="text-[10px] font-black text-cyan-400 uppercase tracking-widest mb-3">人工复核原因</p>
+              <p class="text-xs text-gray-300 leading-6">{{ app.manual_review_reason }}</p>
+            </div>
+          </div>
+
+          <div v-if="app.conflict_notes?.length || app.followup_questions?.length" class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div v-if="app.conflict_notes?.length" class="bg-red-500/5 border border-red-500/10 rounded-2xl p-5">
+              <p class="text-[10px] font-black text-red-400 uppercase tracking-widest mb-3">专家冲突点</p>
+              <ul class="space-y-2">
+                <li v-for="item in app.conflict_notes" :key="item" class="text-xs text-gray-300 flex items-start gap-2"><span class="text-red-500">!</span>{{ item }}</li>
+              </ul>
+            </div>
+            <div v-if="app.followup_questions?.length" class="bg-yellow-500/5 border border-yellow-500/10 rounded-2xl p-5">
+              <p class="text-[10px] font-black text-yellow-300 uppercase tracking-widest mb-3">建议追问</p>
+              <ul class="space-y-2">
+                <li v-for="item in app.followup_questions" :key="item" class="text-xs text-gray-300 flex items-start gap-2"><span class="text-yellow-400">?</span>{{ item }}</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-3 pt-3 border-t border-white/5">
+            <button @click="handleAudit(app.id, 'approved')" class="flex-1 sm:flex-none px-4 py-3 bg-green-500/10 text-green-400 rounded-2xl text-xs font-black hover:bg-green-500 hover:text-white transition-all flex items-center justify-center gap-2">
+              <CheckCircle2 :size="16"/> 管理员通过
+            </button>
+            <button @click="handleAudit(app.id, 'rejected')" class="flex-1 sm:flex-none px-4 py-3 bg-red-500/10 text-red-400 rounded-2xl text-xs font-black hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2">
+              <XCircle :size="16"/> 管理员驳回
+            </button>
+            <button @click="handleAudit(app.id, 'human_review')" class="w-full sm:w-auto px-4 py-3 bg-blue-500/10 text-blue-400 rounded-2xl text-xs font-black hover:bg-blue-500 hover:text-white transition-all flex items-center justify-center gap-2">
+              <ShieldCheck :size="16"/> 标记人审
+            </button>
+          </div>
+        </BaseCard>
+
+        <BaseCard v-if="filteredAuditApplications.length === 0" class="!p-10 text-center text-gray-500">
+          当前筛选条件下暂无申请记录
         </BaseCard>
       </div>
 

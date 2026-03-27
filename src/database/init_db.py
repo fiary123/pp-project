@@ -26,7 +26,8 @@ def init_database():
     tables_to_drop = [
         "adopt_records", "credit_events", "user_credit_profiles",
         "nutrition_feedbacks", "nutrition_plans", "agent_trace_logs",
-        "user_sanctions", "moderation_logs", "messages", "comments",
+        "user_sanctions", "moderation_logs", "pet_chat_profiles", "pet_chat_history",
+        "messages", "comments",
         "posts", "applications", "announcements", "pets", "users",
     ]
     for t in tables_to_drop:
@@ -50,6 +51,7 @@ def init_database():
     cursor.execute('''CREATE TABLE pets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        source_post_id INTEGER REFERENCES posts(id) ON DELETE SET NULL,
         owner_type TEXT DEFAULT 'org',  -- org (救助站) or personal (个人送养)
         name TEXT NOT NULL,
         species TEXT,
@@ -58,6 +60,7 @@ def init_database():
         energy_level TEXT,
         description TEXT,
         image_url TEXT,
+        adoption_preferences TEXT,
         tags TEXT DEFAULT '[]',
         lng REAL,
         lat REAL,
@@ -104,7 +107,24 @@ def init_database():
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
         pet_id INTEGER REFERENCES pets(id) ON DELETE CASCADE,
         apply_reason TEXT,
-        status TEXT DEFAULT 'pending',  -- pending, approved, rejected
+        pet_owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        ai_decision TEXT,
+        ai_readiness_score REAL,
+        ai_summary TEXT,
+        flow_status TEXT DEFAULT 'submitted',
+        risk_level TEXT DEFAULT 'Medium',
+        consensus_score REAL,
+        missing_fields TEXT,
+        conflict_notes TEXT,
+        followup_questions TEXT,
+        publisher_feedback TEXT,
+        manual_review_reason TEXT,
+        memory_scope TEXT,
+        owner_note TEXT,
+        owner_followed_ai INTEGER,
+        decision_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        decision_time DATETIME,
+        status TEXT DEFAULT 'pending_owner_review',  -- pending_owner_review, approved, rejected, platform_blocked
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
 
@@ -199,6 +219,29 @@ def init_database():
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id)
     )''')
+
+    # ── pet_chat_history ───────────────────────────────────────────────────
+    cursor.execute('''CREATE TABLE pet_chat_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        pet_name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+    cursor.execute("CREATE INDEX idx_pet_chat_history_user_pet ON pet_chat_history(user_id, pet_name)")
+
+    # ── pet_chat_profiles ──────────────────────────────────────────────────
+    cursor.execute('''CREATE TABLE pet_chat_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        pet_name TEXT NOT NULL,
+        profile_json TEXT DEFAULT '{}',
+        summary TEXT DEFAULT '',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, pet_name)
+    )''')
+    cursor.execute("CREATE INDEX idx_pet_chat_profiles_user_pet ON pet_chat_profiles(user_id, pet_name)")
 
     # ── adopt_records ──────────────────────────────────────────────────────
     cursor.execute('''CREATE TABLE adopt_records (

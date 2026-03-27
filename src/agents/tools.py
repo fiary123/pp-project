@@ -257,37 +257,146 @@ def generate_followup_questions(user_query: str) -> str:
     参数 user_query: 用户的原始需求描述，例如"想养一只适合公寓的宠物"
     返回 JSON 数组字符串，每项含 key、question、options 三个字段。
     """
-    # 基于关键词启发式生成追问，作为 LLM 的结构化输入补充
-    questions = []
-    q = user_query.lower()
+    import json as _json
 
-    if not any(k in q for k in ['活跃', '安静', '好动', '懒']):
+    raw_query = user_query or ""
+    q = raw_query.lower()
+
+    def contains_any(text: str, keywords: list[str]) -> bool:
+        return any(k in text for k in keywords)
+
+    species = "unknown"
+    if contains_any(raw_query, ["猫", "猫咪", "狸花", "英短", "布偶", "橘猫"]):
+        species = "cat"
+    elif contains_any(raw_query, ["狗", "狗狗", "小狗", "柯基", "金毛", "比熊", "柴犬"]):
+        species = "dog"
+    elif contains_any(raw_query, ["兔", "仓鼠", "龙猫", "鹦鹉", "异宠"]):
+        species = "other"
+
+    has_age = contains_any(raw_query, ["幼", "成", "老年", "几个月", "岁", "月", "奶猫", "幼犬"])
+    has_breed = contains_any(raw_query, [
+        "狸花", "英短", "美短", "布偶", "金渐层", "橘猫", "奶牛猫",
+        "柯基", "金毛", "边牧", "柴犬", "比熊", "拉布拉多", "哈士奇"
+    ])
+    has_temperament = contains_any(raw_query, [
+        "粘人", "亲人", "安静", "活泼", "高冷", "聪明", "温顺", "不粘人", "独立"
+    ])
+    has_space = contains_any(raw_query, ["公寓", "别墅", "院子", "平方", "㎡", "出租屋"])
+    has_time = contains_any(raw_query, ["时间", "陪伴", "上班", "在家", "出差", "加班"])
+    has_experience = contains_any(raw_query, ["经验", "养过", "第一次", "新手", "老手"])
+    has_size = contains_any(raw_query, ["小型", "中型", "大型", "体型"])
+    has_hair = contains_any(raw_query, ["掉毛", "长毛", "短毛", "毛少", "毛多"])
+
+    questions = []
+
+    if species == "unknown":
         questions.append({
-            "key": "activity_level",
-            "question": "您希望宠物平时是活泼好动还是安静陪伴型的？",
-            "options": ["活泼爱玩", "温和安静", "都可以"]
+            "key": "species_preference",
+            "question": "您现在更偏向哪一类宠物？我可以按这个方向继续细化推荐。",
+            "options": ["猫咪优先", "狗狗优先", "其他宠物也可以"]
         })
-    if not any(k in q for k in ['公寓', '别墅', '院子', '平方', '㎡']):
-        questions.append({
-            "key": "living_space",
-            "question": "您的居住空间大概是什么情况？",
-            "options": ["小型公寓(60㎡以下)", "中等户型(60-120㎡)", "大户型/有院子"]
-        })
-    if not any(k in q for k in ['时间', '陪伴', '上班', '在家']):
-        questions.append({
-            "key": "time_availability",
-            "question": "平时每天能陪伴宠物大概多长时间？",
-            "options": ["2小时以内", "2-4小时", "4小时以上"]
-        })
-    if not any(k in q for k in ['经验', '养过', '第一次', '新手']):
+
+    if species == "cat":
+        if not has_age:
+            questions.append({
+                "key": "cat_age_preference",
+                "question": "您更想要什么年龄段的猫咪？粘人感和适应速度通常会和年龄有关。",
+                "options": ["幼猫更好", "成猫更合适", "年龄不是重点"]
+            })
+        if not has_breed:
+            questions.append({
+                "key": "cat_breed_preference",
+                "question": "您对猫咪品种有偏好吗？还是更看重性格合适就行？",
+                "options": ["指定品种", "田园猫也可以", "只看性格合适"]
+            })
+        if not has_hair:
+            questions.append({
+                "key": "cat_hair_preference",
+                "question": "在毛发和打理上，您更偏向哪种类型的猫咪？",
+                "options": ["短毛省心", "长毛颜值高", "都可以接受"]
+            })
+
+    if species == "dog":
+        if not has_size:
+            questions.append({
+                "key": "dog_size_preference",
+                "question": "您更想养什么体型的狗狗？这会直接影响空间和运动需求。",
+                "options": ["小型犬", "中型犬", "大型犬也可以"]
+            })
+        if not has_age:
+            questions.append({
+                "key": "dog_age_preference",
+                "question": "您更倾向幼犬、成犬，还是只要脾气合适都可以？",
+                "options": ["幼犬", "成犬", "年龄不是重点"]
+            })
+        if not has_breed:
+            questions.append({
+                "key": "dog_breed_preference",
+                "question": "您是有明确想要的品种，还是先从性格和生活习惯来匹配？",
+                "options": ["已有想要的品种", "先看性格匹配", "都可以"]
+            })
+
+    if species == "other" and not has_experience:
         questions.append({
             "key": "experience_level",
-            "question": "您之前有养宠物的经验吗？",
+            "question": "异宠的饲养差异比较大，想先确认一下，您之前有相关经验吗？",
+            "options": ["完全没有", "有一点经验", "养过类似宠物"]
+        })
+
+    if has_temperament and not has_age:
+        questions.append({
+            "key": "temperament_age_balance",
+            "question": "您刚才提到了性格偏好，那您更在意性格稳定，还是愿意慢慢陪它建立亲密感？",
+            "options": ["更看重现成的稳定性格", "可以慢慢培养感情", "都可以"]
+        })
+
+    if not has_space:
+        questions.append({
+            "key": "living_space",
+            "question": "您平时的居住空间大概是什么情况？我会避开明显不适合的类型。",
+            "options": ["小型公寓(60㎡以下)", "中等户型(60-120㎡)", "大户型/有院子"]
+        })
+    if not has_time:
+        questions.append({
+            "key": "time_availability",
+            "question": "平时每天大概能陪伴宠物多久？这会影响我对陪伴型宠物的推荐。",
+            "options": ["2小时以内", "2-4小时", "4小时以上"]
+        })
+    if not has_experience:
+        questions.append({
+            "key": "experience_level",
+            "question": "最后再确认一下，您是第一次养宠，还是已经有一些经验了？",
             "options": ["完全没有", "有一些经验", "资深宠主"]
         })
 
-    import json as _json
-    return _json.dumps(questions[:3], ensure_ascii=False)
+    if not questions:
+        questions = [
+            {
+                "key": "primary_priority",
+                "question": "如果只能优先满足一个条件，您最看重的是性格、品种，还是饲养难度？",
+                "options": ["性格最重要", "品种最重要", "省心好养最重要"]
+            },
+            {
+                "key": "living_space",
+                "question": "您的居住空间大概是什么情况？我会据此避开不适合的小伙伴。",
+                "options": ["小型公寓(60㎡以下)", "中等户型(60-120㎡)", "大户型/有院子"]
+            },
+            {
+                "key": "time_availability",
+                "question": "平时每天大概能陪伴宠物多久？",
+                "options": ["2小时以内", "2-4小时", "4小时以上"]
+            }
+        ]
+
+    deduped = []
+    seen_keys = set()
+    for item in questions:
+        if item["key"] in seen_keys:
+            continue
+        seen_keys.add(item["key"])
+        deduped.append(item)
+
+    return _json.dumps(deduped[:3], ensure_ascii=False)
 
 
 # ==========================================
@@ -366,3 +475,47 @@ def score_pet_match(user_profile_json: str, pet_list_json: str) -> str:
 
     results.sort(key=lambda x: x["fit_score"], reverse=True)
     return _json.dumps(results[:5], ensure_ascii=False)
+
+# ==========================================
+# 9. 领养经验召回工具 (Feedback Memory Layer)
+# ==========================================
+@tool("recall_adoption_experience")
+def recall_adoption_experience(applicant_profile_tags: str):
+    """
+    根据申请人的特征标签（如：租房, 新手, 边牧, 预算低），从历史领养回访经验库中检索相似案例。
+    返回历史案例的真实满意度、遇到的挑战和建议，帮助本次审核进行“先例参考”。
+    参数 applicant_profile_tags: 描述申请人特征的关键词字符串。
+    """
+    try:
+        chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+        collection = chroma_client.get_or_create_collection(name="adoption_experience")
+
+        if collection.count() == 0:
+            return "【经验库】目前尚无历史案例积累，请基于通用准则评估。"
+
+        results = collection.query(
+            query_texts=[applicant_profile_tags],
+            n_results=2,
+            include=["documents", "metadatas"]
+        )
+
+        docs = results.get("documents", [[]])[0]
+        metas = results.get("metadatas", [[]])[0]
+
+        if not docs:
+            return "【经验库】未找到高度相似的历史案例。"
+
+        experience_reports = []
+        for doc, meta in zip(docs, metas):
+            report = (
+                f"- 相似历史案例：{doc}\n"
+                f"  * 满意度：{meta.get('satisfaction', '?')}/5\n"
+                f"  * 挑战：{meta.get('challenges', '无')}\n"
+                f"  * 建议：{meta.get('recommendation', '继续观察')}"
+            )
+            experience_reports.append(report)
+
+        return "【历史先例参考】\n" + "\n---\n".join(experience_reports)
+
+    except Exception as e:
+        return f"经验库调用异常: {str(e)}"

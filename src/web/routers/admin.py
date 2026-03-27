@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends
 from src.web.schemas import UserSanctionRequest, ApplicationUpdateRequest
 from src.web.services.db_service import get_db_connection, ensure_tables
@@ -5,6 +7,86 @@ from src.web.dependencies import require_admin
 
 # 在 APIRouter 级别添加依赖，使得该文件下所有路由默认受保护
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_admin)])
+
+
+@router.get("/overview/stats")
+def get_overview_stats():
+    conn = get_db_connection()
+    ensure_tables(conn)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total_users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM posts")
+    total_posts = cursor.fetchone()[0]
+
+    cursor.execute("SELECT type, COUNT(*) AS cnt FROM posts GROUP BY type")
+    post_type_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+    cursor.execute("SELECT COUNT(*) FROM applications")
+    total_applications = cursor.fetchone()[0]
+
+    cursor.execute("SELECT status, COUNT(*) AS cnt FROM applications GROUP BY status")
+    app_status_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+    cursor.execute("SELECT COUNT(*) FROM applications WHERE owner_followed_ai = 1")
+    owner_followed_ai = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM applications WHERE owner_followed_ai = 0")
+    owner_rejected_ai = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM adopt_records")
+    successful_adoptions = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM pets")
+    total_pets = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM pets WHERE status='待领养'")
+    pets_waiting = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM announcements")
+    total_announcements = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM agent_trace_logs")
+    total_ai_traces = cursor.fetchone()[0]
+
+    cursor.execute("SELECT DATE(create_time) AS d, COUNT(*) AS cnt FROM posts GROUP BY DATE(create_time) ORDER BY d DESC LIMIT 7")
+    recent_post_rows = [dict(r) for r in cursor.fetchall()][::-1]
+
+    cursor.execute("SELECT DATE(create_time) AS d, COUNT(*) AS cnt FROM applications GROUP BY DATE(create_time) ORDER BY d DESC LIMIT 7")
+    recent_application_rows = [dict(r) for r in cursor.fetchall()][::-1]
+
+    conn.close()
+
+    return {
+        "summary": {
+            "total_users": total_users,
+            "total_posts": total_posts,
+            "successful_adoptions": successful_adoptions,
+            "total_applications": total_applications,
+            "pets_waiting": pets_waiting,
+            "total_pets": total_pets,
+            "total_announcements": total_announcements,
+            "total_ai_traces": total_ai_traces,
+            "owner_followed_ai": owner_followed_ai,
+            "owner_rejected_ai": owner_rejected_ai,
+        },
+        "post_breakdown": {
+            "daily": post_type_map.get("daily", 0),
+            "experience": post_type_map.get("experience", 0),
+            "adopt_help": post_type_map.get("adopt_help", 0),
+        },
+        "application_breakdown": {
+            "pending_owner_review": app_status_map.get("pending_owner_review", 0),
+            "pending": app_status_map.get("pending", 0),
+            "approved": app_status_map.get("approved", 0),
+            "rejected": app_status_map.get("rejected", 0),
+            "platform_blocked": app_status_map.get("platform_blocked", 0),
+        },
+        "recent_posts": recent_post_rows,
+        "recent_applications": recent_application_rows,
+    }
 
 @router.get("/users")
 def get_admin_users():
@@ -65,8 +147,33 @@ def get_admin_applications():
     cursor.execute("PRAGMA table_info(applications)")
     cols = {r[1] for r in cursor.fetchall()}
     order_col = "create_time" if "create_time" in cols else "id"
-    cursor.execute(f"SELECT * FROM applications ORDER BY {order_col} DESC")
-    rows = [dict(r) for r in cursor.fetchall()]
+    cursor.execute(
+        f"""
+        SELECT a.*,
+               u.username AS user_name,
+               a.apply_reason AS reason,
+               p.name AS pet_name,
+               o.username AS owner_name
+        FROM applications a
+        LEFT JOIN users u ON a.user_id = u.id
+        LEFT JOIN users o ON a.pet_owner_id = o.id
+        LEFT JOIN pets p ON a.pet_id = p.id
+        ORDER BY a.{order_col} DESC
+        """
+    )
+    rows = []
+    for row in cursor.fetchall():
+        item = dict(row)
+        for key in ("missing_fields", "conflict_notes", "followup_questions"):
+            raw = item.get(key)
+            if raw:
+                try:
+                    item[key] = json.loads(raw)
+                except Exception:
+                    item[key] = []
+            else:
+                item[key] = []
+        rows.append(item)
     conn.close()
     return rows
 
@@ -75,7 +182,16 @@ async def update_application(req: ApplicationUpdateRequest):
     conn = get_db_connection()
     ensure_tables(conn)
     cursor = conn.cursor()
-    cursor.execute("UPDATE applications SET status=? WHERE id=?", (req.status, req.app_id))
+    flow_status = {
+        "approved": "approved",
+        "rejected": "rejected",
+        "human_review": "manual_review",
+        "probing": "need_more_info",
+    }.get(req.status, "waiting_publisher")
+    cursor.execute(
+        "UPDATE applications SET status=?, flow_status=? WHERE id=?",
+        (req.status, flow_status, req.app_id)
+    )
     conn.commit()
     conn.close()
     return {"status": "success"}

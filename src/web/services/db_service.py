@@ -44,6 +44,7 @@ def ensure_tables(conn: sqlite3.Connection):
     cur.execute('''CREATE TABLE IF NOT EXISTS pets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        source_post_id INTEGER REFERENCES posts(id) ON DELETE SET NULL,
         owner_type TEXT DEFAULT 'org',  -- org (救助站) or personal (个人送养)
         name TEXT NOT NULL,
         species TEXT,
@@ -52,6 +53,7 @@ def ensure_tables(conn: sqlite3.Connection):
         energy_level TEXT,
         description TEXT,
         image_url TEXT,
+        adoption_preferences TEXT,
         tags TEXT DEFAULT '[]',
         lng REAL,
         lat REAL,
@@ -59,6 +61,14 @@ def ensure_tables(conn: sqlite3.Connection):
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
+    try:
+        cur.execute('ALTER TABLE pets ADD COLUMN adoption_preferences TEXT')
+    except Exception:
+        pass
+    try:
+        cur.execute('ALTER TABLE pets ADD COLUMN source_post_id INTEGER')
+    except Exception:
+        pass
 
     # ── posts ──────────────────────────────────────────────────────────────
     cur.execute('''CREATE TABLE IF NOT EXISTS posts (
@@ -122,6 +132,29 @@ def ensure_tables(conn: sqlite3.Connection):
         status TEXT DEFAULT 'pending',  -- pending, approved, rejected
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
+    for col, definition in [
+        ('pet_owner_id', 'INTEGER'),
+        ('ai_decision', 'TEXT'),
+        ('ai_readiness_score', 'REAL'),
+        ('ai_summary', 'TEXT'),
+        ('flow_status', 'TEXT'),
+        ('risk_level', 'TEXT'),
+        ('consensus_score', 'REAL'),
+        ('missing_fields', 'TEXT'),
+        ('conflict_notes', 'TEXT'),
+        ('followup_questions', 'TEXT'),
+        ('publisher_feedback', 'TEXT'),
+        ('manual_review_reason', 'TEXT'),
+        ('memory_scope', 'TEXT'),
+        ('owner_note', 'TEXT'),
+        ('owner_followed_ai', 'INTEGER'),
+        ('decision_by', 'INTEGER'),
+        ('decision_time', 'DATETIME'),
+    ]:
+        try:
+            cur.execute(f'ALTER TABLE applications ADD COLUMN {col} {definition}')
+        except Exception:
+            pass
 
     # ── announcements ──────────────────────────────────────────────────────
     cur.execute('''CREATE TABLE IF NOT EXISTS announcements (
@@ -225,6 +258,18 @@ def ensure_tables(conn: sqlite3.Connection):
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
     cur.execute("CREATE INDEX IF NOT EXISTS idx_pet_chat_history_user_pet ON pet_chat_history(user_id, pet_name)")
+
+    # ── pet_chat_profiles ──────────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS pet_chat_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        pet_name TEXT NOT NULL,
+        profile_json TEXT DEFAULT '{}',
+        summary TEXT DEFAULT '',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, pet_name)
+    )''')
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pet_chat_profiles_user_pet ON pet_chat_profiles(user_id, pet_name)")
 
     # ── adopt_records ──────────────────────────────────────────────────────
     cur.execute('''CREATE TABLE IF NOT EXISTS adopt_records (

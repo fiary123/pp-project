@@ -48,6 +48,7 @@ class PetUpdate(BaseModel):
     species: Optional[str] = None
     image_url: Optional[str] = None
     description: Optional[str] = None
+    adoption_preferences: Optional[str] = None
 
 class PetBatchItem(BaseModel):
     name: str
@@ -116,6 +117,25 @@ class ChangePasswordRequest(BaseModel):
 class ApplicationUpdateRequest(BaseModel):
     app_id: int
     status: str
+
+
+class AdoptionApplicationCreateRequest(BaseModel):
+    pet_id: int
+    apply_reason: str = Field(min_length=5, description="申请理由")
+    ai_decision: Optional[str] = Field(default=None, description="AI 辅助结论")
+    ai_readiness_score: Optional[float] = Field(default=None, description="AI 准备度评分")
+    ai_summary: Optional[str] = Field(default="", description="AI 评估摘要")
+    risk_level: Optional[str] = Field(default="Medium", description="风险等级")
+    consensus_score: Optional[float] = Field(default=None, description="专家共识分数")
+    missing_fields: List[str] = Field(default_factory=list, description="仍缺失的关键信息")
+    conflict_notes: List[str] = Field(default_factory=list, description="专家冲突说明")
+    followup_questions: List[str] = Field(default_factory=list, description="建议继续追问的问题")
+    memory_scope: Optional[str] = Field(default="", description="记忆作用域")
+
+
+class OwnerApplicationDecisionRequest(BaseModel):
+    status: Literal["approved", "rejected", "probing", "human_review"]
+    owner_note: str = Field(default="", description="送养方备注或追问内容")
 
 class UserSanctionRequest(BaseModel):
     user_id: int

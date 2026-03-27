@@ -2034,30 +2034,30 @@ onMounted(fetchAnnouncements);
 </script>
 
 <template>
-  <div class="space-y-24 pb-20">
+  <div class="space-y-16 md:space-y-24 pb-16 md:pb-20">
     <!-- Hero Section -->
-    <section class="relative h-[90vh] flex items-center justify-center overflow-hidden rounded-[4rem] mx-4 mt-4 shadow-2xl">
+    <section class="relative min-h-[75vh] md:h-[90vh] flex items-center justify-center overflow-hidden rounded-[2rem] md:rounded-[4rem] mx-3 md:mx-4 mt-3 md:mt-4 shadow-2xl">
       <div class="absolute inset-0 bg-gradient-to-br from-orange-600/20 via-black to-black z-10"></div>
       <img src="https://images.unsplash.com/photo-1450778869180-41d0601e046e?auto=format&fit=crop&w=2000&q=80" class="absolute inset-0 w-full h-full object-cover grayscale opacity-40" />
       
-      <div class="relative z-20 text-center space-y-8 max-w-5xl px-6">
+      <div class="relative z-20 text-center space-y-6 md:space-y-8 max-w-5xl px-4 md:px-6">
         <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-500 text-xs font-black tracking-widest uppercase animate-bounce">
           <Sparkles :size="14" /> AI 智能宠物平台
         </div>
         <h2 class="text-8xl md:text-9xl font-black text-white italic tracking-tighter leading-[0.8] uppercase">心灵 <br/> <span class="text-orange-500">相连接</span></h2>
-        <p class="text-xl text-gray-400 font-medium max-w-2xl mx-auto leading-relaxed">利用先进的 AI 技术，为您与生命中的另一半建立深厚的情感连接。</p>
-        <div class="flex flex-wrap justify-center gap-6 pt-8">
-          <button @click="$router.push('/adopt')" class="bg-orange-500 hover:bg-orange-600 text-white px-12 py-6 rounded-3xl font-black text-xl transition-all hover:scale-105 shadow-2xl flex items-center gap-3 uppercase italic">立即开始 <ArrowRight :size="24" /></button>
+        <p class="text-base md:text-xl text-gray-400 font-medium max-w-2xl mx-auto leading-relaxed">利用先进的 AI 技术，为您与生命中的另一半建立深厚的情感连接。</p>
+        <div class="flex flex-wrap justify-center gap-4 md:gap-6 pt-4 md:pt-8">
+          <button @click="$router.push('/adopt')" class="bg-orange-500 hover:bg-orange-600 text-white px-8 md:px-12 py-4 md:py-6 rounded-2xl md:rounded-3xl font-black text-base md:text-xl transition-all hover:scale-105 shadow-2xl flex items-center gap-3 uppercase italic">立即开始 <ArrowRight :size="22" /></button>
           <button @click="$router.push('/wiki')" class="bg-white/5 hover:bg-white/10 text-white px-12 py-6 rounded-3xl font-black text-xl border border-white/10 backdrop-blur-xl transition-all uppercase italic">了解更多</button>
         </div>
       </div>
     </section>
 
     <!-- 公告板块 -->
-    <section class="max-w-7xl mx-auto px-6">
-      <div class="flex items-end justify-between mb-12">
+    <section class="max-w-7xl mx-auto px-4 md:px-6">
+      <div class="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-8 md:mb-12">
         <div class="space-y-2">
-          <h3 class="text-5xl font-black text-white italic uppercase tracking-tighter">平台公告</h3>
+          <h3 class="text-3xl md:text-5xl font-black text-white italic uppercase tracking-tighter">平台公告</h3>
           <p class="text-gray-500 font-bold uppercase tracking-widest text-xs">站内新鲜事与官方动态</p>
         </div>
         <!-- 管理员发布按钮 -->
@@ -2066,8 +2066,8 @@ onMounted(fetchAnnouncements);
         </button>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div v-for="item in announcements" :key="item.id" class="group bg-white/5 border border-white/5 p-8 rounded-[2.5rem] hover:border-orange-500/30 transition-all relative">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+        <div v-for="item in announcements" :key="item.id" class="group bg-white/5 border border-white/5 p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] hover:border-orange-500/30 transition-all relative">
           <div class="flex justify-between items-start mb-4">
             <span v-if="item.is_hot" class="px-3 py-1 bg-orange-500 text-white text-[10px] font-black rounded-full uppercase italic">热门</span>
             <span class="text-gray-600 font-mono text-xs ml-auto">{{ item.date }}</span>
@@ -2084,14 +2084,14 @@ onMounted(fetchAnnouncements);
     </section>
 
     <!-- 宠物知识推荐板块 -->
-    <section class="max-w-7xl mx-auto px-6">
-      <div class="space-y-2 mb-12">
-        <h3 class="text-5xl font-black text-white italic uppercase tracking-tighter">宠物知识</h3>
+    <section class="max-w-7xl mx-auto px-4 md:px-6">
+      <div class="space-y-2 mb-8 md:mb-12">
+        <h3 class="text-3xl md:text-5xl font-black text-white italic uppercase tracking-tighter">宠物知识</h3>
         <p class="text-gray-500 font-bold uppercase tracking-widest text-xs">每日精选·科学养宠指南</p>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
         <div v-for="tip in knowledgeTips" :key="tip.id"
-          class="group bg-white/5 border border-white/5 p-8 rounded-[2.5rem] hover:border-orange-500/30 transition-all cursor-pointer"
+          class="group bg-white/5 border border-white/5 p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] hover:border-orange-500/30 transition-all cursor-pointer"
           @click="selectedTip = tip">
           <div class="flex items-center gap-2 mb-4">
             <span class="px-3 py-1 rounded-full text-[10px] font-black uppercase italic border"
@@ -2108,12 +2108,12 @@ onMounted(fetchAnnouncements);
     </section>
 
     <!-- 特色板块 (保持原样) -->
-    <section class="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-12">
+    <section class="max-w-7xl mx-auto px-4 md:px-6 grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-12">
       <div v-for="feat in [
         { i: Zap, t: 'AI 智能匹配', d: '深度神经网络分析，为您匹配性格最契合的伴侣。', to: '/adopt' },
         { i: ShieldCheck, t: '机构认证', d: '严格的救助机构资质审核，确保每一条信息的真实性。', to: '/adopt' },
         { i: Heart, t: '全程陪伴', d: '全生命周期的养护指导，从医疗到行为纠正一应俱全。', to: '/chat' }
-      ]" :key="feat.t" @click="$router.push(feat.to)" class="space-y-6 p-8 rounded-[3rem] bg-gradient-to-b from-white/5 to-transparent border border-white/5 hover:border-orange-500/30 transition-all group cursor-pointer">
+      ]" :key="feat.t" @click="$router.push(feat.to)" class="space-y-5 md:space-y-6 p-5 md:p-8 rounded-[2rem] md:rounded-[3rem] bg-gradient-to-b from-white/5 to-transparent border border-white/5 hover:border-orange-500/30 transition-all group cursor-pointer">
         <div class="w-16 h-16 bg-orange-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-orange-500/20 group-hover:rotate-12 transition-transform">
           <component :is="feat.i" :size="32" />
         </div>
@@ -2124,10 +2124,10 @@ onMounted(fetchAnnouncements);
 
     <!-- 知识详情弹窗 -->
     <Teleport to="body">
-      <div v-if="selectedTip" class="fixed inset-0 z-[600] flex items-center justify-center bg-black/90 backdrop-blur-md px-4" @click.self="selectedTip = null">
-        <div class="bg-[#111] border border-white/10 rounded-[3rem] w-full max-w-2xl max-h-[80vh] flex flex-col">
+      <div v-if="selectedTip" class="fixed inset-0 z-[600] flex items-center justify-center bg-black/90 backdrop-blur-md px-3 md:px-4" @click.self="selectedTip = null">
+        <div class="bg-[#111] border border-white/10 rounded-[2rem] md:rounded-[3rem] w-full max-w-2xl max-h-[85vh] flex flex-col">
           <!-- 头部 -->
-          <div class="flex justify-between items-start p-10 pb-6 border-b border-white/5">
+          <div class="flex justify-between items-start p-5 md:p-10 md:pb-6 border-b border-white/5">
             <div class="space-y-2">
               <div class="flex items-center gap-2">
                 <span class="px-3 py-1 rounded-full text-[10px] font-black uppercase italic border" :class="selectedTip.tagClass">{{ selectedTip.tag }}</span>
@@ -2149,8 +2149,8 @@ onMounted(fetchAnnouncements);
 
     <!-- 公告发布弹窗 -->
     <Teleport to="body">
-      <div v-if="showAnnounceModal" class="fixed inset-0 z-[600] flex items-center justify-center bg-black/95 backdrop-blur-md px-4">
-        <div class="bg-[#111] border border-white/10 p-10 rounded-[3rem] w-full max-w-xl space-y-6">
+      <div v-if="showAnnounceModal" class="fixed inset-0 z-[600] flex items-center justify-center bg-black/95 backdrop-blur-md px-3 md:px-4">
+        <div class="bg-[#111] border border-white/10 p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] w-full max-w-xl space-y-6">
           <div class="flex justify-between items-center"><h3 class="text-2xl font-black text-white italic uppercase flex items-center gap-2"><Megaphone class="text-orange-500" /> 发布新公告</h3><button @click="showAnnounceModal=false" class="text-gray-500"><X :size="24"/></button></div>
           <div class="space-y-4">
             <input v-model="announceForm.title" placeholder="公告标题" class="w-full bg-white/5 border border-white/10 rounded-xl px-6 py-4 text-white outline-none focus:border-orange-500" />

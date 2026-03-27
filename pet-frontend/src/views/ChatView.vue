@@ -147,7 +147,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="max-w-5xl mx-auto h-[85vh] flex gap-6 pb-10 px-4">
+  <div class="max-w-5xl mx-auto h-[calc(100vh-7rem)] md:h-[85vh] flex gap-4 md:gap-6 pb-6 md:pb-10 px-3 md:px-4">
     <!-- 左侧联系人列表 -->
     <BaseCard class="hidden md:flex flex-col w-80 !p-0 overflow-hidden border-white/5 bg-black/40">
       <div class="p-6 border-b border-white/5 flex items-center justify-between">
@@ -189,9 +189,9 @@ onUnmounted(() => {
     </BaseCard>
 
     <!-- 右侧对话窗口 -->
-    <div class="flex-1 flex flex-col rounded-[3rem] border border-white/5 overflow-hidden bg-white/5 backdrop-blur-3xl shadow-2xl relative">
+    <div class="flex-1 flex flex-col rounded-[2rem] md:rounded-[3rem] border border-white/5 overflow-hidden bg-white/5 backdrop-blur-3xl shadow-2xl relative min-w-0">
       <!-- 头部 -->
-      <div class="p-6 bg-black/20 border-b border-white/5 flex items-center gap-4 flex-shrink-0">
+      <div class="p-4 md:p-6 bg-black/20 border-b border-white/5 flex items-center gap-3 md:gap-4 flex-shrink-0">
         <button @click="$router.back()" class="md:hidden p-2 text-gray-400 hover:text-white"><ChevronLeft /></button>
         <div class="relative" v-if="activeContactId">
           <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeContactName}`" class="w-12 h-12 rounded-2xl border border-orange-500/20" />
@@ -202,6 +202,21 @@ onUnmounted(() => {
           <p class="text-[9px] text-gray-500 font-bold uppercase tracking-[0.2em]">私信对话</p>
         </div>
         <div v-else class="text-gray-500 text-sm">请选择一个联系人</div>
+      </div>
+
+      <div v-if="contacts.length > 0" class="md:hidden px-3 py-3 border-b border-white/5 overflow-x-auto scrollbar-hide">
+        <div class="flex gap-2">
+          <button
+            v-for="c in contacts"
+            :key="c.other_id"
+            @click="selectContact(c.other_id, c.other_name)"
+            :class="activeContactId === c.other_id ? 'bg-orange-500/20 border-orange-500/40 text-white' : 'bg-white/5 border-white/10 text-gray-300'"
+            class="flex items-center gap-2 px-3 py-2 rounded-2xl border whitespace-nowrap transition-all"
+          >
+            <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${c.other_name}`" class="w-6 h-6 rounded-full border border-white/10" />
+            <span class="text-xs font-bold">{{ c.other_name }}</span>
+          </button>
+        </div>
       </div>
 
       <!-- 错误提示 -->
@@ -221,7 +236,7 @@ onUnmounted(() => {
       </div>
 
       <!-- 消息列表 -->
-      <div v-else ref="scrollContainer" class="flex-1 p-8 overflow-y-auto space-y-6 scrollbar-hide">
+      <div v-else ref="scrollContainer" class="flex-1 p-4 md:p-8 overflow-y-auto space-y-4 md:space-y-6 scrollbar-hide">
         <div v-if="messages.length === 0" class="text-center text-gray-600 text-sm py-16">
           还没有消息，发送第一条吧 👋
         </div>
@@ -239,7 +254,7 @@ onUnmounted(() => {
               :class="m.sender_id === authStore.user?.id
                 ? 'bg-orange-500 text-white rounded-tr-none'
                 : 'bg-white/10 text-gray-200 rounded-tl-none border border-white/5'"
-              class="max-w-xs px-5 py-3 rounded-[1.5rem] text-sm leading-relaxed shadow-xl break-words"
+              class="max-w-[85vw] md:max-w-xs px-4 md:px-5 py-3 rounded-[1.3rem] md:rounded-[1.5rem] text-sm leading-relaxed shadow-xl break-words"
             >
               {{ m.content }}
             </div>
@@ -249,19 +264,19 @@ onUnmounted(() => {
       </div>
 
       <!-- 输入框 -->
-      <div class="p-6 bg-black/40 border-t border-white/5 flex-shrink-0">
+      <div class="p-4 md:p-6 bg-black/40 border-t border-white/5 flex-shrink-0">
         <div class="flex gap-3 items-center">
           <input
             v-model="userInput"
             @keyup.enter="handleSend"
             :disabled="!activeContactId"
             placeholder="在此输入消息..."
-            class="flex-1 bg-white/5 border border-white/10 rounded-[1.5rem] py-4 px-6 text-sm text-white focus:border-orange-500 outline-none transition-all placeholder:text-gray-600 disabled:opacity-40"
+            class="flex-1 min-w-0 bg-white/5 border border-white/10 rounded-[1.3rem] md:rounded-[1.5rem] py-3 md:py-4 px-4 md:px-6 text-sm text-white focus:border-orange-500 outline-none transition-all placeholder:text-gray-600 disabled:opacity-40"
           />
           <button
             @click="handleSend"
             :disabled="!activeContactId || !userInput.trim()"
-            class="p-4 bg-orange-500 rounded-[1.5rem] text-white hover:bg-orange-600 transition-all shadow-xl shadow-orange-500/30 active:scale-95 disabled:bg-orange-500/40 disabled:cursor-not-allowed"
+            class="p-3 md:p-4 bg-orange-500 rounded-[1.3rem] md:rounded-[1.5rem] text-white hover:bg-orange-600 transition-all shadow-xl shadow-orange-500/30 active:scale-95 disabled:bg-orange-500/40 disabled:cursor-not-allowed"
           >
             <Send :size="22" />
           </button>

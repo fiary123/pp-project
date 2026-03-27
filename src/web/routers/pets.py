@@ -53,7 +53,23 @@ async def batch_create_pets(req: PetBatchCreate, current_user: dict = Depends(ge
 def get_all_pets():
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM pets")
+        cursor.execute(
+            """
+            SELECT p.*,
+                   po.image_url AS post_image_url,
+                   po.image_urls AS post_image_urls,
+                   po.pet_gender,
+                   po.pet_age,
+                   po.pet_breed,
+                   po.adopt_reason,
+                   po.location,
+                   po.title AS post_title,
+                   po.content AS post_content
+            FROM pets p
+            LEFT JOIN posts po ON po.id = p.source_post_id
+            ORDER BY p.created_at DESC, p.id DESC
+            """
+        )
         res = [dict(row) for row in cursor.fetchall()]
     return res
 
@@ -69,8 +85,14 @@ async def update_pet(pet_id: int, req: PetUpdate, current_user: dict = Depends(g
         if pet["owner_id"] != current_user["id"] and current_user.get("role") not in ["org_admin"]:
             raise HTTPException(status_code=403, detail="无权限修改该宠物信息")
         cursor.execute(
-            "UPDATE pets SET name=COALESCE(?,name), species=COALESCE(?,species), image_url=COALESCE(?,image_url), description=COALESCE(?,description) WHERE id=?",
-            (req.name, req.species, req.image_url, req.description, pet_id),
+            """UPDATE pets SET
+               name=COALESCE(?,name),
+               species=COALESCE(?,species),
+               image_url=COALESCE(?,image_url),
+               description=COALESCE(?,description),
+               adoption_preferences=COALESCE(?,adoption_preferences)
+               WHERE id=?""",
+            (req.name, req.species, req.image_url, req.description, req.adoption_preferences, pet_id),
         )
         conn.commit()
     return {"status": "success"}

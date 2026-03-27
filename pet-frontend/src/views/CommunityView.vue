@@ -39,6 +39,37 @@ const activePostComments = ref<Record<number, any[]>>({});
 const commentInputs = ref<Record<number, string>>({});
 const isSubmittingComment = ref<Record<number, boolean>>({});
 const likedPosts = ref<Set<number>>(new Set());
+const MOCK_COMMENT_STORAGE_KEY = 'community_mock_comments_v1';
+
+const readMockComments = (): Record<number, any[]> => {
+  try {
+    const raw = localStorage.getItem(MOCK_COMMENT_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeMockComments = (commentsMap: Record<number, any[]>) => {
+  try {
+    localStorage.setItem(MOCK_COMMENT_STORAGE_KEY, JSON.stringify(commentsMap));
+  } catch {
+    // 忽略本地存储异常，不阻塞评论流程
+  }
+};
+
+const getStoredMockComments = (postId: number) => {
+  const commentsMap = readMockComments();
+  return Array.isArray(commentsMap[postId]) ? commentsMap[postId] : [];
+};
+
+const saveStoredMockComments = (postId: number, comments: any[]) => {
+  const commentsMap = readMockComments();
+  commentsMap[postId] = comments;
+  writeMockComments(commentsMap);
+};
 
 // 用户信息弹窗
 const showUserProfile = ref(false);
@@ -113,9 +144,7 @@ const fetchPosts = async () => {
       ...p,
       create_time: p.create_time ? new Date(p.create_time).toLocaleString() : '刚刚'
     }));
-    posts.value = formattedDbItems.length > 0
-      ? [...formattedDbItems, ...generateMockPosts()]
-      : generateMockPosts();
+    posts.value = formattedDbItems.length > 0 ? formattedDbItems : generateMockPosts();
   } catch {
     posts.value = generateMockPosts();
   } finally {
@@ -141,7 +170,7 @@ const loadComments = async (postId: number) => {
     return;
   }
   if (postId >= 9000) {
-    activePostComments.value[postId] = [];
+    activePostComments.value[postId] = getStoredMockComments(postId);
     return;
   }
   try {
@@ -156,8 +185,17 @@ const handleSubmitComment = async (postId: number) => {
   const content = commentInputs.value[postId]?.trim();
   if (!content || !authStore.user?.id) return;
   if (postId >= 9000) {
-    if (!activePostComments.value[postId]) activePostComments.value[postId] = [];
-    activePostComments.value[postId].push({ id: Date.now(), username: authStore.user.username || '我', content });
+    const nextComments = [
+      ...(activePostComments.value[postId] || getStoredMockComments(postId)),
+      {
+        id: Date.now(),
+        username: authStore.user.username || '我',
+        content,
+        create_time: new Date().toLocaleString(),
+      }
+    ];
+    activePostComments.value[postId] = nextComments;
+    saveStoredMockComments(postId, nextComments);
     commentInputs.value[postId] = '';
     return;
   }
@@ -285,28 +323,29 @@ onMounted(fetchPosts);
 </script>
 
 <template>
-  <div class="max-w-4xl mx-auto space-y-8 pb-32 px-4">
-    <div class="flex items-end justify-between border-b border-white/5 pb-6">
+  <div>
+  <div class="max-w-4xl mx-auto space-y-6 md:space-y-8 pb-24 md:pb-32 px-3 md:px-4 text-gray-900 dark:text-white">
+    <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-gray-200 dark:border-white/5 pb-4 md:pb-6">
       <div>
-        <h2 class="text-4xl font-black text-white italic tracking-tighter uppercase">宠物 <span class="text-orange-500">社区</span></h2>
-        <p class="text-gray-400 font-bold text-sm uppercase tracking-widest mt-2">
+        <h2 class="text-3xl md:text-4xl font-black text-gray-900 dark:text-white italic tracking-tighter uppercase">宠物 <span class="text-orange-500">社区</span></h2>
+        <p class="text-gray-500 dark:text-gray-400 font-bold text-xs md:text-sm uppercase tracking-widest mt-2">
           {{ isAdmin ? '管理模式已开启' : '记录萌宠点滴，分享养宠干货' }}
         </p>
       </div>
-      <div class="flex gap-6">
+      <div class="flex gap-4 md:gap-6 overflow-x-auto scrollbar-hide">
         <button v-for="t in [{id:'all', n:'全部'}, {id:'daily', n:'日常'}, {id:'experience', n:'攻略'}, {id:'adopt_help', n:'送养'}]"
           :key="t.id" @click="activeType = t.id as any"
           :class="activeType === t.id ? 'text-orange-500 border-b-2 border-orange-500 font-black scale-110' : 'text-gray-500'"
-          class="text-base uppercase tracking-widest transition-all px-3 pb-2">{{ t.n }}</button>
+          class="text-sm md:text-base uppercase tracking-widest transition-all px-2 md:px-3 pb-2 whitespace-nowrap">{{ t.n }}</button>
       </div>
     </div>
 
     <div v-if="isLoading" class="py-20 flex justify-center"><Loader2 class="animate-spin text-orange-500" :size="48" /></div>
 
     <div v-else class="space-y-10">
-      <BaseCard v-for="post in filteredPosts" :key="post.id" class="!p-0 overflow-hidden border-white/5 relative">
+      <BaseCard v-for="post in filteredPosts" :key="post.id" class="!p-0 overflow-hidden border-gray-200 dark:border-white/5 relative">
         <!-- 管理员/本人控制栏 -->
-        <div v-if="isAdmin || authStore.user?.id === post.user_id" class="px-6 py-3 bg-white/5 border-b border-white/5 flex justify-between items-center">
+        <div v-if="isAdmin || authStore.user?.id === post.user_id" class="px-4 md:px-6 py-3 bg-gray-50 dark:bg-white/5 border-b border-gray-200 dark:border-white/5 flex justify-between items-center">
           <span class="text-[9px] font-black text-gray-500 uppercase tracking-widest">{{ authStore.user?.id === post.user_id ? '我的帖子' : '内容管理' }}</span>
           <div class="flex gap-3">
             <button @click="startEdit(post)" class="text-blue-400 hover:text-blue-300 text-[10px] font-black uppercase flex items-center gap-1 transition-colors"><Edit3 :size="12" /> 编辑</button>
@@ -315,13 +354,13 @@ onMounted(fetchPosts);
         </div>
 
         <!-- 帖子头部：可点击头像/用户名弹出用户信息 -->
-        <div class="p-6 flex items-center gap-4">
+        <div class="p-4 md:p-6 flex items-center gap-3 md:gap-4">
           <button @click="openUserProfile(post.user_id, { id: post.user_id, username: post.username, role: post.role })"
             class="w-12 h-12 rounded-full border-2 border-orange-500/20 overflow-hidden hover:border-orange-500 hover:scale-105 transition-all flex-shrink-0 shadow-lg">
             <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${post.username}`" />
           </button>
           <div>
-            <h4 class="font-bold text-white text-lg flex items-center gap-2">
+            <h4 class="font-bold text-gray-900 dark:text-white text-base md:text-lg flex items-center gap-2">
               <button @click="openUserProfile(post.user_id, { id: post.user_id, username: post.username, role: post.role })"
                 class="hover:text-orange-500 transition-colors">{{ post.username }}</button>
               <span class="text-[10px] bg-orange-500/10 text-orange-500 px-2 py-0.5 rounded border border-orange-500/20 uppercase tracking-wider font-black">
@@ -333,22 +372,22 @@ onMounted(fetchPosts);
         </div>
 
         <!-- 帖子内容 -->
-        <div class="px-8 pb-8 space-y-5">
-          <h3 v-if="post.title" class="text-2xl font-black text-white italic tracking-tight">{{ post.title }}</h3>
+        <div class="px-4 md:px-8 pb-6 md:pb-8 space-y-4 md:space-y-5">
+          <h3 v-if="post.title" class="text-xl md:text-2xl font-black text-gray-900 dark:text-white italic tracking-tight">{{ post.title }}</h3>
           <!-- 送养帖宠物信息卡 -->
-          <div v-if="post.type === 'adopt_help' && (post.pet_name || post.pet_breed)" class="bg-orange-500/5 border border-orange-500/20 rounded-2xl px-5 py-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-            <div v-if="post.pet_name" class="flex gap-2"><span class="text-gray-500">名字</span><span class="text-white font-bold">{{ post.pet_name }}</span></div>
-            <div v-if="post.pet_breed" class="flex gap-2"><span class="text-gray-500">品种</span><span class="text-white font-bold">{{ post.pet_breed }}</span></div>
+          <div v-if="post.type === 'adopt_help' && (post.pet_name || post.pet_breed)" class="bg-orange-50 dark:bg-orange-500/5 border border-orange-200 dark:border-orange-500/20 rounded-2xl px-4 md:px-5 py-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+            <div v-if="post.pet_name" class="flex gap-2"><span class="text-gray-500">名字</span><span class="text-gray-900 dark:text-white font-bold">{{ post.pet_name }}</span></div>
+            <div v-if="post.pet_breed" class="flex gap-2"><span class="text-gray-500">品种</span><span class="text-gray-900 dark:text-white font-bold">{{ post.pet_breed }}</span></div>
             <div v-if="post.pet_gender" class="flex gap-2"><span class="text-gray-500">性别</span>
               <span :class="post.pet_gender === 'male' ? 'text-blue-400' : post.pet_gender === 'female' ? 'text-pink-400' : 'text-gray-400'" class="font-bold">
                 {{ post.pet_gender === 'male' ? '♂ 公' : post.pet_gender === 'female' ? '♀ 母' : '未知' }}
               </span>
             </div>
-            <div v-if="post.pet_age" class="flex gap-2"><span class="text-gray-500">年龄</span><span class="text-white font-bold">{{ post.pet_age }}</span></div>
-            <div v-if="post.location" class="flex gap-2"><span class="text-gray-500">地址</span><span class="text-white font-bold">{{ post.location }}</span></div>
-            <div v-if="post.adopt_reason" class="col-span-2 flex gap-2 pt-1 border-t border-orange-500/10 mt-1"><span class="text-gray-500 flex-shrink-0">送养原因</span><span class="text-orange-300 text-xs leading-relaxed">{{ post.adopt_reason }}</span></div>
+            <div v-if="post.pet_age" class="flex gap-2"><span class="text-gray-500">年龄</span><span class="text-gray-900 dark:text-white font-bold">{{ post.pet_age }}</span></div>
+            <div v-if="post.location" class="flex gap-2"><span class="text-gray-500">地址</span><span class="text-gray-900 dark:text-white font-bold">{{ post.location }}</span></div>
+            <div v-if="post.adopt_reason" class="col-span-2 flex gap-2 pt-1 border-t border-orange-200 dark:border-orange-500/10 mt-1"><span class="text-gray-500 flex-shrink-0">送养原因</span><span class="text-orange-700 dark:text-orange-300 text-xs leading-relaxed">{{ post.adopt_reason }}</span></div>
           </div>
-          <p class="text-gray-300 text-base leading-relaxed whitespace-pre-line">{{ post.content }}</p>
+          <p class="text-gray-700 dark:text-gray-300 text-sm md:text-base leading-relaxed whitespace-pre-line">{{ post.content }}</p>
           <!-- 多图展示 -->
           <div v-if="post.image_urls && JSON.parse(post.image_urls).length > 0" class="mt-4">
             <div :class="JSON.parse(post.image_urls).length === 1 ? '' : 'grid grid-cols-2 gap-2'">
@@ -371,7 +410,7 @@ onMounted(fetchPosts);
         </div>
 
         <!-- 互动栏 -->
-        <div class="px-8 py-5 bg-white/5 flex items-center gap-12 border-t border-white/5">
+        <div class="px-4 md:px-8 py-4 md:py-5 bg-gray-50 dark:bg-white/5 flex flex-wrap items-center gap-6 md:gap-12 border-t border-gray-200 dark:border-white/5">
           <button @click="handleLike(post.id)"
             :class="likedPosts.has(post.id) ? 'text-red-500' : 'text-gray-500 hover:text-red-500'"
             class="flex items-center gap-3 text-base font-black transition-all group">
@@ -386,32 +425,35 @@ onMounted(fetchPosts);
         </div>
 
         <!-- 评论区 -->
-        <div v-if="activePostComments[post.id] !== undefined" class="bg-black/20 border-t border-white/5">
-          <div class="px-8 pt-6 space-y-4">
+        <div v-if="activePostComments[post.id] !== undefined" class="bg-gray-50/80 dark:bg-black/20 border-t border-gray-200 dark:border-white/5">
+          <div class="px-4 md:px-8 pt-5 md:pt-6 space-y-4">
             <div v-if="(activePostComments[post.id]?.length ?? 0) === 0" class="text-center text-gray-600 text-sm py-4">
               暂无评论，来发表第一条吧 👋
             </div>
             <div v-for="c in activePostComments[post.id]" :key="c.id" class="flex gap-4">
-              <div class="w-9 h-9 rounded-full bg-white/5 overflow-hidden flex-shrink-0">
+              <div class="w-9 h-9 rounded-full bg-white dark:bg-white/5 overflow-hidden flex-shrink-0 border border-gray-200 dark:border-white/10">
                 <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${c.username}`" />
               </div>
-              <div class="flex-1 bg-white/5 rounded-2xl px-4 py-3 border border-white/5">
-                <p class="text-xs font-black text-orange-500 uppercase mb-1">{{ c.username }}</p>
-                <p class="text-sm text-gray-300">{{ c.content }}</p>
+              <div class="flex-1 bg-white dark:bg-white/5 rounded-2xl px-4 py-3 border border-gray-200 dark:border-white/5">
+                <div class="flex items-center justify-between gap-3 mb-1">
+                  <p class="text-xs font-black text-orange-500 uppercase">{{ c.username }}</p>
+                  <p v-if="c.create_time" class="text-[10px] text-gray-500 font-mono">{{ c.create_time }}</p>
+                </div>
+                <p class="text-sm text-gray-700 dark:text-gray-300">{{ c.content }}</p>
               </div>
             </div>
           </div>
-          <div class="px-8 py-5 flex gap-3 items-center">
-            <div class="w-9 h-9 rounded-full bg-white/5 overflow-hidden flex-shrink-0 border border-white/10">
+          <div class="px-4 md:px-8 py-4 md:py-5 flex gap-3 items-center">
+            <div class="w-9 h-9 rounded-full bg-white dark:bg-white/5 overflow-hidden flex-shrink-0 border border-gray-200 dark:border-white/10">
               <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${authStore.user?.username || 'me'}`" />
             </div>
             <input v-model="commentInputs[post.id]" @keyup.enter="handleSubmitComment(post.id)"
               :placeholder="authStore.user ? '写下你的评论...' : '登录后才能评论'"
               :disabled="!authStore.user"
-              class="flex-1 bg-white/5 border border-white/10 rounded-2xl px-5 py-3 text-sm text-white outline-none focus:border-orange-500 transition-colors placeholder-gray-600 disabled:opacity-40" />
+              class="flex-1 min-w-0 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl px-4 md:px-5 py-3 text-sm text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-colors placeholder-gray-400 dark:placeholder-gray-600 disabled:opacity-40" />
             <button @click="handleSubmitComment(post.id)"
               :disabled="!commentInputs[post.id]?.trim() || !authStore.user || isSubmittingComment[post.id]"
-              class="px-5 py-3 bg-orange-500 disabled:bg-orange-500/40 text-white text-sm font-black rounded-2xl transition-all flex items-center gap-2">
+              class="px-4 md:px-5 py-3 bg-orange-500 disabled:bg-orange-500/40 text-white text-sm font-black rounded-2xl transition-all flex items-center gap-2 whitespace-nowrap">
               <Loader2 v-if="isSubmittingComment[post.id]" class="animate-spin" :size="14" />
               <span v-else>发送</span>
             </button>
@@ -421,66 +463,67 @@ onMounted(fetchPosts);
     </div>
 
     <!-- 发布按钮 -->
-    <button @click="showPublishModal = true" class="fixed bottom-12 right-12 w-16 h-16 bg-orange-500 text-white rounded-full flex items-center justify-center shadow-2xl z-50 hover:scale-110 transition-all shadow-orange-500/20">
-      <Plus :size="32" />
+    <button @click="showPublishModal = true" class="fixed bottom-5 right-5 md:bottom-12 md:right-12 w-14 h-14 md:w-16 md:h-16 bg-orange-500 text-white rounded-full flex items-center justify-center shadow-2xl z-50 hover:scale-110 transition-all shadow-orange-500/20">
+      <Plus :size="26" class="md:hidden" />
+      <Plus :size="32" class="hidden md:block" />
     </button>
 
     <!-- 发布/编辑弹窗 -->
     <Teleport to="body">
-      <div v-if="showPublishModal" class="fixed inset-0 z-[500] flex items-center justify-center bg-black/95 backdrop-blur-md px-4">
-        <BaseCard class="w-full max-w-xl p-10 relative !bg-zinc-900 border-white/10 shadow-2xl">
-          <button @click="closeModal" class="absolute top-6 right-6 text-gray-500 hover:text-white transition-colors"><X :size="24"/></button>
-          <h3 class="text-3xl font-black text-white mb-10 italic uppercase tracking-tighter">{{ isEditing ? '编辑帖子' : '发布动态' }}</h3>
-          <div class="space-y-8">
-            <div class="grid grid-cols-3 gap-3">
+      <div v-if="showPublishModal" class="fixed inset-0 z-[500] flex items-start md:items-center justify-center bg-black/70 dark:bg-black/95 backdrop-blur-md px-4 py-4 md:py-8 overflow-y-auto">
+        <BaseCard class="w-full max-w-xl p-5 md:p-10 relative !bg-white dark:!bg-zinc-900 border-gray-200 dark:border-white/10 shadow-2xl my-auto max-h-[calc(100vh-2rem)] overflow-y-auto text-gray-900 dark:text-white">
+          <button @click="closeModal" class="absolute top-4 right-4 md:top-6 md:right-6 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors"><X :size="22" class="md:hidden"/><X :size="24" class="hidden md:block"/></button>
+          <h3 class="text-2xl md:text-3xl font-black text-gray-900 dark:text-white mb-6 md:mb-10 italic uppercase tracking-tighter">{{ isEditing ? '编辑帖子' : '发布动态' }}</h3>
+          <div class="space-y-6 md:space-y-8">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <button v-for="t in [{id:'daily', n:'日常分享'}, {id:'experience', n:'养宠攻略'}, {id:'adopt_help', n:'寻主/求助'}]"
                 :key="t.id" @click="publishType = t.id as any"
-                :class="publishType === t.id ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'bg-white/5 text-gray-500'"
-                class="py-4 rounded-xl text-sm font-black uppercase transition-all tracking-widest border border-white/5">
+                :class="publishType === t.id ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20 border-orange-500' : 'bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-white/5'"
+                class="py-4 rounded-xl text-sm font-black uppercase transition-all tracking-widest border">
                 {{ t.n }}
               </button>
             </div>
             <input v-model="publishForm.title" placeholder="给动态起个吸睛的标题吧 (可选)"
-              class="w-full bg-white/5 border border-white/10 rounded-xl px-6 py-5 text-base text-white outline-none focus:border-orange-500 transition-all" />
+              class="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 md:px-6 py-4 md:py-5 text-sm md:text-base text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all placeholder-gray-400 dark:placeholder-gray-600" />
             <textarea v-model="publishForm.content"
-              class="w-full h-36 bg-white/5 border border-white/10 rounded-2xl p-6 text-base text-white outline-none focus:border-orange-500 transition-all leading-relaxed"
+              class="w-full h-32 md:h-36 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl p-4 md:p-6 text-sm md:text-base text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all leading-relaxed placeholder-gray-400 dark:placeholder-gray-600"
               placeholder="这一刻的想法..."></textarea>
 
             <!-- 送养专属字段 -->
-            <div v-if="publishType === 'adopt_help'" class="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-5 space-y-4">
+            <div v-if="publishType === 'adopt_help'" class="bg-orange-50 dark:bg-orange-500/5 border border-orange-200 dark:border-orange-500/20 rounded-2xl p-4 md:p-5 space-y-4">
               <p class="text-xs font-black text-orange-500 uppercase tracking-widest">宠物信息</p>
-              <div class="grid grid-cols-2 gap-3">
-                <input v-model="publishForm.pet_name" placeholder="宠物名字" class="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-all" />
-                <input v-model="publishForm.pet_breed" placeholder="品种（如：英短、金毛）" class="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-all" />
-                <input v-model="publishForm.pet_age" placeholder="年龄（如：2岁3个月）" class="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-all" />
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <input v-model="publishForm.pet_name" placeholder="宠物名字" class="bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all placeholder-gray-400 dark:placeholder-gray-600" />
+                <input v-model="publishForm.pet_breed" placeholder="品种（如：英短、金毛）" class="bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all placeholder-gray-400 dark:placeholder-gray-600" />
+                <input v-model="publishForm.pet_age" placeholder="年龄（如：2岁3个月）" class="bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all placeholder-gray-400 dark:placeholder-gray-600" />
                 <div class="flex gap-2">
                   <button v-for="g in [['male','♂ 公'],['female','♀ 母'],['unknown','未知']]" :key="g[0]"
                     @click="publishForm.pet_gender = g[0] as string"
-                    :class="publishForm.pet_gender === g[0] ? (g[0]==='male' ? 'bg-blue-500 text-white' : g[0]==='female' ? 'bg-pink-500 text-white' : 'bg-gray-500 text-white') : 'bg-white/5 text-gray-400'"
-                    class="flex-1 py-3 rounded-xl text-xs font-bold transition-all border border-white/10">{{ g[1] }}</button>
+                    :class="publishForm.pet_gender === g[0] ? (g[0]==='male' ? 'bg-blue-500 text-white' : g[0]==='female' ? 'bg-pink-500 text-white' : 'bg-gray-500 text-white') : 'bg-white dark:bg-white/5 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-white/10'"
+                    class="flex-1 py-3 rounded-xl text-xs font-bold transition-all border">{{ g[1] }}</button>
                 </div>
               </div>
               <textarea v-model="publishForm.adopt_reason" placeholder="送养原因（如：主人工作调动、过敏等）"
-                class="w-full h-20 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-all leading-relaxed"></textarea>
+                class="w-full h-20 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all leading-relaxed placeholder-gray-400 dark:placeholder-gray-600"></textarea>
               <input v-model="publishForm.location" placeholder="所在地址（如：北京市朝阳区）"
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-all" />
+                class="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all placeholder-gray-400 dark:placeholder-gray-600" />
             </div>
 
             <!-- 多图上传区 -->
             <div class="space-y-3">
-              <div v-if="publishForm.image_urls.length > 0" class="grid grid-cols-3 gap-2">
+              <div v-if="publishForm.image_urls.length > 0" class="grid grid-cols-2 md:grid-cols-3 gap-2">
                 <div v-for="(url, idx) in publishForm.image_urls" :key="idx" class="relative group aspect-square rounded-xl overflow-hidden border border-white/10">
                   <img :src="url" class="w-full h-full object-cover" />
                   <button @click="removeImage(idx)" class="absolute top-1 right-1 w-6 h-6 bg-black/70 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-red-500"><X :size="12" /></button>
                 </div>
                 <div v-if="publishForm.image_urls.length < 9" @click="triggerUpload"
-                  class="aspect-square rounded-xl border-2 border-dashed border-white/10 flex items-center justify-center cursor-pointer hover:border-orange-500/50 hover:bg-white/5 transition-all">
+                  class="aspect-square rounded-xl border-2 border-dashed border-gray-200 dark:border-white/10 flex items-center justify-center cursor-pointer hover:border-orange-500/50 hover:bg-gray-50 dark:hover:bg-white/5 transition-all">
                   <Loader2 v-if="isUploading" class="animate-spin text-orange-500" :size="20" />
                   <Plus v-else class="text-gray-500" :size="24" />
                 </div>
               </div>
               <div v-else @click="triggerUpload"
-                class="w-full py-10 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-orange-500/50 hover:bg-white/5 transition-all">
+                class="w-full py-10 border-2 border-dashed border-gray-200 dark:border-white/10 rounded-2xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-orange-500/50 hover:bg-gray-50 dark:hover:bg-white/5 transition-all">
                 <Upload v-if="!isUploading" class="text-gray-500" :size="28" />
                 <Loader2 v-else class="text-orange-500 animate-spin" :size="28" />
                 <p class="text-xs font-black text-gray-500 uppercase tracking-widest">{{ isUploading ? '上传中...' : '点击上传图片（最多9张）' }}</p>
@@ -488,7 +531,7 @@ onMounted(fetchPosts);
               <input type="file" ref="fileInput" class="hidden" accept="image/*,video/*" multiple @change="handleFileUpload" />
             </div>
             <button @click="handlePublish" :disabled="isPublishing || isUploading"
-              class="w-full bg-orange-500 text-white py-5 rounded-xl font-black text-xl hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex justify-center items-center gap-3 shadow-xl shadow-orange-500/20">
+              class="w-full bg-orange-500 text-white py-4 md:py-5 rounded-xl font-black text-base md:text-xl hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex justify-center items-center gap-3 shadow-xl shadow-orange-500/20">
               <Loader2 v-if="isPublishing" class="animate-spin" :size="24" />
               {{ isEditing ? '确认修改' : '立即发布动态' }}
             </button>
@@ -500,12 +543,12 @@ onMounted(fetchPosts);
 
   <!-- 图片查看器 -->
   <Teleport to="body">
-    <div v-if="showViewer" class="fixed inset-0 z-[700] flex items-center justify-center bg-black/95" @click.self="showViewer = false">
-      <button @click="showViewer = false" class="absolute top-6 right-6 w-10 h-10 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white transition-all"><X :size="20" /></button>
-      <button v-if="viewerIndex > 0" @click="viewerIndex--" class="absolute left-6 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white transition-all"><ChevronLeft :size="24" /></button>
+    <div v-if="showViewer" class="fixed inset-0 z-[700] flex items-center justify-center bg-black/95 px-3" @click.self="showViewer = false">
+      <button @click="showViewer = false" class="absolute top-4 right-4 md:top-6 md:right-6 w-10 h-10 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white transition-all"><X :size="20" /></button>
+      <button v-if="viewerIndex > 0" @click="viewerIndex--" class="absolute left-3 md:left-6 w-10 h-10 md:w-12 md:h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white transition-all"><ChevronLeft :size="20" class="md:hidden"/><ChevronLeft :size="24" class="hidden md:block"/></button>
       <img :src="viewerImages[viewerIndex]" class="max-w-[90vw] max-h-[90vh] object-contain rounded-2xl shadow-2xl" />
-      <button v-if="viewerIndex < viewerImages.length - 1" @click="viewerIndex++" class="absolute right-6 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white transition-all"><ChevronRight :size="24" /></button>
-      <div class="absolute bottom-6 text-gray-400 text-sm">{{ viewerIndex + 1 }} / {{ viewerImages.length }}</div>
+      <button v-if="viewerIndex < viewerImages.length - 1" @click="viewerIndex++" class="absolute right-3 md:right-6 w-10 h-10 md:w-12 md:h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white transition-all"><ChevronRight :size="20" class="md:hidden"/><ChevronRight :size="24" class="hidden md:block"/></button>
+      <div class="absolute bottom-4 md:bottom-6 text-gray-400 text-xs md:text-sm">{{ viewerIndex + 1 }} / {{ viewerImages.length }}</div>
     </div>
   </Teleport>
 
@@ -514,8 +557,8 @@ onMounted(fetchPosts);
     <Transition name="fade">
       <div v-if="showUserProfile" class="fixed inset-0 z-[600] flex items-center justify-center bg-black/80 backdrop-blur-md px-4"
         @click.self="showUserProfile = false">
-        <div class="bg-[#111] border border-white/10 rounded-[3rem] w-full max-w-sm p-10 space-y-6 relative">
-          <button @click="showUserProfile = false" class="absolute top-6 right-6 text-gray-500 hover:text-white transition-colors"><X :size="20" /></button>
+        <div class="bg-white dark:bg-[#111] border border-gray-200 dark:border-white/10 rounded-[2rem] md:rounded-[3rem] w-full max-w-sm p-6 md:p-10 space-y-6 relative text-gray-900 dark:text-white">
+          <button @click="showUserProfile = false" class="absolute top-4 right-4 md:top-6 md:right-6 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors"><X :size="20" /></button>
 
           <div v-if="isLoadingProfile" class="flex justify-center py-8">
             <Loader2 class="animate-spin text-orange-500" :size="32" />
@@ -527,7 +570,7 @@ onMounted(fetchPosts);
                 <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${profileUser.username}`" class="w-full h-full" />
               </div>
               <div>
-                <h3 class="text-2xl font-black text-white">{{ profileUser.username }}</h3>
+                <h3 class="text-2xl font-black text-gray-900 dark:text-white">{{ profileUser.username }}</h3>
                 <span class="text-[10px] bg-orange-500/10 text-orange-500 px-2 py-0.5 rounded border border-orange-500/20 uppercase font-black mt-1 inline-block">
                   {{ roleLabel[profileUser.role] || profileUser.role || '用户' }}
                 </span>
@@ -535,15 +578,15 @@ onMounted(fetchPosts);
             </div>
 
             <div class="space-y-3">
-              <div v-if="profileUser.occupation" class="flex items-center gap-3 text-sm text-gray-400">
+              <div v-if="profileUser.occupation" class="flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
                 <Briefcase class="text-orange-500 flex-shrink-0" :size="16" />
                 <span>{{ profileUser.occupation }}</span>
               </div>
-              <div v-if="profileUser.living_env" class="flex items-center gap-3 text-sm text-gray-400">
+              <div v-if="profileUser.living_env" class="flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
                 <Home class="text-orange-500 flex-shrink-0" :size="16" />
                 <span>{{ profileUser.living_env }}</span>
               </div>
-              <div v-if="profileUser.preference" class="flex items-center gap-3 text-sm text-gray-400">
+              <div v-if="profileUser.preference" class="flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
                 <Star class="text-orange-500 flex-shrink-0" :size="16" />
                 <span>偏好：{{ profileUser.preference }}</span>
               </div>
@@ -554,11 +597,11 @@ onMounted(fetchPosts);
             <div class="flex gap-3 pt-2">
               <button v-if="authStore.user && authStore.user.id !== profileUser.id"
                 @click="$router.push(`/chat?to=${profileUser.id}`); showUserProfile = false"
-                class="flex-1 bg-orange-500 hover:bg-orange-600 text-white py-4 rounded-2xl font-black flex items-center justify-center gap-2 transition-all">
+                class="flex-1 bg-orange-500 hover:bg-orange-600 text-white py-3 md:py-4 rounded-2xl font-black flex items-center justify-center gap-2 transition-all text-sm md:text-base">
                 <MessageSquare :size="18" /> 发私信
               </button>
               <button @click="showUserProfile = false"
-                class="flex-1 bg-white/10 hover:bg-white/20 text-white py-4 rounded-2xl font-black transition-all">
+                class="flex-1 bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 text-gray-900 dark:text-white py-3 md:py-4 rounded-2xl font-black transition-all text-sm md:text-base">
                 关闭
               </button>
             </div>
@@ -567,6 +610,7 @@ onMounted(fetchPosts);
       </div>
     </Transition>
   </Teleport>
+  </div>
 </template>
 
 <style scoped>
