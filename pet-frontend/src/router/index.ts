@@ -13,19 +13,19 @@ import NutritionView from '../views/NutritionView.vue'
 
 const routes = [
   { path: '/login', name: 'login', component: LoginView },
-  { path: '/profile', name: 'profile', component: ProfileView },
+  { path: '/profile', name: 'profile', component: ProfileView, meta: { requiresAuth: true } },
   { path: '/', name: 'home', component: HomeView },
   { path: '/mutual-aid', name: 'mutualAid', component: MutualAidView },
   { path: '/wiki', name: 'wiki', component: WikiView },
   { path: '/nutrition', name: 'nutrition', component: NutritionView },
   { path: '/adopt', name: 'adopt', component: AdoptView },
   { path: '/community', name: 'community', component: CommunityView },
-  { path: '/chat', name: 'chat', component: ChatView },
+  { path: '/chat', name: 'chat', component: ChatView, meta: { requiresAuth: true } },
   { 
     path: '/dashboard', 
     name: 'dashboard', 
     component: DashboardView,
-    meta: { requiresAdmin: true }
+    meta: { requiresAuth: true, requiresAdmin: true }
   }
 ]
 
@@ -37,16 +37,17 @@ const router = createRouter({
 // 导航守卫 (权限控制)
 router.beforeEach((to, _from) => {
   const authStore = useAuthStore()
+  const hasSession = authStore.ensureValidSession()
 
-  // 1. 如果访问需要管理员权限的页面
-  if (to.meta.requiresAdmin && !authStore.isAdmin) {
-    alert('权限不足：该页面仅限救助站管理员访问')
-    return '/'
+  // 1. 如果访问需要登录的页面
+  if (to.meta.requiresAuth && !hasSession) {
+    return '/login'
   }
 
-  // 2. 如果未登录且访问的不是登录页
-  if (!authStore.isLoggedIn && to.name !== 'login') {
-    return '/login'
+  // 2. 如果访问需要管理员权限的页面
+  if (to.meta.requiresAdmin && !authStore.isAdmin) {
+    alert('权限不足：该页面仅限系统管理员访问')
+    return '/'
   }
 })
 

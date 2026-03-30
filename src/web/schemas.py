@@ -9,7 +9,10 @@ class RegisterRequest(BaseModel):
     username: str
     email: str
     password: str
-    role: Literal["individual", "org_admin"] = "individual"
+    code: str # 验证码
+
+class SendCodeRequest(BaseModel):
+    email: str
 
 class PostCreate(BaseModel):
     user_id: int
@@ -25,6 +28,7 @@ class PostCreate(BaseModel):
     pet_breed: Optional[str] = None          # 品种
     adopt_reason: Optional[str] = None       # 送养原因
     location: Optional[str] = None           # 所在地址
+    adoption_preferences: Optional[dict] = None
 
 class PostUpdate(BaseModel):
     title: Optional[str] = None
@@ -37,6 +41,7 @@ class PostUpdate(BaseModel):
     pet_breed: Optional[str] = None
     adopt_reason: Optional[str] = None
     location: Optional[str] = None
+    adoption_preferences: Optional[dict] = None
 
 class CommentCreate(BaseModel):
     post_id: int
@@ -113,6 +118,7 @@ class ChangePasswordRequest(BaseModel):
     user_id: int
     old_password: str
     new_password: str
+    code: str # 增加验证码必填
 
 class ApplicationUpdateRequest(BaseModel):
     app_id: int
@@ -131,6 +137,7 @@ class AdoptionApplicationCreateRequest(BaseModel):
     conflict_notes: List[str] = Field(default_factory=list, description="专家冲突说明")
     followup_questions: List[str] = Field(default_factory=list, description="建议继续追问的问题")
     memory_scope: Optional[str] = Field(default="", description="记忆作用域")
+    assessment_payload: Optional[dict] = Field(default=None, description="用于后续 Flow 继续运行的完整评估输入")
 
 
 class OwnerApplicationDecisionRequest(BaseModel):
@@ -164,6 +171,30 @@ class AdoptionFeedbackRequest(BaseModel):
     would_recommend: bool = Field(description="是否向他人推荐领养")
     free_feedback: str = Field(default="", description="自由反馈文本")
 
+
+class AdoptionEvaluationFollowupRequest(BaseModel):
+    supplement_text: str = Field(default="", description="申请人补充的自由文本")
+    applicant_info: Optional[str] = Field(default=None, description="更新后的申请人情况描述")
+    application_reason: Optional[str] = Field(default=None, description="更新后的申请理由")
+    monthly_budget: Optional[float] = Field(default=None, ge=0, description="更新后的月预算")
+    daily_companion_hours: Optional[float] = Field(default=None, ge=0, le=24, description="更新后的日陪伴时长")
+    has_pet_experience: Optional[bool] = Field(default=None, description="是否有养宠经验")
+    housing_type: Optional[Literal["apartment", "house", "other"]] = Field(default=None, description="住房类型")
+    existing_pets: Optional[str] = Field(default=None, description="原住宠物情况")
+
+
+class AdoptionEvaluationReviewRequest(BaseModel):
+    status: Literal["approved", "rejected", "probing", "human_review"]
+    note: str = Field(default="", description="发布者或管理员的审核备注")
+
+
+class AdoptionEvaluationFeedbackRequest(BaseModel):
+    overall_satisfaction: int = Field(ge=1, le=5, description="整体满意度 1-5")
+    bond_level: Literal["very_close", "close", "normal", "distant"] = Field(description="与宠物的亲密程度")
+    unexpected_challenges: str = Field(default="", description="遇到的意外挑战")
+    would_recommend: bool = Field(description="是否向他人推荐领养")
+    free_feedback: str = Field(default="", description="自由反馈文本")
+
 class AdoptionAssessmentRequest(BaseModel):
     """领养资质评估请求 - 输入层"""
     # 申请人画像信息
@@ -179,6 +210,7 @@ class AdoptionAssessmentRequest(BaseModel):
     housing_type: Literal["apartment", "house", "other"] = Field(default="apartment", description="住房类型")
     # 原住宠物
     existing_pets: str = Field(default="", description="家中原住宠物情况，无则留空")
+    publisher_preferences: Optional[dict] = Field(default=None, description="送养方结构化偏好设置")
 
 
 class PetChatRequest(BaseModel):
@@ -196,8 +228,19 @@ class AdoptionRiskFactor(BaseModel):
     severity: Literal["low", "medium", "high"] = Field(description="严重程度")
 
 
+class AdoptionAssessmentDimension(BaseModel):
+    """七维领养评估结果"""
+    key: str = Field(description="维度编码")
+    label: str = Field(description="维度名称")
+    score: int = Field(ge=0, le=100, description="维度评分 0-100")
+    risk_level: Literal["Low", "Medium", "High"] = Field(description="维度风险等级")
+    evidence: List[str] = Field(default_factory=list, description="当前维度的判断依据")
+    missing_info: List[str] = Field(default_factory=list, description="当前维度仍缺失的信息")
+    suggestion: str = Field(default="", description="该维度的优化建议")
+
+
 class MutualAidTaskCreate(BaseModel):
-    user_id: int
+    user_id: Optional[int] = None
     task_type: str = "上门喂养"
     pet_name: str
     pet_species: str = "猫"
@@ -211,10 +254,10 @@ class MutualAidMatchRequest(BaseModel):
     user_id: Optional[int] = None
 
 class MutualAidAcceptRequest(BaseModel):
-    helper_id: int
+    helper_id: Optional[int] = None
 
 class MutualAidReportRequest(BaseModel):
-    reporter_id: int
+    reporter_id: Optional[int] = None
     reason: str
 
 
@@ -230,7 +273,12 @@ class AdoptionAssessmentResponse(BaseModel):
         description="系统建议决策：pass=建议通过 / conditional_pass=条件通过 / review_required=人工复核 / reject=建议驳回"
     )
     need_manual_review: bool = Field(description="是否需要人工二次核验")
+    need_followup: bool = Field(default=False, description="是否建议继续追问补充信息")
     # 详细分析
+    dimension_scores: List[AdoptionAssessmentDimension] = Field(default_factory=list, description="七维结构化评估结果")
+    missing_fields: List[str] = Field(default_factory=list, description="仍需补充确认的字段")
+    followup_questions: List[str] = Field(default_factory=list, description="建议继续追问的问题")
+    conflict_notes: List[str] = Field(default_factory=list, description="冲突点说明")
     risk_factors: List[AdoptionRiskFactor] = Field(default_factory=list, description="风险因子列表")
     recommendations: List[str] = Field(default_factory=list, description="个性化建议与补救策略")
     review_note: str = Field(default="", description="给管理员的审核备注")

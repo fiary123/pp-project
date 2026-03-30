@@ -1,31 +1,51 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Mail, Lock, User, ArrowRight, Loader2 } from 'lucide-vue-next'
+import { Mail, Lock, User, ShieldCheck, Loader2, ArrowRight } from 'lucide-vue-next'
 import { useAuthStore } from '../store/authStore'
-import axios from 'axios'
+import axios from '../api/index'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
 const isLogin = ref(true)
 const isLoading = ref(false)
+const isSendingCode = ref(false)
+const countdown = ref(0)
 const errorMsg = ref('')
 
 const form = ref({
   username: '',
   email: '',
   password: '',
-  role: 'individual'
+  code: '' 
 })
+
+// 发送验证码逻辑
+const sendCode = async () => {
+  if (!form.value.email) return (errorMsg.value = '请先输入邮箱')
+  isSendingCode.value = true
+  errorMsg.value = ''
+  try {
+    await axios.post('/api/send-code', { email: form.value.email })
+    alert('验证码已发送，请查收邮件（或查看后端控制台）')
+    countdown.value = 60
+    const timer = setInterval(() => {
+      countdown.value--
+      if (countdown.value <= 0) clearInterval(timer)
+    }, 1000)
+  } catch (e: any) {
+    errorMsg.value = e.response?.data?.detail || '发送失败'
+  } finally {
+    isSendingCode.value = false
+  }
+}
 
 const handleAuth = async () => {
   isLoading.value = true
   errorMsg.value = ''
-  
   try {
     if (isLogin.value) {
-      // 登录逻辑
       const res = await axios.post('/api/login', {
         email: form.value.email,
         password: form.value.password
@@ -33,13 +53,21 @@ const handleAuth = async () => {
       authStore.login(res.data.user, res.data.access_token)
       router.push('/')
     } else {
-      // 注册逻辑
-      await axios.post('/api/register', form.value)
-      isLogin.value = true
+      if (!form.value.code) {
+        errorMsg.value = '请输入验证码'
+        return
+      }
+      await axios.post('/api/register', {
+        username: form.value.username,
+        email: form.value.email,
+        password: form.value.password,
+        code: form.value.code
+      })
       alert('注册成功，请登录！')
+      isLogin.value = true
     }
-  } catch (err: any) {
-    errorMsg.value = err.response?.data?.detail || '认证失败，请检查网络'
+  } catch (e: any) {
+    errorMsg.value = e.response?.data?.detail || '操作失败'
   } finally {
     isLoading.value = false
   }
@@ -48,7 +76,7 @@ const handleAuth = async () => {
 
 <template>
   <div class="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md px-4">
-    <div class="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 overflow-hidden rounded-[3rem] border border-white/10 shadow-2xl">
+    <div class="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 overflow-hidden rounded-[3rem] border border-gray-200 dark:border-white/10 shadow-2xl bg-white dark:bg-[#121212]">
       
       <!-- 左侧：视觉区域 -->
       <div class="hidden md:block relative bg-orange-500 overflow-hidden">
@@ -61,32 +89,45 @@ const handleAuth = async () => {
       </div>
 
       <!-- 右侧：表单区域 -->
-      <div class="bg-[#121212] p-8 md:p-12 flex flex-col justify-center">
-        <div class="mb-10">
-          <h3 class="text-3xl font-black text-white">{{ isLogin ? '欢迎回来' : '开启旅程' }}</h3>
-          <p class="text-gray-500 mt-2">{{ isLogin ? '请登录您的账号以继续' : '只需几秒钟即可完成注册' }}</p>
+      <div class="p-8 md:p-12 flex flex-col justify-center">
+        <div class="mb-10 text-center md:text-left">
+          <h3 class="text-3xl font-black text-gray-900 dark:text-white">{{ isLogin ? '欢迎回来' : '开启旅程' }}</h3>
+          <p class="text-gray-500 mt-2">{{ isLogin ? '请登录您的账号以继续' : '只需几秒钟即可通过邮箱验证注册' }}</p>
         </div>
 
         <div class="space-y-4">
-          <!-- 角色选择 (仅注册) -->
-          <div v-if="!isLogin" class="grid grid-cols-2 gap-3 mb-6">
-            <button @click="form.role = 'individual'" :class="form.role === 'individual' ? 'bg-orange-500 text-white' : 'bg-white/5 text-gray-400'" class="py-2 rounded-xl text-xs font-bold transition-all border border-white/5">个人用户</button>
-            <button @click="form.role = 'org_admin'" :class="form.role === 'org_admin' ? 'bg-orange-500 text-white' : 'bg-white/5 text-gray-400'" class="py-2 rounded-xl text-xs font-bold transition-all border border-white/5">救助机构</button>
-          </div>
-
+          <!-- 用户名 (仅注册) -->
           <div v-if="!isLogin" class="relative group">
-            <User class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-orange-500 transition-colors" :size="18" />
-            <input v-model="form.username" type="text" placeholder="您的称呼" class="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-orange-500 transition-all" />
+            <User class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-orange-500 transition-colors" :size="18" />
+            <input v-model="form.username" type="text" placeholder="您的称呼" 
+                   class="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl py-4 pl-12 pr-4 text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all" />
           </div>
 
+          <!-- 邮箱 -->
           <div class="relative group">
-            <Mail class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-orange-500 transition-colors" :size="18" />
-            <input v-model="form.email" type="email" placeholder="电子邮箱" class="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-orange-500 transition-all" />
+            <Mail class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-orange-500 transition-colors" :size="18" />
+            <input v-model="form.email" type="email" placeholder="电子邮箱" 
+                   class="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl py-4 pl-12 pr-4 text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all" />
           </div>
 
+          <!-- 验证码 (仅注册) -->
+          <div v-if="!isLogin" class="flex gap-3 group">
+            <div class="relative flex-1">
+              <ShieldCheck class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-orange-500 transition-colors" :size="18" />
+              <input v-model="form.code" type="text" placeholder="6位验证码" 
+                     class="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl py-4 pl-12 pr-4 text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all" />
+            </div>
+            <button type="button" @click="sendCode" :disabled="isSendingCode || countdown > 0"
+                    class="px-4 rounded-2xl bg-orange-500/10 border border-orange-500/20 text-orange-500 font-bold text-xs hover:bg-orange-500 hover:text-white transition-all disabled:opacity-50 min-w-[100px]">
+              {{ countdown > 0 ? `${countdown}s` : '获取码' }}
+            </button>
+          </div>
+
+          <!-- 密码 -->
           <div class="relative group">
-            <Lock class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-orange-500 transition-colors" :size="18" />
-            <input v-model="form.password" type="password" placeholder="安全密码" class="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-orange-500 transition-all" />
+            <Lock class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-orange-500 transition-colors" :size="18" />
+            <input v-model="form.password" type="password" placeholder="安全密码" 
+                   class="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl py-4 pl-12 pr-4 text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all" />
           </div>
 
           <div v-if="errorMsg" class="text-red-500 text-xs px-2 font-bold">{{ errorMsg }}</div>
@@ -94,7 +135,7 @@ const handleAuth = async () => {
           <button 
             @click="handleAuth"
             :disabled="isLoading"
-            class="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-700 text-white py-4 rounded-2xl font-black flex items-center justify-center gap-2 transition-all shadow-lg shadow-orange-500/20"
+            class="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white py-4 rounded-2xl font-black flex items-center justify-center gap-2 transition-all shadow-lg shadow-orange-500/20"
           >
             <template v-if="isLoading">
               <Loader2 class="animate-spin" :size="20" /> 正在同步...
@@ -120,5 +161,4 @@ const handleAuth = async () => {
 </template>
 
 <style scoped>
-/* @reference "tailwindcss"; */
 </style>

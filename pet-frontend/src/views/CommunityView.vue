@@ -10,6 +10,61 @@ import axios from '../api/index';
 
 const authStore = useAuthStore();
 
+const defaultAdoptionPreferences = {
+  hard_preferences: [] as string[],
+  soft_preferences: ['住房稳定性', '陪伴时间', '责任意识'],
+  allow_novice: true,
+  accept_renting: true,
+  require_stable_housing: false,
+  require_financial_capacity: false,
+  prefer_local: false,
+  require_family_agreement: false,
+  prefer_quiet_household: false,
+  prefer_multi_pet_experience: false,
+  focus_experience: false,
+  focus_companionship: true,
+  focus_stability: true,
+  risk_tolerance: 'medium'
+};
+
+const parseAdoptionPreferences = (raw: unknown) => {
+  if (!raw) return { ...defaultAdoptionPreferences };
+  if (typeof raw === 'string') {
+    try {
+      return { ...defaultAdoptionPreferences, ...(JSON.parse(raw) as Record<string, unknown>) };
+    } catch {
+      return { ...defaultAdoptionPreferences };
+    }
+  }
+  if (typeof raw === 'object') {
+    return { ...defaultAdoptionPreferences, ...(raw as Record<string, unknown>) };
+  }
+  return { ...defaultAdoptionPreferences };
+};
+
+const riskToleranceOptions = [
+  { value: 'conservative', label: '保守型' },
+  { value: 'medium', label: '中性' },
+  { value: 'relaxed', label: '宽松型' }
+] as const;
+
+const requirementOptions = [
+  { key: 'allow_novice', label: '接受新手' },
+  { key: 'accept_renting', label: '接受租房' },
+  { key: 'prefer_local', label: '优先同城' },
+  { key: 'require_family_agreement', label: '需家人同意' },
+  { key: 'require_stable_housing', label: '稳定住房' },
+  { key: 'require_financial_capacity', label: '预算能力' }
+] as const;
+
+const focusOptions = [
+  { key: 'focus_stability', label: '长期稳定' },
+  { key: 'focus_companionship', label: '陪伴时间' },
+  { key: 'focus_experience', label: '照护经验' },
+  { key: 'prefer_quiet_household', label: '安静家庭' },
+  { key: 'prefer_multi_pet_experience', label: '多宠经验' }
+] as const;
+
 // 1. 状态管理
 const posts = ref<any[]>([]);
 const activeType = ref<'all' | 'daily' | 'experience' | 'adopt_help'>('all');
@@ -23,7 +78,8 @@ const publishType = ref<'daily' | 'experience' | 'adopt_help'>('daily');
 const publishForm = ref({
   title: '', content: '', image_url: '',
   image_urls: [] as string[],
-  pet_name: '', pet_gender: '', pet_age: '', pet_breed: '', adopt_reason: '', location: ''
+  pet_name: '', pet_gender: '', pet_age: '', pet_breed: '', adopt_reason: '', location: '',
+  adoption_preferences: { ...defaultAdoptionPreferences }
 });
 const isPublishing = ref(false);
 const isUploading = ref(false);
@@ -97,6 +153,31 @@ const isVideo = (url: string) => {
   return ['.mp4', '.webm', '.ogg', '.mov'].some(ext => url.toLowerCase().endsWith(ext));
 };
 
+const toggleAdoptionPreference = (key: keyof typeof defaultAdoptionPreferences) => {
+  if (!publishForm.value.adoption_preferences) {
+    publishForm.value.adoption_preferences = { ...defaultAdoptionPreferences };
+  }
+  const current = publishForm.value.adoption_preferences[key];
+  if (typeof current === 'boolean') {
+    (publishForm.value.adoption_preferences as Record<string, unknown>)[key] = !current;
+  }
+};
+
+const summarizePreferenceTags = (preferences: unknown) => {
+  const pref = parseAdoptionPreferences(preferences);
+  return [
+    pref.require_stable_housing ? '稳定住房' : '',
+    pref.require_financial_capacity ? '预算能力' : '',
+    pref.require_family_agreement ? '家庭同意' : '',
+    pref.prefer_local ? '同城优先' : '',
+    pref.focus_companionship ? '高陪伴' : '',
+    pref.focus_experience ? '经验优先' : '',
+    pref.prefer_quiet_household ? '安静家庭' : '',
+    pref.prefer_multi_pet_experience ? '多宠经验' : '',
+    pref.allow_novice ? '接受新手' : '不倾向新手'
+  ].filter(Boolean).slice(0, 6);
+};
+
 // 模拟帖子生成器
 const generateMockPosts = () => {
   const users = ['猫片达人', '狗狗日记', '宠物百科', '爱宠志愿者', '铲屎官小李'];
@@ -129,9 +210,25 @@ const generateMockPosts = () => {
     content: c.content,
     image_url: c.img,
     type: c.type,
+    adoption_preferences: c.type === 'adopt_help' ? { ...defaultAdoptionPreferences } : null,
     likes: 12 + i * 5,
-    create_time: '2026-03-22 10:00'
+    create_time: '2026-03-22 10:00',
+    comment_count: getStoredMockComments(9000 + i).length,
   }));
+};
+
+const syncPostCommentCount = (postId: number, count: number) => {
+  const target = posts.value.find((post) => post.id === postId);
+  if (target) {
+    target.comment_count = count;
+  }
+};
+
+const getCommentCount = (post: any) => {
+  const loadedCount = activePostComments.value[post.id];
+  if (Array.isArray(loadedCount)) return loadedCount.length;
+  if (typeof post.comment_count === 'number') return post.comment_count;
+  return 0;
 };
 
 // 2. 加载数据
@@ -142,6 +239,8 @@ const fetchPosts = async () => {
     const dbItems = (res.data && res.data.items) ? res.data.items : (Array.isArray(res.data) ? res.data : []);
     const formattedDbItems = dbItems.map((p: any) => ({
       ...p,
+      adoption_preferences: parseAdoptionPreferences(p.adoption_preferences),
+      comment_count: Number(p.comment_count || 0),
       create_time: p.create_time ? new Date(p.create_time).toLocaleString() : '刚刚'
     }));
     posts.value = formattedDbItems.length > 0 ? formattedDbItems : generateMockPosts();
@@ -170,14 +269,19 @@ const loadComments = async (postId: number) => {
     return;
   }
   if (postId >= 9000) {
-    activePostComments.value[postId] = getStoredMockComments(postId);
+    const storedComments = getStoredMockComments(postId);
+    activePostComments.value[postId] = storedComments;
+    syncPostCommentCount(postId, storedComments.length);
     return;
   }
   try {
     const res = await axios.get(`/api/posts/${postId}/comments`);
-    activePostComments.value[postId] = res.data || [];
+    const comments = res.data || [];
+    activePostComments.value[postId] = comments;
+    syncPostCommentCount(postId, comments.length);
   } catch {
     activePostComments.value[postId] = [];
+    syncPostCommentCount(postId, 0);
   }
 };
 
@@ -196,6 +300,7 @@ const handleSubmitComment = async (postId: number) => {
     ];
     activePostComments.value[postId] = nextComments;
     saveStoredMockComments(postId, nextComments);
+    syncPostCommentCount(postId, nextComments.length);
     commentInputs.value[postId] = '';
     return;
   }
@@ -204,7 +309,9 @@ const handleSubmitComment = async (postId: number) => {
     await axios.post('/api/posts/comment', { post_id: postId, user_id: authStore.user.id, content });
     commentInputs.value[postId] = '';
     const res = await axios.get(`/api/posts/${postId}/comments`);
-    activePostComments.value[postId] = res.data || [];
+    const comments = res.data || [];
+    activePostComments.value[postId] = comments;
+    syncPostCommentCount(postId, comments.length);
   } catch {
     alert('评论发送失败，请重试');
   } finally {
@@ -252,7 +359,8 @@ const startEdit = (post: any) => {
     image_urls: imgs,
     pet_name: post.pet_name || '', pet_gender: post.pet_gender || '',
     pet_age: post.pet_age || '', pet_breed: post.pet_breed || '',
-    adopt_reason: post.adopt_reason || '', location: post.location || ''
+    adopt_reason: post.adopt_reason || '', location: post.location || '',
+    adoption_preferences: parseAdoptionPreferences(post.adoption_preferences)
   };
   showPublishModal.value = true;
 };
@@ -285,6 +393,7 @@ const handlePublish = async () => {
       payload.pet_breed = publishForm.value.pet_breed;
       payload.adopt_reason = publishForm.value.adopt_reason;
       payload.location = publishForm.value.location;
+      payload.adoption_preferences = publishForm.value.adoption_preferences;
     }
     if (isEditing.value && editingPostId.value) {
       await axios.put(`/api/posts/${editingPostId.value}`, payload);
@@ -304,7 +413,11 @@ const closeModal = () => {
   showPublishModal.value = false;
   isEditing.value = false;
   editingPostId.value = null;
-  publishForm.value = { title: '', content: '', image_url: '', image_urls: [], pet_name: '', pet_gender: '', pet_age: '', pet_breed: '', adopt_reason: '', location: '' };
+  publishForm.value = {
+    title: '', content: '', image_url: '', image_urls: [],
+    pet_name: '', pet_gender: '', pet_age: '', pet_breed: '', adopt_reason: '', location: '',
+    adoption_preferences: { ...defaultAdoptionPreferences }
+  };
 };
 
 const filteredPosts = computed(() => {
@@ -327,8 +440,8 @@ onMounted(fetchPosts);
   <div class="max-w-4xl mx-auto space-y-6 md:space-y-8 pb-24 md:pb-32 px-3 md:px-4 text-gray-900 dark:text-white">
     <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-gray-200 dark:border-white/5 pb-4 md:pb-6">
       <div>
-        <h2 class="text-3xl md:text-4xl font-black text-gray-900 dark:text-white italic tracking-tighter uppercase">宠物 <span class="text-orange-500">社区</span></h2>
-        <p class="text-gray-500 dark:text-gray-400 font-bold text-xs md:text-sm uppercase tracking-widest mt-2">
+        <h2 class="text-3xl md:text-4xl font-black italic tracking-tighter uppercase" style="color: var(--text-primary);">宠物 <span class="text-orange-500">社区</span></h2>
+        <p class="font-bold text-xs md:text-sm uppercase tracking-widest mt-2" style="color: var(--text-secondary);">
           {{ isAdmin ? '管理模式已开启' : '记录萌宠点滴，分享养宠干货' }}
         </p>
       </div>
@@ -343,10 +456,10 @@ onMounted(fetchPosts);
     <div v-if="isLoading" class="py-20 flex justify-center"><Loader2 class="animate-spin text-orange-500" :size="48" /></div>
 
     <div v-else class="space-y-10">
-      <BaseCard v-for="post in filteredPosts" :key="post.id" class="!p-0 overflow-hidden border-gray-200 dark:border-white/5 relative">
+      <BaseCard v-for="post in filteredPosts" :key="post.id" class="!p-0 !bg-slate-50 dark:!bg-[#1a1a1a] overflow-hidden !border-slate-200 dark:!border-white/5 relative shadow-lg dark:shadow-2xl">
         <!-- 管理员/本人控制栏 -->
-        <div v-if="isAdmin || authStore.user?.id === post.user_id" class="px-4 md:px-6 py-3 bg-gray-50 dark:bg-white/5 border-b border-gray-200 dark:border-white/5 flex justify-between items-center">
-          <span class="text-[9px] font-black text-gray-500 uppercase tracking-widest">{{ authStore.user?.id === post.user_id ? '我的帖子' : '内容管理' }}</span>
+        <div v-if="isAdmin || authStore.user?.id === post.user_id" class="px-4 md:px-6 py-3 bg-slate-100 dark:bg-white/5 border-b border-slate-200 dark:border-white/5 flex justify-between items-center">
+          <span class="text-[9px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">{{ authStore.user?.id === post.user_id ? '我的帖子' : '内容管理' }}</span>
           <div class="flex gap-3">
             <button @click="startEdit(post)" class="text-blue-400 hover:text-blue-300 text-[10px] font-black uppercase flex items-center gap-1 transition-colors"><Edit3 :size="12" /> 编辑</button>
             <button @click="handleDelete(post.id)" class="text-red-400 hover:text-red-300 text-[10px] font-black uppercase flex items-center gap-1 transition-colors"><Trash2 :size="12" /> 删除</button>
@@ -360,34 +473,42 @@ onMounted(fetchPosts);
             <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${post.username}`" />
           </button>
           <div>
-            <h4 class="font-bold text-gray-900 dark:text-white text-base md:text-lg flex items-center gap-2">
+            <h4 class="font-bold text-slate-900 dark:text-white text-base md:text-lg flex items-center gap-2">
               <button @click="openUserProfile(post.user_id, { id: post.user_id, username: post.username, role: post.role })"
                 class="hover:text-orange-500 transition-colors">{{ post.username }}</button>
               <span class="text-[10px] bg-orange-500/10 text-orange-500 px-2 py-0.5 rounded border border-orange-500/20 uppercase tracking-wider font-black">
                 {{ roleLabel[post.role] || post.role || '用户' }}
               </span>
             </h4>
-            <p class="text-xs text-gray-500 font-mono mt-0.5">{{ post.create_time }}</p>
+            <p class="text-xs text-slate-500 dark:text-gray-500 font-mono mt-0.5">{{ post.create_time }}</p>
           </div>
         </div>
 
         <!-- 帖子内容 -->
         <div class="px-4 md:px-8 pb-6 md:pb-8 space-y-4 md:space-y-5">
-          <h3 v-if="post.title" class="text-xl md:text-2xl font-black text-gray-900 dark:text-white italic tracking-tight">{{ post.title }}</h3>
+          <h3 v-if="post.title" class="text-xl md:text-2xl font-black text-slate-900 dark:text-white italic tracking-tight">{{ post.title }}</h3>
           <!-- 送养帖宠物信息卡 -->
           <div v-if="post.type === 'adopt_help' && (post.pet_name || post.pet_breed)" class="bg-orange-50 dark:bg-orange-500/5 border border-orange-200 dark:border-orange-500/20 rounded-2xl px-4 md:px-5 py-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-            <div v-if="post.pet_name" class="flex gap-2"><span class="text-gray-500">名字</span><span class="text-gray-900 dark:text-white font-bold">{{ post.pet_name }}</span></div>
-            <div v-if="post.pet_breed" class="flex gap-2"><span class="text-gray-500">品种</span><span class="text-gray-900 dark:text-white font-bold">{{ post.pet_breed }}</span></div>
-            <div v-if="post.pet_gender" class="flex gap-2"><span class="text-gray-500">性别</span>
+            <div v-if="post.pet_name" class="flex gap-2"><span class="text-slate-500 dark:text-gray-500">名字</span><span class="text-slate-900 dark:text-white font-bold">{{ post.pet_name }}</span></div>
+            <div v-if="post.pet_breed" class="flex gap-2"><span class="text-slate-500 dark:text-gray-500">品种</span><span class="text-slate-900 dark:text-white font-bold">{{ post.pet_breed }}</span></div>
+            <div v-if="post.pet_gender" class="flex gap-2"><span class="text-slate-500 dark:text-gray-500">性别</span>
               <span :class="post.pet_gender === 'male' ? 'text-blue-400' : post.pet_gender === 'female' ? 'text-pink-400' : 'text-gray-400'" class="font-bold">
                 {{ post.pet_gender === 'male' ? '♂ 公' : post.pet_gender === 'female' ? '♀ 母' : '未知' }}
               </span>
             </div>
-            <div v-if="post.pet_age" class="flex gap-2"><span class="text-gray-500">年龄</span><span class="text-gray-900 dark:text-white font-bold">{{ post.pet_age }}</span></div>
-            <div v-if="post.location" class="flex gap-2"><span class="text-gray-500">地址</span><span class="text-gray-900 dark:text-white font-bold">{{ post.location }}</span></div>
-            <div v-if="post.adopt_reason" class="col-span-2 flex gap-2 pt-1 border-t border-orange-200 dark:border-orange-500/10 mt-1"><span class="text-gray-500 flex-shrink-0">送养原因</span><span class="text-orange-700 dark:text-orange-300 text-xs leading-relaxed">{{ post.adopt_reason }}</span></div>
+            <div v-if="post.pet_age" class="flex gap-2"><span class="text-slate-500 dark:text-gray-500">年龄</span><span class="text-slate-900 dark:text-white font-bold">{{ post.pet_age }}</span></div>
+            <div v-if="post.location" class="flex gap-2"><span class="text-slate-500 dark:text-gray-500">地址</span><span class="text-slate-900 dark:text-white font-bold">{{ post.location }}</span></div>
+            <div v-if="post.adopt_reason" class="col-span-2 flex gap-2 pt-1 border-t border-orange-200 dark:border-orange-500/10 mt-1"><span class="text-slate-500 dark:text-gray-500 flex-shrink-0">送养原因</span><span class="text-orange-700 dark:text-orange-300 text-xs leading-relaxed">{{ post.adopt_reason }}</span></div>
+            <div v-if="summarizePreferenceTags(post.adoption_preferences).length" class="col-span-2 space-y-2 pt-1 border-t border-orange-200 dark:border-orange-500/10 mt-1">
+              <span class="text-slate-500 dark:text-gray-500 text-xs">领养偏好</span>
+              <div class="flex flex-wrap gap-2">
+                <span v-for="tag in summarizePreferenceTags(post.adoption_preferences)" :key="tag" class="px-2.5 py-1 rounded-full bg-white text-orange-600 border border-orange-200 text-[11px] font-bold dark:bg-white/5 dark:border-orange-500/20 dark:text-orange-300">
+                  {{ tag }}
+                </span>
+              </div>
+            </div>
           </div>
-          <p class="text-gray-700 dark:text-gray-300 text-sm md:text-base leading-relaxed whitespace-pre-line">{{ post.content }}</p>
+          <p class="text-slate-800 dark:text-gray-300 text-sm md:text-base leading-relaxed whitespace-pre-line font-medium">{{ post.content }}</p>
           <!-- 多图展示 -->
           <div v-if="post.image_urls && JSON.parse(post.image_urls).length > 0" class="mt-4">
             <div :class="JSON.parse(post.image_urls).length === 1 ? '' : 'grid grid-cols-2 gap-2'">
@@ -410,22 +531,22 @@ onMounted(fetchPosts);
         </div>
 
         <!-- 互动栏 -->
-        <div class="px-4 md:px-8 py-4 md:py-5 bg-gray-50 dark:bg-white/5 flex flex-wrap items-center gap-6 md:gap-12 border-t border-gray-200 dark:border-white/5">
+        <div class="px-4 md:px-8 py-4 md:py-5 bg-slate-100 dark:bg-white/5 flex flex-wrap items-center gap-6 md:gap-12 border-t border-slate-200 dark:border-white/5">
           <button @click="handleLike(post.id)"
-            :class="likedPosts.has(post.id) ? 'text-red-500' : 'text-gray-500 hover:text-red-500'"
+            :class="likedPosts.has(post.id) ? 'text-red-500' : 'text-slate-600 dark:text-gray-500 hover:text-red-500'"
             class="flex items-center gap-3 text-base font-black transition-all group">
             <Heart :size="24" :fill="likedPosts.has(post.id) ? 'currentColor' : 'none'" class="group-hover:scale-110 transition-transform" />
             {{ post.likes }}
           </button>
-          <button @click="loadComments(post.id)" class="flex items-center gap-3 text-base font-black text-gray-500 hover:text-blue-500 group">
+          <button @click="loadComments(post.id)" class="flex items-center gap-3 text-base font-black text-slate-600 dark:text-gray-500 hover:text-blue-500 group">
             <MessageCircle :size="24" class="group-hover:scale-110 transition-transform" />
             评论
-            <span v-if="activePostComments[post.id]?.length" class="text-xs text-gray-600">{{ activePostComments[post.id]?.length }}</span>
+            <span class="text-xs text-slate-600 dark:text-gray-600">{{ getCommentCount(post) }}</span>
           </button>
         </div>
 
         <!-- 评论区 -->
-        <div v-if="activePostComments[post.id] !== undefined" class="bg-gray-50/80 dark:bg-black/20 border-t border-gray-200 dark:border-white/5">
+        <div v-if="activePostComments[post.id] !== undefined" class="bg-slate-100/80 dark:bg-black/20 border-t border-slate-200 dark:border-white/5">
           <div class="px-4 md:px-8 pt-5 md:pt-6 space-y-4">
             <div v-if="(activePostComments[post.id]?.length ?? 0) === 0" class="text-center text-gray-600 text-sm py-4">
               暂无评论，来发表第一条吧 👋
@@ -434,12 +555,12 @@ onMounted(fetchPosts);
               <div class="w-9 h-9 rounded-full bg-white dark:bg-white/5 overflow-hidden flex-shrink-0 border border-gray-200 dark:border-white/10">
                 <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${c.username}`" />
               </div>
-              <div class="flex-1 bg-white dark:bg-white/5 rounded-2xl px-4 py-3 border border-gray-200 dark:border-white/5">
+              <div class="flex-1 bg-white dark:bg-white/5 rounded-2xl px-4 py-3 border border-slate-200 dark:border-white/5">
                 <div class="flex items-center justify-between gap-3 mb-1">
                   <p class="text-xs font-black text-orange-500 uppercase">{{ c.username }}</p>
-                  <p v-if="c.create_time" class="text-[10px] text-gray-500 font-mono">{{ c.create_time }}</p>
+                  <p v-if="c.create_time" class="text-[10px] text-slate-500 dark:text-gray-500 font-mono">{{ c.create_time }}</p>
                 </div>
-                <p class="text-sm text-gray-700 dark:text-gray-300">{{ c.content }}</p>
+                <p class="text-sm text-slate-800 dark:text-gray-300">{{ c.content }}</p>
               </div>
             </div>
           </div>
@@ -507,6 +628,58 @@ onMounted(fetchPosts);
                 class="w-full h-20 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all leading-relaxed placeholder-gray-400 dark:placeholder-gray-600"></textarea>
               <input v-model="publishForm.location" placeholder="所在地址（如：北京市朝阳区）"
                 class="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-gray-900 dark:text-white outline-none focus:border-orange-500 transition-all placeholder-gray-400 dark:placeholder-gray-600" />
+
+              <div class="space-y-3 pt-2 border-t border-orange-200 dark:border-orange-500/20">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                  <p class="text-xs font-black text-orange-500 uppercase tracking-widest">送养偏好</p>
+                  <span class="text-[11px] text-gray-500 dark:text-gray-400">保持现有页面风格的轻量配置</span>
+                </div>
+
+                <div class="space-y-2">
+                  <p class="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">风险容忍度</p>
+                  <div class="grid grid-cols-3 gap-2">
+                    <button
+                      v-for="item in riskToleranceOptions"
+                      :key="item.value"
+                      @click="publishForm.adoption_preferences.risk_tolerance = item.value"
+                      :class="publishForm.adoption_preferences.risk_tolerance === item.value ? 'bg-orange-500 text-white border-orange-500 shadow-lg shadow-orange-500/10' : 'bg-white dark:bg-white/5 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-white/10'"
+                      class="rounded-xl border px-3 py-2.5 text-xs font-black transition-all"
+                    >
+                      {{ item.label }}
+                    </button>
+                  </div>
+                </div>
+
+                <div class="space-y-2">
+                  <p class="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">基础要求</p>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      v-for="item in requirementOptions"
+                      :key="item.key"
+                      @click="toggleAdoptionPreference(item.key)"
+                      :class="publishForm.adoption_preferences[item.key] ? 'bg-orange-500 text-white border-orange-500' : 'bg-white dark:bg-white/5 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-white/10'"
+                      class="rounded-full border px-3 py-2 text-xs font-bold transition-all"
+                    >
+                      {{ item.label }}
+                    </button>
+                  </div>
+                </div>
+
+                <div class="space-y-2">
+                  <p class="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">关注重点</p>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      v-for="item in focusOptions"
+                      :key="item.key"
+                      @click="toggleAdoptionPreference(item.key)"
+                      :class="publishForm.adoption_preferences[item.key] ? 'bg-orange-100 text-orange-700 border-orange-300 dark:bg-orange-500/10 dark:text-orange-300 dark:border-orange-500/20' : 'bg-white dark:bg-white/5 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-white/10'"
+                      class="rounded-full border px-3 py-2 text-xs font-bold transition-all"
+                    >
+                      {{ item.label }}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <!-- 多图上传区 -->

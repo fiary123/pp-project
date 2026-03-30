@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { Salad, Loader2, Sparkles, AlertTriangle, RefreshCcw, ClipboardCheck } from 'lucide-vue-next'
 import axios from '../api/index'
 import BaseCard from '../components/BaseCard.vue'
+import AppSelect from '../components/AppSelect.vue'
 import { useAuthStore } from '../store/authStore'
 
 const authStore = useAuthStore()
@@ -46,6 +47,41 @@ const feedbackStatus = ref('')
 const errorMsg = ref('')
 const currentPlanId = ref<number | null>(null)
 const feedbackId = ref<number | null>(null)
+const speciesOptions = [
+  { label: '猫', value: 'cat' },
+  { label: '狗', value: 'dog' },
+]
+const activityLevelOptions = [
+  { label: '低', value: 'low' },
+  { label: '中', value: 'medium' },
+  { label: '高', value: 'high' },
+]
+const goalOptions = [
+  { label: '维持', value: 'maintain' },
+  { label: '减脂', value: 'lose_weight' },
+  { label: '增重', value: 'gain_weight' },
+]
+const weightChangeOptions = [
+  { label: '增重', value: 'gain' },
+  { label: '稳定', value: 'stable' },
+  { label: '减重', value: 'lose' },
+]
+const appetiteOptions = [
+  { label: '良好', value: 'good' },
+  { label: '正常', value: 'normal' },
+  { label: '较差', value: 'poor' },
+]
+const stoolOptions = [
+  { label: '正常', value: 'normal' },
+  { label: '偏软', value: 'soft' },
+  { label: '偏硬', value: 'hard' },
+  { label: '腹泻', value: 'diarrhea' },
+]
+const activityChangeOptions = [
+  { label: '增加', value: 'increase' },
+  { label: '稳定', value: 'stable' },
+  { label: '减少', value: 'decrease' },
+]
 
 const canSubmit = computed(() => (
   form.value.weight_kg > 0 &&
@@ -141,60 +177,55 @@ const replanNutrition = async () => {
 </script>
 
 <template>
-  <div class="space-y-8">
+  <div class="space-y-8 text-gray-900 dark:text-white">
     <div class="text-center space-y-3">
       <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold uppercase tracking-[0.2em]">
         <Sparkles :size="14" /> 营养专家
       </div>
-      <h2 class="text-5xl font-black text-white italic">营养与喂养专家</h2>
-      <p class="text-gray-400">先生成初始方案，再提交近 7 天反馈，完成动态营养再规划</p>
+      <h2 class="text-5xl font-black italic" style="color: var(--text-primary);">营养与喂养专家</h2>
+      <p style="color: var(--text-secondary);">先生成初始方案，再提交近 7 天反馈，完成动态营养再规划</p>
     </div>
 
     <div class="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-6">
       <BaseCard class="!p-8 space-y-5">
         <div class="grid grid-cols-2 gap-4">
-          <label class="text-xs text-gray-400" for="pet_name">宠物昵称
-            <input id="pet_name" name="pet_name" v-model="form.pet_name" type="text" placeholder="例: 豆包" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
+          <label class="text-xs text-gray-500 dark:text-gray-400" for="pet_name">宠物昵称
+            <input id="pet_name" name="pet_name" v-model="form.pet_name" type="text" placeholder="例: 豆包" class="nutrition-field w-full mt-1 rounded-xl px-3 py-2" />
           </label>
-          <label class="text-xs text-gray-400" for="species">宠物类型
-            <select id="species" name="species" v-model="form.species" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
-              <option value="cat">猫</option>
-              <option value="dog">狗</option>
-            </select>
+          <label class="text-xs text-gray-500 dark:text-gray-400" for="species">宠物类型
+            <div class="mt-1">
+              <AppSelect v-model="form.species" :options="speciesOptions" />
+            </div>
           </label>
-          <label class="text-xs text-gray-400" for="age_months">年龄（月）
-            <input id="age_months" name="age_months" v-model.number="form.age_months" type="number" min="0" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
+          <label class="text-xs text-gray-500 dark:text-gray-400" for="age_months">年龄（月）
+            <input id="age_months" name="age_months" v-model.number="form.age_months" type="number" min="0" class="nutrition-field w-full mt-1 rounded-xl px-3 py-2" />
           </label>
-          <label class="text-xs text-gray-400" for="weight_kg">体重（kg）
-            <input id="weight_kg" name="weight_kg" v-model.number="form.weight_kg" type="number" min="0.1" step="0.1" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
+          <label class="text-xs text-gray-500 dark:text-gray-400" for="weight_kg">体重（kg）
+            <input id="weight_kg" name="weight_kg" v-model.number="form.weight_kg" type="number" min="0.1" step="0.1" class="nutrition-field w-full mt-1 rounded-xl px-3 py-2" />
           </label>
-          <label class="text-xs text-gray-400" for="food_kcal">粮食能量(kcal/100g)
-            <input id="food_kcal" name="food_kcal" v-model.number="form.food_kcal_per_100g" type="number" min="1" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
+          <label class="text-xs text-gray-500 dark:text-gray-400" for="food_kcal">粮食能量(kcal/100g)
+            <input id="food_kcal" name="food_kcal" v-model.number="form.food_kcal_per_100g" type="number" min="1" class="nutrition-field w-full mt-1 rounded-xl px-3 py-2" />
           </label>
-          <label class="text-xs text-gray-400" for="activity_level">活动量
-            <select id="activity_level" name="activity_level" v-model="form.activity_level" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
-              <option value="low">低</option>
-              <option value="medium">中</option>
-              <option value="high">高</option>
-            </select>
+          <label class="text-xs text-gray-500 dark:text-gray-400" for="activity_level">活动量
+            <div class="mt-1">
+              <AppSelect v-model="form.activity_level" :options="activityLevelOptions" />
+            </div>
           </label>
         </div>
 
         <div class="grid grid-cols-2 gap-4">
-          <label class="text-xs text-gray-400" for="goal">目标
-            <select id="goal" name="goal" v-model="form.goal" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
-              <option value="maintain">维持</option>
-              <option value="lose_weight">减脂</option>
-              <option value="gain_weight">增重</option>
-            </select>
+          <label class="text-xs text-gray-500 dark:text-gray-400" for="goal">目标
+            <div class="mt-1">
+              <AppSelect v-model="form.goal" :options="goalOptions" />
+            </div>
           </label>
-          <label class="text-xs text-gray-400 flex items-end pb-3 gap-2" for="neutered">
+          <label class="text-xs text-gray-500 dark:text-gray-400 flex items-end pb-3 gap-2" for="neutered">
             <input id="neutered" name="neutered" type="checkbox" v-model="form.neutered" /> 已绝育
           </label>
         </div>
 
-        <label class="text-xs text-gray-400" for="symptoms">特殊情况（使用“、”分隔）
-          <input id="symptoms" name="symptoms" v-model="form.symptoms_text" type="text" placeholder="软便、掉毛" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white" />
+        <label class="text-xs text-gray-500 dark:text-gray-400" for="symptoms">特殊情况（使用“、”分隔）
+          <input id="symptoms" name="symptoms" v-model="form.symptoms_text" type="text" placeholder="软便、掉毛" class="nutrition-field w-full mt-1 rounded-xl px-3 py-2" />
         </label>
 
         <button @click="generatePlan" :disabled="isGenerating || !canSubmit" class="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-700 rounded-2xl py-3 font-black text-white flex items-center justify-center gap-2 transition-all">
@@ -203,41 +234,32 @@ const replanNutrition = async () => {
           生成喂养方案
         </button>
 
-        <div class="rounded-3xl border border-white/10 bg-white/5 p-5 space-y-4" :class="{ 'opacity-70': !hasPlan }">
-          <div class="flex items-center gap-2 text-sm font-black text-white">
+        <div class="rounded-3xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-5 space-y-4" :class="{ 'opacity-70': !hasPlan }">
+          <div class="flex items-center gap-2 text-sm font-black text-gray-900 dark:text-white">
             <ClipboardCheck :size="16" class="text-emerald-400" />
             近 7 天执行反馈
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label class="text-xs text-gray-400">体重变化
-              <select v-model="feedbackForm.weight_change" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
-                <option value="gain">增重</option>
-                <option value="stable">稳定</option>
-                <option value="lose">减重</option>
-              </select>
+            <label class="text-xs text-gray-500 dark:text-gray-400">体重变化
+              <div class="mt-1">
+                <AppSelect v-model="feedbackForm.weight_change" :options="weightChangeOptions" />
+              </div>
             </label>
-            <label class="text-xs text-gray-400">食欲状态
-              <select v-model="feedbackForm.appetite_status" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
-                <option value="good">良好</option>
-                <option value="normal">正常</option>
-                <option value="poor">较差</option>
-              </select>
+            <label class="text-xs text-gray-500 dark:text-gray-400">食欲状态
+              <div class="mt-1">
+                <AppSelect v-model="feedbackForm.appetite_status" :options="appetiteOptions" />
+              </div>
             </label>
-            <label class="text-xs text-gray-400">排便情况
-              <select v-model="feedbackForm.stool_status" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
-                <option value="normal">正常</option>
-                <option value="soft">偏软</option>
-                <option value="hard">偏硬</option>
-                <option value="diarrhea">腹泻</option>
-              </select>
+            <label class="text-xs text-gray-500 dark:text-gray-400">排便情况
+              <div class="mt-1">
+                <AppSelect v-model="feedbackForm.stool_status" :options="stoolOptions" />
+              </div>
             </label>
-            <label class="text-xs text-gray-400">活动量变化
-              <select v-model="feedbackForm.activity_change" class="w-full mt-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white">
-                <option value="increase">增加</option>
-                <option value="stable">稳定</option>
-                <option value="decrease">减少</option>
-              </select>
+            <label class="text-xs text-gray-500 dark:text-gray-400">活动量变化
+              <div class="mt-1">
+                <AppSelect v-model="feedbackForm.activity_change" :options="activityChangeOptions" />
+              </div>
             </label>
           </div>
 
@@ -255,7 +277,7 @@ const replanNutrition = async () => {
             </button>
           </div>
 
-          <p class="text-xs text-gray-400">流程说明：先生成初始方案，再提交反馈，最后触发 NutritionOptimizer 进行闭环再规划。</p>
+          <p class="text-xs text-gray-600 dark:text-gray-400">流程说明：先生成初始方案，再提交反馈，最后触发 NutritionOptimizer 进行闭环再规划。</p>
         </div>
 
         <p v-if="feedbackStatus" class="text-emerald-400 text-sm">{{ feedbackStatus }}</p>
@@ -265,31 +287,60 @@ const replanNutrition = async () => {
       <BaseCard class="!p-8" v-if="plan">
         <div class="flex items-start justify-between gap-4 mb-4">
           <div>
-            <h3 class="text-xl font-black text-white">结构化结果</h3>
-            <p class="text-sm text-gray-400 mt-1">当前展示的是最新激活方案</p>
+            <h3 class="text-xl font-black text-gray-900 dark:text-white">结构化结果</h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">当前展示的是最新激活方案</p>
           </div>
-          <div v-if="currentPlanId" class="text-xs text-gray-400">方案 ID：{{ currentPlanId }}</div>
+          <div v-if="currentPlanId" class="text-xs text-gray-600 dark:text-gray-400">方案 ID：{{ currentPlanId }}</div>
         </div>
 
         <div class="grid grid-cols-2 gap-3 text-sm">
-          <div class="bg-white/5 rounded-xl p-3">每日热量：<span class="font-bold text-emerald-400">{{ plan.daily_kcal }} kcal</span></div>
-          <div class="bg-white/5 rounded-xl p-3">每日喂食：<span class="font-bold text-emerald-400">{{ plan.daily_food_g }} g</span></div>
-          <div class="bg-white/5 rounded-xl p-3">喂食频次：<span class="font-bold text-emerald-400">{{ plan.feedings_per_day }} 次/天</span></div>
-          <div class="bg-white/5 rounded-xl p-3">饮水建议：<span class="font-bold text-emerald-400">{{ plan.daily_water_ml }} ml</span></div>
-          <div class="bg-white/5 rounded-xl p-3">置信度：<span class="font-bold text-amber-400">{{ confidenceText }}</span></div>
-          <div class="bg-white/5 rounded-xl p-3">复查周期：<span class="font-bold text-emerald-400">{{ plan.recheck_in_days ?? '未提供' }} 天</span></div>
+          <div class="bg-gray-50 dark:bg-white/5 rounded-xl p-3">每日热量：<span class="font-bold text-emerald-400">{{ plan.daily_kcal }} kcal</span></div>
+          <div class="bg-gray-50 dark:bg-white/5 rounded-xl p-3">每日喂食：<span class="font-bold text-emerald-400">{{ plan.daily_food_g }} g</span></div>
+          <div class="bg-gray-50 dark:bg-white/5 rounded-xl p-3">喂食频次：<span class="font-bold text-emerald-400">{{ plan.feedings_per_day }} 次/天</span></div>
+          <div class="bg-gray-50 dark:bg-white/5 rounded-xl p-3">饮水建议：<span class="font-bold text-emerald-400">{{ plan.daily_water_ml }} ml</span></div>
+          <div class="bg-gray-50 dark:bg-white/5 rounded-xl p-3">置信度：<span class="font-bold text-amber-400">{{ confidenceText }}</span></div>
+          <div class="bg-gray-50 dark:bg-white/5 rounded-xl p-3">复查周期：<span class="font-bold text-emerald-400">{{ plan.recheck_in_days ?? '未提供' }} 天</span></div>
         </div>
 
-        <div class="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm">
-          <div class="text-gray-400">就医建议</div>
+        <div class="mt-4 rounded-2xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-black/20 p-4 text-sm">
+          <div class="text-gray-600 dark:text-gray-400">就医建议</div>
           <div class="mt-1 font-bold" :class="plan.requires_vet ? 'text-red-400' : 'text-emerald-400'">
             {{ plan.requires_vet ? '建议尽快联系兽医' : '当前可继续家庭观察' }}
           </div>
-          <p v-if="plan.adjustment_summary" class="mt-3 text-gray-300 whitespace-pre-wrap leading-6">{{ plan.adjustment_summary }}</p>
+          <p v-if="plan.adjustment_summary" class="mt-3 text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-6">{{ plan.adjustment_summary }}</p>
         </div>
 
-        <div class="mt-5 text-sm text-gray-300 whitespace-pre-wrap leading-7">{{ markdown }}</div>
+        <div class="mt-5 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-7">{{ markdown }}</div>
       </BaseCard>
     </div>
   </div>
 </template>
+
+<style scoped>
+.nutrition-field {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgb(229 231 235);
+  color: rgb(17 24 39);
+}
+
+.nutrition-field::placeholder {
+  color: rgb(156 163 175);
+}
+
+.nutrition-field:focus {
+  outline: none;
+  border-color: rgb(16 185 129);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
+}
+
+:global(.dark) .nutrition-field {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+:global(.dark) .nutrition-field::placeholder {
+  color: rgb(75 85 99);
+}
+
+</style>

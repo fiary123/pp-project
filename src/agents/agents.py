@@ -22,7 +22,12 @@ from .pet_persona import get_pet_persona_agent
 from .nutrition_expert import get_nutrition_expert_agent, get_nutrition_planner_agent, get_nutrition_optimizer_agent
 from .nutrition_planner import build_nutrition_plan, render_nutrition_markdown
 from .adoption_profiler import get_encyclopedia_agent, get_adoption_profiler_agent, get_cohabitation_risk_agent
-from .tools import generate_followup_questions, score_pet_match, search_mutual_aid_tasks, recall_adoption_experience
+from .tools import generate_followup_questions, score_pet_match, search_mutual_aid_tasks, recall_adoption_experience, pet_health_knowledge_search
+from src.web.services.adoption_contract import (
+    CONTRACT_VERSION,
+    normalize_confidence,
+    validate_contract_list,
+)
 
 # ==========================================
 # 1. 环境与模型配置
@@ -67,6 +72,119 @@ def _merge_unique(existing: Optional[List[str]], incoming: Optional[List[str]], 
         if len(merged) >= limit: break
     return merged
 
+
+def _build_agent_contract(
+    agent_name: str,
+    *,
+    score: int = 0,
+    recommendation: str = "publisher_review",
+    evidence: Optional[List[str]] = None,
+    risk_tags: Optional[List[str]] = None,
+    missing_fields: Optional[List[str]] = None,
+    confidence: float = 0.72,
+    dimension_scores: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    return validate_contract_list([{
+        "agent_name": agent_name,
+        "dimension_scores": dimension_scores or {},
+        "risk_tags": _merge_unique([], risk_tags or []),
+        "missing_fields": _merge_unique([], missing_fields or []),
+        "confidence": normalize_confidence(confidence),
+        "recommendation": recommendation,
+        "evidence": _merge_unique([], evidence or []),
+        "score": max(0, min(100, int(score))),
+    }], fallback_name_prefix=agent_name)[0]
+
+
+def _build_adoption_result_from_raw(raw_text: str, latency: float, target_species: str, publisher_preferences: Optional[dict]) -> dict:
+    structured = _extract_json_payload(raw_text)
+    score = 65
+    if structured.get("readiness_score") is not None:
+        try:
+            score = int(float(structured.get("readiness_score")))
+        except Exception:
+            score = 65
+    else:
+        for pattern in [r'readiness[_\s]*score[：:\s]*(\d+)', r'评分[：:\s]*(\d+)', r'分数[：:\s]*(\d+)', r'(\d+)\s*/\s*100']:
+            matched = re.search(pattern, raw_text, re.IGNORECASE)
+            if matched:
+                score = int(matched.group(1))
+                break
+
+    decision = str(structured.get("decision") or "").lower()
+    if not decision:
+        lowered = raw_text.lower()
+        if any(k in lowered for k in ["驳回", "reject", "拒绝"]):
+            decision = "reject"
+        elif any(k in lowered for k in ["审核", "review", "人工"]):
+            decision = "review_required"
+        elif score < 50:
+            decision = "reject"
+        elif score < 75:
+            decision = "review_required"
+        else:
+            decision = "pass"
+
+    risk_level = str(structured.get("risk_level") or ("Low" if score > 80 else ("High" if score < 50 else "Medium")))
+    confidence_level = normalize_confidence(structured.get("confidence") or structured.get("confidence_level") or 0.74)
+    recommendations = _merge_unique(["AI 已复盘历史记忆。"], structured.get("recommendations"))
+    followup_questions = _merge_unique([], structured.get("followup_questions"), limit=4)
+    conflict_notes = _merge_unique([], structured.get("conflict_notes"), limit=4)
+
+    risk_factors = []
+    for factor in structured.get("risk_factors") or []:
+        if isinstance(factor, dict):
+            risk_factors.append(factor)
+
+    structured_outputs = validate_contract_list([
+        _build_agent_contract(
+            "MemoryRecallAgent",
+            score=min(100, score + 3),
+            recommendation="publisher_review",
+            evidence=["已将历史案例和回访信息纳入本次推理上下文。"],
+            risk_tags=["memory_referenced"],
+            confidence=0.76,
+        ),
+        _build_agent_contract(
+            "PreferenceMatchAgent",
+            score=score,
+            recommendation="followup" if followup_questions else ("manual_review" if decision == "review_required" else "publisher_review"),
+            evidence=[f"已结合 {target_species} 物种特征与发布者偏好进行适配评估。"],
+            risk_tags=[risk_level.lower()],
+            missing_fields=followup_questions,
+            confidence=confidence_level,
+        ),
+        _build_agent_contract(
+            "ConsensusCoordinatorAgent",
+            score=score,
+            recommendation="reject_candidate" if decision == "reject" else ("manual_review" if decision == "review_required" else "publisher_review"),
+            evidence=[structured.get("summary") or f"终审裁决已生成，耗时 {latency}s。"],
+            risk_tags=[factor.get("dimension") or factor.get("description") or "" for factor in risk_factors],
+            missing_fields=followup_questions,
+            confidence=confidence_level,
+        ),
+    ], fallback_name_prefix="AdoptionAgent")
+
+    return {
+        "readiness_score": score,
+        "success_probability": round(float(structured.get("success_probability") or (score / 100 * 0.95)), 2),
+        "decision": decision,
+        "risk_level": risk_level,
+        "risk_factors": risk_factors,
+        "recommendations": recommendations,
+        "followup_questions": followup_questions,
+        "conflict_notes": conflict_notes,
+        "confidence_level": confidence_level,
+        "structured_agent_contracts": structured_outputs,
+        "output_contract_version": CONTRACT_VERSION,
+        "final_summary": (
+            f"## 资质评估报告 v3.9\n"
+            f"**决策：{decision} (评分：{score}/100)**\n"
+            f"**耗时：{latency}s**\n\n"
+            f"### 裁决书\n{raw_text}"
+        ),
+    }
+
 def _build_local_pet_reply(user_msg: str, pet_name: str, pet_species: str, pet_desc: str, observer_profile: Optional[Dict[str, Any]] = None) -> str:
     prompt = (observer_profile or {}).get("next_probe") or "你平时会怎么照顾我呀？"
     missing_topics = (observer_profile or {}).get("missing_topics") or []
@@ -89,6 +207,45 @@ def _build_local_pet_reply(user_msg: str, pet_name: str, pet_species: str, pet_d
         care_hint = "我会想知道你是不是愿意长期稳定地照顾我。"
 
     return f"{opener}{desc_hint}{care_hint}{prompt}"
+
+
+def _looks_like_knowledge_miss(text: str) -> bool:
+    miss_markers = [
+        "未检索到匹配结果",
+        "知识库尚未初始化",
+        "暂无高度相关",
+        "知识库为空",
+        "基础知识库",
+        "建议由医疗 agent",
+        "检索失败",
+    ]
+    lowered = (text or "").lower()
+    return any(marker in (text or "") for marker in miss_markers) or "无匹配" in lowered
+
+
+def _run_llm_knowledge_fallback(user_query: str, retrieval_hint: str = "") -> str:
+    fallback_agent = Agent(
+        role='宠物百科兜底顾问',
+        goal='在知识库未命中时，基于通用宠物知识给出谨慎、友好的补充回答。',
+        backstory='你擅长在缺少知识库命中时提供清晰的常识型解释，并主动提示不确定性与风险边界。',
+        llm=llm,
+        verbose=True,
+        allow_delegation=False,
+    )
+    task = Task(
+        description=(
+            f'用户问题："{user_query}"\n'
+            f'检索情况：{retrieval_hint or "知识库未命中或暂不可用。"}\n'
+            '请直接输出简洁回答，并遵守：\n'
+            '1. 开头明确说明“以下为 AI 通用知识补充，非知识库命中结果”。\n'
+            '2. 不要伪造来源，不要说自己查到了知识库里不存在的内容。\n'
+            '3. 优先给出可执行建议；若涉及疾病、急性风险、用药或持续异常，提醒尽快咨询兽医。\n'
+            '4. 语气自然，不要只回复“无法回答”。'
+        ),
+        expected_output='一段简洁、可直接展示给用户的回答。',
+        agent=fallback_agent,
+    )
+    return str(Crew(agents=[fallback_agent], tasks=[task]).kickoff())
 
 # ==========================================
 # 3. 核心运行工作流 (语音、访谈与匹配)
@@ -190,7 +347,29 @@ def run_adoption_assessment(
     from .audit_expert import get_audit_expert_agent
     prescreen = rule_engine_prescreen(target_species, monthly_budget, daily_companion_hours, has_pet_experience, housing_type, existing_pets, applicant_info, publisher_preferences)
     if prescreen["hard_block"]:
-        return {"readiness_score": 0, "success_probability": 0.0, "decision": "reject", "risk_level": "High", "risk_factors": [], "recommendations": ["解决硬拦截后重试"], "final_summary": f"## 拦截\n原因：{prescreen['prescreen_summary']}"}
+        return {
+            "readiness_score": 0,
+            "success_probability": 0.0,
+            "decision": "reject",
+            "risk_level": "High",
+            "risk_factors": [],
+            "recommendations": ["解决硬拦截后重试"],
+            "followup_questions": [],
+            "conflict_notes": [],
+            "confidence_level": 0.98,
+            "structured_agent_contracts": validate_contract_list([
+                _build_agent_contract(
+                    "RulePrescreenAgent",
+                    score=0,
+                    recommendation="reject_candidate",
+                    evidence=[prescreen["prescreen_summary"]],
+                    risk_tags=["hard_block"],
+                    confidence=0.98,
+                )
+            ], fallback_name_prefix="AdoptionAgent"),
+            "output_contract_version": CONTRACT_VERSION,
+            "final_summary": f"## 拦截\n原因：{prescreen['prescreen_summary']}",
+        }
     
     e_agent, p_agent, a_agent, c_agent, ch_agent = get_encyclopedia_agent(llm), get_adoption_profiler_agent(llm), get_audit_expert_agent(llm), get_consensus_coordinator_agent(llm), get_cohabitation_risk_agent(llm)
     h_expert = Agent(role='历史复盘专家', goal='召回相似案例。', backstory='管理长期记忆。', llm=llm, tools=[recall_adoption_experience], verbose=True, allow_delegation=False)
@@ -200,34 +379,56 @@ def run_adoption_assessment(
     t_cohab = Task(description=f'评估环境风险。申请人信息：{applicant_info}\n住房类型：{housing_type}\n原住宠物：{existing_pets}', expected_output='报告。', agent=ch_agent, context=[t_ency], async_execution=True)
     t_prop = Task(description=f'提出适配提议。申请理由：{application_reason}\n发布者偏好：{json.dumps(publisher_preferences or {}, ensure_ascii=False)}\n知识上下文：{knowledge_context}\n记忆上下文：{memory_context}', expected_output='提议书。', agent=p_agent, context=[t_ency, t_recall])
     t_audit = Task(description='审计质疑。', expected_output='质疑报告。', agent=a_agent, context=[t_prop, t_recall])
-    t_cons = Task(description='终审裁决报告（含 readiness_score）。', expected_output='最终报告。', agent=c_agent, context=[t_prop, t_audit, t_cohab])
+    t_cons = Task(
+        description=(
+            "终审裁决。请输出严格 JSON 对象，不要输出额外说明。"
+            "字段包含：readiness_score, decision, risk_level, confidence, "
+            "risk_factors(数组，元素含 dimension/description/severity), "
+            "recommendations(数组), followup_questions(数组), conflict_notes(数组), summary。"
+        ),
+        expected_output='严格 JSON 对象。',
+        agent=c_agent,
+        context=[t_prop, t_audit, t_cohab],
+    )
     
     try:
         res = str(Crew(agents=[h_expert, e_agent, p_agent, a_agent, c_agent, ch_agent], tasks=[t_recall, t_ency, t_cohab, t_prop, t_audit, t_cons], process=Process.hierarchical, manager_llm=llm, memory=True).kickoff())
         latency = round(time.time() - start_time, 2)
     except: res, latency = "评估中断", 0
     
-    score = 65
-    for p in [r'readiness[_\s]*score[：:\s]*(\d+)', r'评分[：:\s]*(\d+)', r'分数[：:\s]*(\d+)', r'(\d+)\s*/\s*100']:
-        m = re.search(p, res, re.IGNORECASE)
-        if m: score = int(m.group(1)); break
-    
-    decision = "pass"
-    if any(k in res.lower() for k in ["驳回", "reject", "拒绝"]): decision = "reject"
-    elif any(k in res.lower() for k in ["审核", "review", "人工"]): decision = "review_required"
-    elif score < 50: decision = "reject"
-    elif score < 75: decision = "review_required"
-    
-    return {"readiness_score": score, "success_probability": round(score/100*0.95, 2), "decision": decision, "risk_level": "Low" if score > 80 else ("High" if score < 50 else "Medium"), "risk_factors": [], "recommendations": ["AI 已复盘历史记忆。"], "final_summary": f"## 资质评估报告 v3.8\n**决策：{decision} (评分：{score}/100)**\n**耗时：{latency}s**\n\n### 裁决书\n{res}"}
+    result = _build_adoption_result_from_raw(res, latency, target_species, publisher_preferences)
+    result["baseline_report"] = str(prescreen.get("prescreen_summary") or "")
+    return result
 
 # ─────────────────────────────────────────────────────────────
 
 def run_knowledge_expert(user_query: str) -> str:
-    r = Agent(role='检索员', goal='检索知识。', backstory='擅长检索。', llm=llm, tools=[recall_adoption_experience], verbose=True, allow_delegation=False)
-    a = Agent(role='顾问', goal='给出建议。', backstory='资深顾问。', llm=llm, tools=[], verbose=True, allow_delegation=False)
-    t1 = Task(description=f'查询："{user_query}"。', expected_output='原文。', agent=r)
-    t2 = Task(description='生成报告。', expected_output='Markdown。', agent=a, context=[t1])
-    return str(Crew(agents=[r, a], tasks=[t1, t2]).kickoff())
+    r = Agent(role='知识检索员', goal='优先从宠物知识库中检索相关内容。', backstory='擅长提炼用户问题中的核心关键词并检索知识库。', llm=llm, tools=[pet_health_knowledge_search], verbose=True, allow_delegation=False)
+    a = Agent(role='百科顾问', goal='基于检索结果组织清晰回答。', backstory='资深宠物养护顾问，能够区分知识库命中与模型常识补充。', llm=llm, tools=[], verbose=True, allow_delegation=False)
+    t1 = Task(
+        description=f'针对用户问题“{user_query}”调用 pet_health_knowledge_search 检索相关内容；若没有命中也要如实返回。',
+        expected_output='检索摘要。',
+        agent=r
+    )
+    t2 = Task(
+        description=(
+            '根据检索结果生成最终回答。\n'
+            '如果检索结果明确表示未命中、库未初始化、检索失败或只有弱相关内容，'
+            '不要报错，也不要只回复“没有结果”；请改为给出“AI 通用知识补充”式回答，'
+            '并主动提示这不是知识库命中结果。若问题涉及医疗风险，请加入尽快咨询兽医的提醒。'
+        ),
+        expected_output='Markdown。',
+        agent=a,
+        context=[t1]
+    )
+    try:
+        result = str(Crew(agents=[r, a], tasks=[t1, t2]).kickoff())
+        if _looks_like_knowledge_miss(result):
+            return _run_llm_knowledge_fallback(user_query, result)
+        return result
+    except Exception as e:
+        logger.exception("run_knowledge_expert failed")
+        return _run_llm_knowledge_fallback(user_query, str(e))
 
 def _parse_plan_from_tool_output(tool_output: str, profile: dict) -> dict:
     plan = {}

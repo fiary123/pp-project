@@ -38,7 +38,7 @@ defineExpose({ toggle })
 <template>
   <Teleport to="body">
     <transition name="scale">
-      <div v-if="isOpen" class="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] px-4 bg-black/60 backdrop-blur-sm" @click.self="toggle">
+      <div v-if="isOpen" class="command-palette fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] px-4 bg-black/60 backdrop-blur-sm" @click.self="toggle">
         
         <div class="w-full max-w-2xl transform">
           <BaseCard class="!p-0 overflow-hidden shadow-[0_0_50px_rgba(249,115,22,0.2)] border-white/20">
@@ -104,4 +104,37 @@ defineExpose({ toggle })
 }
 
 kbd { font-family: sans-serif; }
+
+:global(html:not(.dark)) .command-palette [class~="text-white"] {
+  color: #111827 !important;
+}
+
+:global(html:not(.dark)) .command-palette [class~="text-gray-300"] {
+  color: #475569 !important;
+}
+
+:global(html:not(.dark)) .command-palette [class~="bg-white/5"] {
+  background-color: #f8fafc !important;
+}
+
+:global(html:not(.dark)) .command-palette [class~="bg-white/10"] {
+  background-color: rgba(241, 245, 249, 0.95) !important;
+}
+
+:global(html:not(.dark)) .command-palette [class~="border-white/10"] {
+  border-color: rgba(148, 163, 184, 0.24) !important;
+}
+
+:global(html:not(.dark)) .command-palette [class~="border-white/20"] {
+  border-color: rgba(148, 163, 184, 0.3) !important;
+}
+
+:global(html:not(.dark)) .command-palette [class*="hover:bg-white/10"]:hover {
+  background-color: #f1f5f9 !important;
+}
+
+:global(html:not(.dark)) .command-palette input {
+  color: #111827 !important;
+  caret-color: #f97316;
+}
 </style>

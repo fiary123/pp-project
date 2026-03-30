@@ -10,6 +10,64 @@ import axios from '../api/index';
 
 const authStore = useAuthStore();
 
+const defaultAdoptionPreferences = {
+  hard_preferences: [] as string[],
+  soft_preferences: ['住房稳定性', '陪伴时间', '责任意识'],
+  allow_novice: true,
+  accept_renting: true,
+  require_stable_housing: false,
+  require_financial_capacity: false,
+  prefer_local: false,
+  require_family_agreement: false,
+  prefer_quiet_household: false,
+  prefer_multi_pet_experience: false,
+  focus_experience: false,
+  focus_companionship: true,
+  focus_stability: true,
+  risk_tolerance: 'medium'
+};
+
+const parseAdoptionPreferences = (raw: unknown) => {
+  if (!raw) return { ...defaultAdoptionPreferences };
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return { ...defaultAdoptionPreferences, ...(parsed as Record<string, unknown>) };
+  } catch {
+    return { ...defaultAdoptionPreferences };
+  }
+};
+
+const riskToleranceLabel = (value?: string) => {
+  if (value === 'conservative') return '保守型'
+  if (value === 'relaxed') return '宽松型'
+  return '中性'
+}
+
+const dimensionRiskClass = (level?: string) => {
+  if (level === 'Low') return 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300';
+  if (level === 'High') return 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300';
+  return 'bg-amber-100 text-amber-700 dark:bg-yellow-500/20 dark:text-yellow-300';
+};
+
+const housingTypeLabel = (value?: string) => {
+  if (value === 'house') return '独立住宅';
+  if (value === 'other') return '其他';
+  return '公寓';
+};
+
+const summarizePetExpectations = (prefs: any) => {
+  const chips: string[] = [];
+  if (prefs.require_stable_housing) chips.push('稳定居住');
+  if (prefs.require_financial_capacity) chips.push('基础经济能力');
+  if (prefs.require_family_agreement) chips.push('家庭同意');
+  if (!prefs.allow_novice) chips.push('有经验优先');
+  if (!prefs.accept_renting) chips.push('谨慎租房');
+  if (prefs.prefer_local) chips.push('本地优先');
+  if (prefs.prefer_quiet_household) chips.push('偏好安静家庭');
+  if (prefs.prefer_multi_pet_experience) chips.push('多宠经验加分');
+  return chips.slice(0, 6);
+}
+
 // 1. 状态管理
 const pets = ref<any[]>([]);
 const isLoading = ref(true);
@@ -24,15 +82,77 @@ const isAiMatching = ref(false);
 const isLoadingFollowup = ref(false);
 const recommendedMatches = ref<Record<string, any>>({});
 const showMatchResultModal = ref(false); 
-const matchedCount = computed(() => Object.keys(recommendedMatches.value).length);
+const soulmateThreshold = 90;
+const recommendationDisplayLimit = 6;
 
-// 获取匹配宠物
-const matchedPets = computed(() => {
+const getPetDisplayScore = (pet: any) => {
+  const rawScore = Number(recommendedMatches.value[String(pet.id)]?.fit_score);
+  if (Number.isFinite(rawScore) && rawScore > 0) return Math.round(rawScore);
+  return Math.max(60, Math.round(Number(pet.match) || 0));
+};
+
+const sortPetsByDisplayScore = (list: any[]) => {
+  return [...list].sort((a, b) => getPetDisplayScore(b) - getPetDisplayScore(a));
+};
+
+// 获取 AI 直接命中的匹配宠物
+const aiMatchedPets = computed(() => {
   const recIds = new Set(Object.keys(recommendedMatches.value));
   return pets.value
     .filter(p => recIds.has(String(p.id)))
-    .sort((a, b) => (recommendedMatches.value[String(b.id)]?.fit_score || 0) - (recommendedMatches.value[String(a.id)]?.fit_score || 0));
+    .sort((a, b) => getPetDisplayScore(b) - getPetDisplayScore(a));
 });
+
+const soulmatePets = computed(() => {
+  return aiMatchedPets.value.filter((pet) => getPetDisplayScore(pet) >= soulmateThreshold);
+});
+
+const closeMatchPets = computed(() => {
+  const aiCloseMatches = aiMatchedPets.value.filter((pet) => getPetDisplayScore(pet) < soulmateThreshold);
+  const selectedIds = new Set(aiCloseMatches.map((pet) => String(pet.id)));
+  const fallbackCandidates = sortPetsByDisplayScore(pets.value)
+    .filter((pet) => !selectedIds.has(String(pet.id)))
+    .slice(0, recommendationDisplayLimit);
+  return sortPetsByDisplayScore([...aiCloseMatches, ...fallbackCandidates]).slice(0, recommendationDisplayLimit);
+});
+
+const displayedMatchPets = computed(() => {
+  return soulmatePets.value.length > 0 ? aiMatchedPets.value : closeMatchPets.value;
+});
+
+const hasSoulmateMatches = computed(() => soulmatePets.value.length > 0);
+
+const displayedMatchCount = computed(() => displayedMatchPets.value.length);
+
+const matchResultHeading = computed(() => {
+  if (hasSoulmateMatches.value) return `为您发现 ${soulmatePets.value.length} 位高契合伙伴`;
+  if (displayedMatchCount.value > 0) return '当前没有特别契合的灵魂伴侣';
+  return '暂未找到合适候选';
+});
+
+const matchResultSubtitle = computed(() => {
+  if (hasSoulmateMatches.value) return 'AI 已完成多维偏好比对，已优先筛出当前最契合的候选。';
+  if (displayedMatchCount.value > 0) return '系统继续为您补充展示几位相近候选，方便继续比较和了解。';
+  return '可以稍微放宽描述条件，系统会继续为您检索更多候选。';
+});
+
+const getPetMatchReason = (pet: any) => {
+  return recommendedMatches.value[String(pet.id)]?.reason
+    || `系统结合宠物特征、陪伴需求和当前偏好，为您筛出了这位较接近的候选。`;
+};
+
+const getPetMatchAdvantages = (pet: any) => {
+  const advantages = recommendedMatches.value[String(pet.id)]?.fit_advantages;
+  if (Array.isArray(advantages) && advantages.length) return advantages.slice(0, 3);
+  if (Array.isArray(pet.tags) && pet.tags.length) {
+    return pet.tags.slice(0, 3).map((tag: string) => `具备${tag}特征`);
+  }
+  return ['当前整体条件较稳定', '适合作为相近候选继续了解', '建议结合档案与互动进一步判断'];
+};
+
+const getPetMatchLabel = (pet: any) => {
+  return getPetDisplayScore(pet) >= soulmateThreshold ? '高契合' : '相近推荐';
+};
 
 // 多轮对话状态
 type MatchStep = 'input' | 'followup';
@@ -267,6 +387,7 @@ const fetchPets = async () => {
         desc: p.description || p.post_content || '暂无详细介绍',
         type: p.type || '狗狗',
         owner_type: p.owner_type || 'org',
+        adoption_preferences: parseAdoptionPreferences(p.adoption_preferences),
         tags: p.tags ? (typeof p.tags === 'string' ? JSON.parse(p.tags) : p.tags) : ['温顺', '粘人'],
         match: 80 + (p.id % 20)
       }));
@@ -274,14 +395,15 @@ const fetchPets = async () => {
         ...p,
         img: p.image_url,
         desc: p.description,
+        adoption_preferences: { ...defaultAdoptionPreferences },
       }));
       pets.value = [...realPets, ...mockPets];
     } else {
-      pets.value = generatePets().map((p: any) => ({ ...p, img: p.image_url, desc: p.description }));
+      pets.value = generatePets().map((p: any) => ({ ...p, img: p.image_url, desc: p.description, adoption_preferences: { ...defaultAdoptionPreferences } }));
     }
   } catch (err) {
     console.error('获取列表失败');
-    pets.value = generatePets().map((p: any) => ({ ...p, img: p.image_url, desc: p.description }));
+    pets.value = generatePets().map((p: any) => ({ ...p, img: p.image_url, desc: p.description, adoption_preferences: { ...defaultAdoptionPreferences } }));
   }
   finally { isLoading.value = false; }
 };
@@ -311,7 +433,8 @@ const handleAdoptAssess = async () => {
   try {
     const res = await axios.post('/api/adoption/assess', {
       ...adoptForm.value,
-      target_pet_name: adoptingPet.value?.name || '未知宠物'
+      target_pet_name: adoptingPet.value?.name || '未知宠物',
+      publisher_preferences: adoptingPet.value?.adoption_preferences || defaultAdoptionPreferences,
     }, { timeout: 180000 });
     assessmentResult.value = res.data;
   } catch (err: any) { alert('评估服务异常'); }
@@ -322,14 +445,29 @@ const submitAdoptionApplication = async () => {
   if (!adoptingPet.value || !assessmentResult.value) return;
   isSubmittingApplication.value = true;
   try {
-    await axios.post('/api/user/applications/submit', {
+    const submitRes = await axios.post('/api/user/applications/submit', {
       pet_id: adoptingPet.value.id,
       apply_reason: adoptForm.value.application_reason || adoptForm.value.applicant_info,
       ai_decision: assessmentResult.value.decision,
       ai_readiness_score: assessmentResult.value.readiness_score,
-      ai_summary: assessmentResult.value.final_summary
+      ai_summary: assessmentResult.value.final_summary,
+      risk_level: assessmentResult.value.risk_level,
+      consensus_score: assessmentResult.value.confidence_level ? assessmentResult.value.confidence_level * 100 : null,
+      conflict_notes: assessmentResult.value.conflict_notes || [],
+      followup_questions: assessmentResult.value.followup_questions || [],
+      memory_scope: assessmentResult.value.trace_id ? `/adoption/${assessmentResult.value.trace_id}` : '',
+      assessment_payload: {
+        ...adoptForm.value,
+        target_pet_name: adoptingPet.value?.name || '未知宠物',
+        target_species: adoptForm.value.target_species,
+        publisher_preferences: adoptingPet.value?.adoption_preferences || defaultAdoptionPreferences,
+        latest_assessment: assessmentResult.value,
+      }
     });
-    alert('申请已提交！');
+    if (submitRes.data?.application_id) {
+      await axios.post(`/api/adoption/evaluate/${submitRes.data.application_id}`);
+    }
+    alert('申请已提交，系统已启动生命周期评估，请到个人中心查看流程状态。');
     showAdoptModal.value = false;
     assessmentResult.value = null;
   } catch (err: any) { alert('提交失败'); }
@@ -431,22 +569,22 @@ onMounted(fetchPets);
               <div class="flex items-center gap-4 md:gap-6 min-w-0">
                 <div class="hidden sm:flex p-4 bg-orange-500 rounded-3xl text-white shadow-xl shadow-orange-500/20"><Sparkles :size="32" /></div>
                 <div class="min-w-0">
-                  <h3 class="text-xl sm:text-2xl md:text-4xl font-black italic uppercase leading-tight">为您发现 {{ matchedCount }} 位灵魂伴侣</h3>
-                  <p class="text-xs md:text-sm text-gray-500 dark:text-gray-400 mt-1 font-black">AI 已通过多智能体博弈完成 100% 契合度比对</p>
+                  <h3 class="text-xl sm:text-2xl md:text-4xl font-black italic uppercase leading-tight">{{ matchResultHeading }}</h3>
+                  <p class="text-xs md:text-sm text-gray-500 dark:text-gray-400 mt-1 font-black">{{ matchResultSubtitle }}</p>
                 </div>
               </div>
               <button @click="showMatchResultModal = false" class="self-end sm:self-auto w-12 h-12 md:w-14 md:h-14 rounded-full bg-gray-200 dark:bg-white/5 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-orange-500 transition-all active:scale-90 shadow-sm"><X :size="24" class="md:hidden"/><X :size="28" class="hidden md:block"/></button>
             </div>
 
             <div class="flex-1 overflow-y-auto p-4 md:p-10 scrollbar-hide">
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 md:gap-8">
-                <div v-for="pet in matchedPets" :key="pet.id" 
+              <div v-if="displayedMatchPets.length" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 md:gap-8">
+                <div v-for="pet in displayedMatchPets" :key="pet.id" 
                   class="group bg-white dark:bg-white/5 border border-gray-200 dark:border-white/5 rounded-[3rem] overflow-hidden flex flex-col shadow-sm hover:shadow-2xl transition-all duration-500">
                   <div class="relative aspect-video">
                     <img :src="pet.img" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
                     <div class="absolute inset-0 bg-gradient-to-t from-gray-50 dark:from-[#111] via-transparent to-transparent opacity-80"></div>
                     <div class="absolute top-4 right-4 bg-orange-500 text-white px-4 py-2 rounded-2xl font-black text-sm flex items-center gap-1 shadow-lg">
-                      <Star :size="14" fill="currentColor" /> {{ recommendedMatches[String(pet.id)]?.fit_score }}% 契合
+                      <Star :size="14" fill="currentColor" /> {{ getPetDisplayScore(pet) }}% {{ getPetMatchLabel(pet) }}
                     </div>
                   </div>
                   <div class="p-5 md:p-8 space-y-4 md:space-y-5 flex-1 flex flex-col">
@@ -458,9 +596,9 @@ onMounted(fetchPets);
                       <button @click="selectedPet = pet" class="text-orange-500 font-black text-xs hover:underline underline-offset-4 shrink-0">查看档案 →</button>
                     </div>
                     <div class="bg-orange-50 dark:bg-black/30 border border-orange-100 dark:border-white/5 rounded-3xl p-5 space-y-4">
-                      <p class="text-sm text-orange-700 dark:text-orange-300 font-bold italic leading-relaxed">"{{ recommendedMatches[String(pet.id)]?.reason }}"</p>
+                      <p class="text-sm text-orange-700 dark:text-orange-300 font-bold italic leading-relaxed">"{{ getPetMatchReason(pet) }}"</p>
                       <div class="space-y-2">
-                        <div v-for="adv in recommendedMatches[String(pet.id)]?.fit_advantages?.slice(0,3)" :key="adv" class="text-xs text-green-700 dark:text-green-400 font-black flex items-start gap-2">
+                        <div v-for="adv in getPetMatchAdvantages(pet)" :key="adv" class="text-xs text-green-700 dark:text-green-400 font-black flex items-start gap-2">
                           <CheckCircle2 :size="14" class="shrink-0 mt-0.5" /> {{ adv }}
                         </div>
                       </div>
@@ -468,6 +606,15 @@ onMounted(fetchPets);
                     <button @click="startAdopt(pet)" class="mt-auto w-full bg-gray-900 dark:bg-white text-white dark:text-black py-4 md:py-5 rounded-2xl font-black text-sm hover:bg-orange-500 hover:text-white transition-all shadow-xl active:scale-95">立即发起领养</button>
                   </div>
                 </div>
+              </div>
+              <div v-else class="min-h-[18rem] flex flex-col items-center justify-center text-center rounded-[2.5rem] bg-white dark:bg-white/5 border border-gray-200 dark:border-white/5 px-6">
+                <div class="w-16 h-16 rounded-3xl bg-orange-100 dark:bg-orange-500/10 text-orange-500 flex items-center justify-center mb-5">
+                  <Sparkles :size="28" />
+                </div>
+                <h4 class="text-2xl font-black text-gray-900 dark:text-white">这次还没刷出特别合适的候选</h4>
+                <p class="mt-3 max-w-xl text-sm md:text-base text-gray-500 dark:text-gray-400 font-bold leading-7">
+                  可以换一种描述方式，补充喜欢的性格、家庭环境或陪伴时间，系统会继续从当前宠物库里为您筛选更接近的对象。
+                </p>
               </div>
             </div>
           </div>
@@ -543,6 +690,32 @@ onMounted(fetchPets);
           </div>
           <div class="overflow-y-auto flex-1 p-5 md:p-10 space-y-6 md:space-y-8 scrollbar-hide text-gray-900 dark:text-white">
             <p class="text-gray-600 dark:text-gray-400 text-sm leading-relaxed font-black">{{ selectedPet.desc }}</p>
+
+            <div class="bg-orange-50 dark:bg-white/5 border border-orange-100 dark:border-white/10 rounded-[1.8rem] md:rounded-[2.2rem] p-5 md:p-6 space-y-4">
+              <div class="flex items-center justify-between gap-3 flex-wrap">
+                <p class="text-[10px] font-black text-orange-500 uppercase tracking-[0.22em]">送养方关注重点</p>
+                <span class="px-3 py-1 rounded-full bg-white dark:bg-white/10 text-xs font-black text-gray-700 dark:text-gray-200">
+                  风险偏好：{{ riskToleranceLabel(selectedPet.adoption_preferences?.risk_tolerance) }}
+                </span>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <span
+                  v-for="item in summarizePetExpectations(selectedPet.adoption_preferences || defaultAdoptionPreferences)"
+                  :key="item"
+                  class="px-3 py-2 rounded-xl bg-white dark:bg-white/10 text-xs font-black text-gray-700 dark:text-gray-100 border border-orange-100 dark:border-white/10"
+                >
+                  {{ item }}
+                </span>
+              </div>
+              <div v-if="selectedPet.adoption_preferences?.hard_preferences?.length" class="space-y-2">
+                <p class="text-[10px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest">硬性条件</p>
+                <p class="text-xs leading-6 text-gray-700 dark:text-gray-300">{{ selectedPet.adoption_preferences.hard_preferences.join('、') }}</p>
+              </div>
+              <div v-if="selectedPet.adoption_preferences?.soft_preferences?.length" class="space-y-2">
+                <p class="text-[10px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest">软性偏好</p>
+                <p class="text-xs leading-6 text-gray-700 dark:text-gray-300">{{ selectedPet.adoption_preferences.soft_preferences.join('、') }}</p>
+              </div>
+            </div>
             
             <div class="bg-orange-50 dark:bg-white/5 border border-orange-100 dark:border-white/10 rounded-[2rem] md:rounded-[2.5rem] overflow-hidden shadow-inner text-gray-900 dark:text-white">
               <div class="flex items-center gap-2 px-6 py-4 border-b border-orange-100 dark:border-white/5 bg-orange-100/50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400">
@@ -587,9 +760,50 @@ onMounted(fetchPets);
               <button @click="showAdoptModal = false" class="text-gray-400 hover:text-orange-500 transition-all active:scale-90"><X :size="28"/></button>
             </div>
             <div v-if="!assessmentResult" class="p-5 md:p-12 space-y-5 md:space-y-8">
+              <div class="bg-orange-50 dark:bg-white/5 border border-orange-100 dark:border-white/10 rounded-[1.4rem] md:rounded-[2rem] p-4 md:p-6">
+                <p class="text-[10px] text-orange-500 font-black uppercase tracking-widest mb-3">这位送养方在意的条件</p>
+                <div class="flex flex-wrap gap-2">
+                  <span
+                    v-for="item in summarizePetExpectations(adoptingPet?.adoption_preferences || defaultAdoptionPreferences)"
+                    :key="item"
+                    class="px-3 py-2 rounded-xl bg-white dark:bg-white/10 text-xs font-black text-gray-700 dark:text-gray-100 border border-orange-100 dark:border-white/10"
+                  >
+                    {{ item }}
+                  </span>
+                </div>
+              </div>
               <div class="space-y-2">
                 <label class="text-[10px] text-gray-500 dark:text-gray-400 font-black uppercase tracking-widest">详细个人画像描述 (不低于10字)</label>
                 <textarea v-model="adoptForm.applicant_info" rows="4" placeholder="请详细描述您的居住环境（面积/封窗）、职业稳定性、家庭成员态度等..." class="w-full bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 rounded-[1.5rem] md:rounded-[2rem] px-5 md:px-8 py-4 md:py-6 outline-none focus:border-orange-500 transition-all shadow-inner text-gray-900 dark:text-white font-black" />
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="space-y-2">
+                  <label class="text-[10px] text-gray-500 dark:text-gray-400 font-black uppercase tracking-widest">月预算（元）</label>
+                  <input v-model.number="adoptForm.monthly_budget" type="number" min="0" class="w-full bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 rounded-2xl px-5 py-4 outline-none focus:border-orange-500 text-gray-900 dark:text-white font-black" />
+                </div>
+                <div class="space-y-2">
+                  <label class="text-[10px] text-gray-500 dark:text-gray-400 font-black uppercase tracking-widest">日陪伴时长（小时）</label>
+                  <input v-model.number="adoptForm.daily_companion_hours" type="number" min="0" max="24" step="0.5" class="w-full bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 rounded-2xl px-5 py-4 outline-none focus:border-orange-500 text-gray-900 dark:text-white font-black" />
+                </div>
+                <div class="space-y-2">
+                  <label class="text-[10px] text-gray-500 dark:text-gray-400 font-black uppercase tracking-widest">住房类型</label>
+                  <select v-model="adoptForm.housing_type" class="w-full bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 rounded-2xl px-5 py-4 outline-none focus:border-orange-500 text-gray-900 dark:text-white font-black">
+                    <option value="apartment">公寓</option>
+                    <option value="house">独立住宅</option>
+                    <option value="other">其他</option>
+                  </select>
+                </div>
+                <div class="space-y-2">
+                  <label class="text-[10px] text-gray-500 dark:text-gray-400 font-black uppercase tracking-widest">原住宠物情况</label>
+                  <input v-model="adoptForm.existing_pets" type="text" placeholder="如：家中已有一只绝育母猫" class="w-full bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 rounded-2xl px-5 py-4 outline-none focus:border-orange-500 text-gray-900 dark:text-white font-black" />
+                </div>
+              </div>
+              <div class="space-y-3">
+                <label class="text-[10px] text-gray-500 dark:text-gray-400 font-black uppercase tracking-widest">养宠经验</label>
+                <div class="flex gap-3">
+                  <button @click="adoptForm.has_pet_experience = true" :class="adoptForm.has_pet_experience ? 'bg-orange-500 text-white border-orange-500' : 'bg-white dark:bg-white/5 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-white/10'" class="flex-1 rounded-2xl border px-4 py-3 text-sm font-black transition-all">有经验</button>
+                  <button @click="adoptForm.has_pet_experience = false" :class="!adoptForm.has_pet_experience ? 'bg-orange-500 text-white border-orange-500' : 'bg-white dark:bg-white/5 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-white/10'" class="flex-1 rounded-2xl border px-4 py-3 text-sm font-black transition-all">首次养宠</button>
+                </div>
               </div>
               <button @click="handleAdoptAssess" :disabled="isAssessing || adoptForm.applicant_info.length < 10" class="w-full bg-orange-500 disabled:bg-orange-500/40 text-white py-4 md:py-6 rounded-[1.5rem] md:rounded-[2rem] font-black text-base md:text-xl flex justify-center items-center gap-4 transition-all active:scale-95 shadow-2xl">
                 <Loader2 v-if="isAssessing" class="animate-spin" :size="24" />
@@ -603,9 +817,67 @@ onMounted(fetchPets);
                  <p class="text-[10px] text-gray-500 dark:text-gray-400 font-black uppercase tracking-widest">领养准备度总分</p>
                  <div :class="[riskLevelConfig[assessmentResult.risk_level]?.bg, riskLevelConfig[assessmentResult.risk_level]?.text]" class="inline-block px-6 py-2 rounded-full text-xs font-black">{{ riskLevelConfig[assessmentResult.risk_level]?.label }}</div>
                </div>
+               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div class="bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-[1.4rem] md:rounded-[2rem] p-4 md:p-5">
+                   <p class="text-[10px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2">系统建议动作</p>
+                   <p class="text-lg font-black text-gray-900 dark:text-white">
+                     {{ assessmentResult.decision === 'pass' ? '建议通过' : assessmentResult.decision === 'conditional_pass' ? '建议补充沟通后通过' : assessmentResult.decision === 'reject' ? '建议谨慎拒绝' : '建议人工复核' }}
+                   </p>
+                 </div>
+                 <div class="bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-[1.4rem] md:rounded-[2rem] p-4 md:p-5">
+                   <p class="text-[10px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2">申请画像摘要</p>
+                   <p class="text-sm text-gray-700 dark:text-gray-300 leading-6">
+                     {{ adoptForm.has_pet_experience ? '具备养宠经验' : '首次养宠' }}，{{ housingTypeLabel(adoptForm.housing_type) }}居住，日陪伴约 {{ adoptForm.daily_companion_hours }} 小时，月预算约 {{ adoptForm.monthly_budget }} 元。
+                   </p>
+                 </div>
+               </div>
+               <div v-if="assessmentResult.dimension_scores?.length" class="space-y-4">
+                 <div class="flex items-center justify-between gap-3">
+                   <h4 class="text-lg md:text-xl font-black">七维领养评估</h4>
+                   <span class="text-[10px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest">发布者主导 · AI辅助 · 可解释</span>
+                 </div>
+                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   <div v-for="dimension in assessmentResult.dimension_scores" :key="dimension.key" class="bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-[1.4rem] md:rounded-[2rem] p-4 md:p-5 space-y-3">
+                     <div class="flex items-start justify-between gap-3">
+                       <div>
+                         <p class="text-base font-black text-gray-900 dark:text-white">{{ dimension.label }}</p>
+                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">评分 {{ dimension.score }}/100</p>
+                       </div>
+                       <span :class="dimensionRiskClass(dimension.risk_level)" class="px-3 py-1 rounded-full text-[10px] font-black uppercase">{{ dimension.risk_level }}</span>
+                     </div>
+                     <div v-if="dimension.evidence?.length" class="space-y-1">
+                       <p class="text-[10px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest">判断依据</p>
+                       <ul class="space-y-1">
+                         <li v-for="item in dimension.evidence.slice(0, 2)" :key="item" class="text-xs leading-6 text-gray-700 dark:text-gray-300">• {{ item }}</li>
+                       </ul>
+                     </div>
+                     <div v-if="dimension.missing_info?.length" class="space-y-1">
+                       <p class="text-[10px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest">仍缺信息</p>
+                       <ul class="space-y-1">
+                         <li v-for="item in dimension.missing_info.slice(0, 2)" :key="item" class="text-xs leading-6 text-orange-600 dark:text-orange-300">? {{ item }}</li>
+                       </ul>
+                     </div>
+                     <p class="text-xs leading-6 text-gray-600 dark:text-gray-400">{{ dimension.suggestion }}</p>
+                   </div>
+                 </div>
+               </div>
                <p v-if="assessmentResult.final_summary" class="text-sm leading-7 text-gray-600 dark:text-gray-300 bg-white/70 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-[1.4rem] md:rounded-[2rem] p-4 md:p-6">
                  {{ assessmentResult.final_summary }}
                </p>
+               <div v-if="assessmentResult.followup_questions?.length || assessmentResult.recommendations?.length" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div v-if="assessmentResult.followup_questions?.length" class="bg-orange-50 dark:bg-orange-500/10 border border-orange-100 dark:border-orange-500/20 rounded-[1.4rem] md:rounded-[2rem] p-4 md:p-5">
+                   <p class="text-[10px] font-black text-orange-500 uppercase tracking-widest mb-3">建议追问</p>
+                   <ul class="space-y-2">
+                     <li v-for="item in assessmentResult.followup_questions" :key="item" class="text-xs leading-6 text-orange-700 dark:text-orange-200">? {{ item }}</li>
+                   </ul>
+                 </div>
+                 <div v-if="assessmentResult.recommendations?.length" class="bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20 rounded-[1.4rem] md:rounded-[2rem] p-4 md:p-5">
+                   <p class="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-3">优化建议</p>
+                   <ul class="space-y-2">
+                     <li v-for="item in assessmentResult.recommendations" :key="item" class="text-xs leading-6 text-blue-700 dark:text-blue-200">• {{ item }}</li>
+                   </ul>
+                 </div>
+               </div>
                <button @click="submitAdoptionApplication" :disabled="isSubmittingApplication" class="w-full bg-orange-500 text-white py-4 md:py-6 rounded-[1.5rem] md:rounded-[2rem] font-black text-base md:text-xl transition-all active:scale-95 shadow-2xl shadow-orange-500/20">确认并正式提交申请</button>
             </div>
           </div>

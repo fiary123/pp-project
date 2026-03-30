@@ -1,15 +1,14 @@
 """
-数据库初始化脚本（仅首次建库或重置测试环境使用）。
-- 与 ensure_tables 共享同一 schema 定义，字段名/枚举值完全对齐。
-- 运行后会 DROP 并重建所有表，同时写入初始测试数据。
-- 生产环境不应直接调用此脚本；日常启动通过 ensure_tables 补全缺失表。
+数据库初始化脚本 - 增强版种子数据
+- 包含丰富的管理员测试数据：不同信用等级、全流程状态、全风险等级。
 """
 import sqlite3
 import os
 import sys
+import json
+from datetime import datetime, timedelta
 from passlib.context import CryptContext
 
-# 支持两种运行方式：直接执行 或 作为包导入
 try:
     from .db_config import SQLITE_DB_PATH
 except ImportError:
@@ -22,37 +21,35 @@ def init_database():
     conn = sqlite3.connect(SQLITE_DB_PATH)
     cursor = conn.cursor()
 
-    # ── 清空旧表（重置顺序：子表先删）─────────────────────────────────────
+    # ── 清空旧表 ──────────────────────────────────────────────────────────
     tables_to_drop = [
         "adopt_records", "credit_events", "user_credit_profiles",
         "nutrition_feedbacks", "nutrition_plans", "agent_trace_logs",
         "user_sanctions", "moderation_logs", "pet_chat_profiles", "pet_chat_history",
-        "messages", "comments",
-        "posts", "applications", "announcements", "pets", "users",
+        "messages", "comments", "posts", "applications", "announcements", "pets", "users",
     ]
     for t in tables_to_drop:
         cursor.execute(f"DROP TABLE IF EXISTS {t}")
 
-    # ── users ──────────────────────────────────────────────────────────────
+    # ── 建表逻辑 (与 ensure_tables 对齐) ───────────────────────────────────
     cursor.execute('''CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
         password TEXT NOT NULL,
-        role TEXT DEFAULT 'individual',
-        status TEXT DEFAULT 'active',   -- active, muted, banned
+        role TEXT DEFAULT 'user',
+        status TEXT DEFAULT 'active',
         occupation TEXT,
         contact TEXT,
         living_env TEXT,
         preference TEXT
     )''')
 
-    # ── pets ───────────────────────────────────────────────────────────────
     cursor.execute('''CREATE TABLE pets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         source_post_id INTEGER REFERENCES posts(id) ON DELETE SET NULL,
-        owner_type TEXT DEFAULT 'org',  -- org (救助站) or personal (个人送养)
+        owner_type TEXT DEFAULT 'personal',
         name TEXT NOT NULL,
         species TEXT,
         age INTEGER DEFAULT 1,
@@ -62,46 +59,12 @@ def init_database():
         image_url TEXT,
         adoption_preferences TEXT,
         tags TEXT DEFAULT '[]',
-        lng REAL,
-        lat REAL,
+        lng REAL, lat REAL,
         status TEXT DEFAULT '待领养',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
 
-    # ── posts ──────────────────────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE posts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        title TEXT,
-        content TEXT NOT NULL,
-        image_url TEXT,
-        type TEXT DEFAULT 'daily',  -- daily, experience, adopt_help, seek_help
-        likes INTEGER DEFAULT 0,
-        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-
-    # ── comments ───────────────────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE comments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        parent_id INTEGER DEFAULT NULL,
-        content TEXT NOT NULL,
-        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-
-    # ── messages ───────────────────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        sender_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        receiver_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        content TEXT NOT NULL,
-        is_read INTEGER DEFAULT 0,
-        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-
-    # ── applications ── 字段名 apply_reason，状态值 pending/approved/rejected ─
     cursor.execute('''CREATE TABLE applications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -111,24 +74,39 @@ def init_database():
         ai_decision TEXT,
         ai_readiness_score REAL,
         ai_summary TEXT,
-        flow_status TEXT DEFAULT 'submitted',
-        risk_level TEXT DEFAULT 'Medium',
+        assessment_payload TEXT,
+        flow_status TEXT DEFAULT 'submitted', -- submitted, need_more_info, waiting_publisher, manual_review, approved, rejected
+        risk_level TEXT DEFAULT 'Medium',    -- Low, Medium, High
         consensus_score REAL,
         missing_fields TEXT,
         conflict_notes TEXT,
         followup_questions TEXT,
+        evaluation_trace_id TEXT,
+        evaluation_started_at DATETIME,
+        evaluation_finished_at DATETIME,
+        evaluation_error TEXT,
         publisher_feedback TEXT,
         manual_review_reason TEXT,
         memory_scope TEXT,
+        feedback_written INTEGER DEFAULT 0,
         owner_note TEXT,
-        owner_followed_ai INTEGER,
+        owner_followed_ai INTEGER DEFAULT 0, -- 关键缺失字段
         decision_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
         decision_time DATETIME,
-        status TEXT DEFAULT 'pending_owner_review',  -- pending_owner_review, approved, rejected, platform_blocked
+        status TEXT DEFAULT 'pending_owner_review',
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
 
-    # ── announcements ──────────────────────────────────────────────────────
+    cursor.execute('''CREATE TABLE user_credit_profiles (
+        user_id INTEGER PRIMARY KEY,
+        responsibility_score REAL DEFAULT 100.0,
+        engagement_score REAL DEFAULT 0.0,
+        community_score REAL DEFAULT 0.0,
+        level TEXT DEFAULT 'Bronze',
+        last_decay_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )''')
+
     cursor.execute('''CREATE TABLE announcements (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
@@ -137,177 +115,105 @@ def init_database():
         date TEXT
     )''')
 
-    # ── moderation_logs ────────────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE moderation_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        target_id INTEGER,
-        admin_id INTEGER,
-        reason TEXT NOT NULL,
-        evidence_url TEXT,
-        delete_time DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-
-    # ── user_sanctions ─────────────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE user_sanctions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        admin_id INTEGER,
-        type TEXT NOT NULL,         -- MUTE, BAN
-        reason TEXT NOT NULL,
-        evidence_url TEXT,
-        expire_date DATETIME,
-        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-
-    # ── agent_trace_logs ───────────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE agent_trace_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        trace_id TEXT NOT NULL,
-        endpoint TEXT,
-        agent_name TEXT,
-        tool_name TEXT,
-        latency_ms INTEGER,
-        fallback_used INTEGER DEFAULT 0,
-        input_msg TEXT,
-        output_msg TEXT,
-        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-
-    # ── nutrition_plans ────────────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE nutrition_plans (
+    cursor.execute('''CREATE TABLE posts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        pet_name TEXT,
-        species TEXT,
-        plan_data TEXT,             -- JSON 字符串
-        is_active INTEGER DEFAULT 1,
-        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-
-    # ── nutrition_feedbacks ────────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE nutrition_feedbacks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        plan_id INTEGER REFERENCES nutrition_plans(id) ON DELETE CASCADE,
-        weight_change TEXT,
-        appetite_status TEXT,
-        stool_status TEXT,
-        activity_change TEXT,
-        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-
-    # ── user_credit_profiles ───────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE user_credit_profiles (
-        user_id INTEGER PRIMARY KEY,
-        responsibility_score REAL DEFAULT 100.0,
-        engagement_score REAL DEFAULT 0.0,
-        community_score REAL DEFAULT 0.0,
-        level TEXT DEFAULT 'Bronze',    -- Bronze, Silver, Gold, Black
-        last_decay_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )''')
-
-    # ── credit_events ──────────────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE credit_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        event_type TEXT NOT NULL,   -- visit_report, course_done, help_others, pet_return
-        dimension TEXT NOT NULL,    -- responsibility, engagement, community
-        content TEXT,
-        base_points REAL,
-        llm_multiplier REAL,
-        final_points REAL,
-        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )''')
-
-    # ── pet_chat_history ───────────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE pet_chat_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        pet_name TEXT NOT NULL,
-        role TEXT NOT NULL,
+        title TEXT,
         content TEXT NOT NULL,
+        image_url TEXT,
+        type TEXT DEFAULT 'daily',
+        likes INTEGER DEFAULT 0,
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
-    cursor.execute("CREATE INDEX idx_pet_chat_history_user_pet ON pet_chat_history(user_id, pet_name)")
 
-    # ── pet_chat_profiles ──────────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE pet_chat_profiles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        pet_name TEXT NOT NULL,
-        profile_json TEXT DEFAULT '{}',
-        summary TEXT DEFAULT '',
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(user_id, pet_name)
-    )''')
-    cursor.execute("CREATE INDEX idx_pet_chat_profiles_user_pet ON pet_chat_profiles(user_id, pet_name)")
-
-    # ── adopt_records ──────────────────────────────────────────────────────
-    cursor.execute('''CREATE TABLE adopt_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        pet_id INTEGER REFERENCES pets(id) ON DELETE CASCADE,
-        adopt_time DATETIME DEFAULT CURRENT_TIMESTAMP
-    )''')
-
-    # ── 高频查询索引 ───────────────────────────────────────────────────────
-    cursor.execute("CREATE INDEX idx_users_email ON users(email)")
-    cursor.execute("CREATE INDEX idx_posts_user_id ON posts(user_id)")
-    cursor.execute("CREATE INDEX idx_posts_create_time ON posts(create_time)")
-    cursor.execute("CREATE INDEX idx_comments_post_id ON comments(post_id)")
-    cursor.execute("CREATE INDEX idx_messages_receiver_id ON messages(receiver_id)")
-    cursor.execute("CREATE INDEX idx_nutrition_plans_user_id ON nutrition_plans(user_id)")
-    cursor.execute("CREATE INDEX idx_applications_user_id ON applications(user_id)")
-    cursor.execute("CREATE INDEX idx_agent_trace_logs_trace_id ON agent_trace_logs(trace_id)")
-    cursor.execute("CREATE INDEX idx_credit_events_user_id ON credit_events(user_id)")
-    cursor.execute("CREATE INDEX idx_user_sanctions_user_id ON user_sanctions(user_id)")
-
-    # ── 种子数据 ───────────────────────────────────────────────────────────
-    notices = [
-        ('关于本周末在中心公园举办线下领养日的通知', '请参加活动的领养人携带好身份证件...', 1, '2026-03-05'),
-        ('新上线：AI 宠物行为翻译官功能说明', '通过上传视频，AI 可以分析宠物的肢体语言...', 0, '2026-03-02'),
-        ('救助站物资捐赠感谢名单公示（二月）', '感谢社会各界对流浪动物的支持...', 0, '2026-02-28'),
-    ]
-    cursor.executemany(
-        "INSERT INTO announcements (title, content, is_hot, date) VALUES (?,?,?,?)", notices
-    )
-
+    # ── 插入用户数据 ──────────────────────────────────────────────────────
     _h = _pwd_context.hash
-    test_users = [
-        ('用户A',    'user@test.com',  _h('123'), 'individual', 'active', '程序员', '13800000001', '公寓', '猫'),
-        ('阳光救助站', 'admin@test.com', _h('123'), 'org_admin',  'active', '站长',   '13800000002', '救助中心', '狗'),
-        ('系统管理员', 'root@test.com',  _h('123'), 'root',       'active', 'IT',     '13800000003', '总部', '所有'),
+    users = [
+        ('用户A', 'user@test.com', _h('123'), 'user', '程序员', '1380001', '公寓', '猫'),
+        ('系统管理员', 'root@test.com', _h('123'), 'admin', 'IT', '1380002', '办公室', '所有'),
+        ('李雷', 'lilei@test.com', _h('123'), 'user', '学生', '1380003', '宿舍', '狗'),
+        ('韩梅梅', 'han@test.com', _h('123'), 'user', '教师', '1380004', '别墅', '金毛'),
+        ('张三', 'zhang@test.com', _h('123'), 'user', '自由职业', '1380005', '平房', '布偶猫'),
+        ('王五', 'wang@test.com', _h('123'), 'user', '医生', '1380006', '公寓', '柯基'),
     ]
     cursor.executemany(
-        "INSERT INTO users (username, email, password, role, status, occupation, contact, living_env, preference) "
-        "VALUES (?,?,?,?,?,?,?,?,?)",
-        test_users
+        "INSERT INTO users (username, email, password, role, occupation, contact, living_env, preference) VALUES (?,?,?,?,?,?,?,?)",
+        users
     )
 
-    pets_data = [
-        (2, 'org', '布丁',  '英国短毛猫',   2, '极少', '安静', '性格温和，喜欢陪伴工作中的主人。它有一双大大的金黄色眼睛，非常治愈。',
-         'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?q=80&w=1000&auto=format&fit=crop'),
-        (2, 'org', '豆包',  '比熊犬',       1, '不掉毛', '中等', '体型小，聪明，不掉毛，适合公寓居住。非常粘人，是绝佳的伴侣犬。',
-         'https://images.unsplash.com/photo-1516734212186-a967f81ad0d7?q=80&w=1000&auto=format&fit=crop'),
-        (2, 'org', '辛巴',  '金毛寻回犬',   3, '较多', '高', '典型的大暖男，对人非常友好，适合有院子的家庭。喜欢玩水和接球。',
-         'https://images.unsplash.com/photo-1552053831-71594a27632d?q=80&w=1000&auto=format&fit=crop'),
-        (2, 'org', '年糕',  '萨摩耶',       1, '非常多', '高', '微笑天使，虽然爱掉毛，但颜值极高，性格活泼。需要主人有足够的耐心打理毛发。',
-         'https://images.unsplash.com/photo-1529429617329-8a79e088c02c?q=80&w=1000&auto=format&fit=crop'),
-        (2, 'org', '奥利奥', '边境牧羊犬',  2, '中等', '极高', '智商天花板，能够听懂许多复杂的指令。需要大量运动和智力挑战。',
-         'https://images.unsplash.com/photo-1503256207526-0df5d6342a00?q=80&w=1000&auto=format&fit=crop'),
-        (2, 'org', '奶油',  '布偶猫',       1, '中等', '安静', '颜值超高，像洋娃娃一样。性格极好，任抱任摸。',
-         'https://images.unsplash.com/photo-1533738363-b7f9aef128ce?q=80&w=1000&auto=format&fit=crop'),
+    # ── 插入信用档案 (涵盖高中低等级) ─────────────────────────────────────
+    credits = [
+        (1, 95.0, 80.0, 70.0, 'Gold'),    # 用户A
+        (2, 100.0, 100.0, 100.0, 'Black'), # 管理员
+        (3, 45.0, 10.0, 5.0, 'Bronze'),   # 李雷 (等级低)
+        (4, 85.0, 60.0, 50.0, 'Silver'),  # 韩梅梅
+        (5, 70.0, 40.0, 30.0, 'Bronze'),  # 张三
+        (6, 110.0, 90.0, 85.0, 'Gold'),   # 王五
     ]
     cursor.executemany(
-        "INSERT INTO pets (owner_id, owner_type, name, species, age, is_shedding, energy_level, description, image_url) "
-        "VALUES (?,?,?,?,?,?,?,?,?)",
-        pets_data
+        "INSERT INTO user_credit_profiles (user_id, responsibility_score, engagement_score, community_score, level) VALUES (?,?,?,?,?)",
+        credits
     )
+
+    # ── 插入宠物数据 ──────────────────────────────────────────────────────
+    pets = [
+        (1, 'personal', '布丁', '猫', 2, '极少', '安静', '温和的猫', 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=500'),
+        (1, 'personal', '豆包', '狗', 1, '不掉毛', '活跃', '可爱的比熊', 'https://images.unsplash.com/photo-1516734212186-a967f81ad0d7?w=500'),
+        (4, 'personal', '辛巴', '狗', 3, '多', '高', '霸气的金毛', 'https://images.unsplash.com/photo-1552053831-71594a27632d?w=500'),
+    ]
+    cursor.executemany(
+        "INSERT INTO pets (owner_id, owner_type, name, species, age, is_shedding, energy_level, description, image_url) VALUES (?,?,?,?,?,?,?,?,?)",
+        pets
+    )
+
+    # ── 插入领养申请 (涵盖所有流程状态、风险等级和冲突/追问) ──────────────
+    # status: pending_owner_review, approved, rejected
+    # flow_status: submitted, need_more_info, waiting_publisher, manual_review, approved, rejected
+    apps = [
+        # 1. 已提交 + Low风险
+        (3, 1, '我很喜欢猫，有耐心。', 1, 'Low', 'submitted', 'pending_owner_review', '[]', '[]', '[]'),
+        
+        # 2. 等待补充信息 + Medium风险 + 缺失字段
+        (5, 2, '想要一只狗陪我。', 1, 'Medium', 'need_more_info', 'pending_owner_review', 
+         json.dumps(['居住面积', '家庭成员意见']), '[]', json.dumps(['请补充您的居住面积详情', '家里其他人同意养狗吗？'])),
+        
+        # 3. 等待发布者处理 + High风险 + 冲突记录
+        (3, 3, '给孩子买个玩具。', 4, 'High', 'waiting_publisher', 'pending_owner_review', 
+         '[]', json.dumps(['动机不纯：将宠物视为玩具', '学生身份：经济来源不稳定']), '[]'),
+        
+        # 4. 进入人工复核 + Medium风险 + 冲突记录
+        (6, 1, '有丰富的养猫经验，家里已经有一只了。', 1, 'Medium', 'manual_review', 'pending_owner_review', 
+         '[]', json.dumps(['环境兼容性：需要核实原住宠物的反应']), '[]'),
+        
+        # 5. 流程通过 + Low风险
+        (4, 1, '家里环境很大，有全职太太照顾。', 1, 'Low', 'approved', 'approved', '[]', '[]', '[]'),
+        
+        # 6. 流程拒绝 + High风险
+        (5, 3, '我就想要最贵的。', 4, 'High', 'rejected', 'rejected', '[]', json.dumps(['极其不负责任的发言']), '[]'),
+        
+        # 7. 提交 + Medium风险 + 追问
+        (1, 3, '我想领养辛巴。', 4, 'Medium', 'submitted', 'pending_owner_review', '[]', '[]', 
+         json.dumps(['你每天能陪它多久？', '如果它生病了你打算怎么办？'])),
+    ]
+    
+    for app in apps:
+        cursor.execute(
+            """INSERT INTO applications 
+               (user_id, pet_id, apply_reason, pet_owner_id, risk_level, flow_status, status, missing_fields, conflict_notes, followup_questions) 
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            app
+        )
+
+    # ── 插入公告和帖子 ────────────────────────────────────────────────────
+    cursor.execute("INSERT INTO announcements (title, content, is_hot, date) VALUES (?,?,?,?)", 
+                   ('新版管理后台上线', '管理员现在可以更直观地筛选申请了。', 1, '2026-03-27'))
+    
+    cursor.execute("INSERT INTO posts (user_id, title, content, type) VALUES (?,?,?,?)",
+                   (1, '晒晒我的猫', '布丁今天特别乖。', 'daily'))
 
     conn.commit()
     conn.close()
-    print("数据库初始化成功！Schema 已与 ensure_tables 对齐。")
+    print("数据库初始化成功！已注入全场景模拟测试数据。")
 
 if __name__ == "__main__":
     init_database()

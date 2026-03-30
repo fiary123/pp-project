@@ -19,7 +19,6 @@
 
 **终端 1 — 后端：**
 ```powershell
-conda activate pet_adoption
 uvicorn src.web.app:app --reload --host 0.0.0.0 --port 8000
 ```
 

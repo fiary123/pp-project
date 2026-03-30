@@ -37,8 +37,13 @@ def ensure_tables(conn: sqlite3.Connection):
         occupation TEXT,
         contact TEXT,
         living_env TEXT,
-        preference TEXT
+        preference TEXT,
+        avatar_url TEXT
     )''')
+    try:
+        cur.execute('ALTER TABLE users ADD COLUMN avatar_url TEXT')
+    except Exception:
+        pass
 
     # ── pets ───────────────────────────────────────────────────────────────
     cur.execute('''CREATE TABLE IF NOT EXISTS pets (
@@ -137,15 +142,21 @@ def ensure_tables(conn: sqlite3.Connection):
         ('ai_decision', 'TEXT'),
         ('ai_readiness_score', 'REAL'),
         ('ai_summary', 'TEXT'),
+        ('assessment_payload', 'TEXT'),
         ('flow_status', 'TEXT'),
         ('risk_level', 'TEXT'),
         ('consensus_score', 'REAL'),
         ('missing_fields', 'TEXT'),
         ('conflict_notes', 'TEXT'),
         ('followup_questions', 'TEXT'),
+        ('evaluation_trace_id', 'TEXT'),
+        ('evaluation_started_at', 'DATETIME'),
+        ('evaluation_finished_at', 'DATETIME'),
+        ('evaluation_error', 'TEXT'),
         ('publisher_feedback', 'TEXT'),
         ('manual_review_reason', 'TEXT'),
         ('memory_scope', 'TEXT'),
+        ('feedback_written', 'INTEGER DEFAULT 0'),
         ('owner_note', 'TEXT'),
         ('owner_followed_ai', 'INTEGER'),
         ('decision_by', 'INTEGER'),
@@ -257,6 +268,88 @@ def ensure_tables(conn: sqlite3.Connection):
         content TEXT NOT NULL,
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
+
+    # ── publisher_preferences ──────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS publisher_preferences (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        publisher_id INTEGER,
+        pet_id INTEGER,
+        hard_constraints_json TEXT DEFAULT '[]',
+        soft_preferences_json TEXT DEFAULT '[]',
+        risk_tolerance TEXT DEFAULT 'medium',
+        raw_preferences_json TEXT DEFAULT '{}',
+        version INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(publisher_id, pet_id)
+    )''')
+
+    # ── adoption_ai_reviews ────────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS adoption_ai_reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        application_id INTEGER,
+        trace_id TEXT,
+        agent_outputs_json TEXT DEFAULT '[]',
+        consensus_result_json TEXT DEFAULT '{}',
+        route_decision TEXT DEFAULT '',
+        overall_score REAL,
+        consensus_score REAL,
+        disagreement_score REAL,
+        risk_level TEXT DEFAULT 'Medium',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # ── adoption_followups ─────────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS adoption_followups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        application_id INTEGER,
+        question TEXT,
+        answer TEXT,
+        source TEXT DEFAULT 'applicant',
+        impact_score REAL DEFAULT 0.0,
+        trace_id TEXT DEFAULT '',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # ── adoption_case_memory ───────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS adoption_case_memory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        application_id INTEGER UNIQUE,
+        case_summary TEXT,
+        decision_result TEXT DEFAULT '',
+        owner_followed_ai INTEGER,
+        followup_outcome TEXT DEFAULT '',
+        risk_tags_json TEXT DEFAULT '[]',
+        feedback_id INTEGER,
+        embedding_status TEXT DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # ── adoption_flow_events ───────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS adoption_flow_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        application_id INTEGER,
+        event_type TEXT NOT NULL,
+        from_status TEXT,
+        to_status TEXT,
+        actor_role TEXT DEFAULT '',
+        actor_id INTEGER,
+        payload_json TEXT DEFAULT '{}',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # ── adoption_signal_weights ────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS adoption_signal_weights (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        signal_type TEXT NOT NULL,
+        signal_key TEXT NOT NULL,
+        positive_count INTEGER DEFAULT 0,
+        negative_count INTEGER DEFAULT 0,
+        weight REAL DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(signal_type, signal_key)
+    )''')
     cur.execute("CREATE INDEX IF NOT EXISTS idx_pet_chat_history_user_pet ON pet_chat_history(user_id, pet_name)")
 
     # ── pet_chat_profiles ──────────────────────────────────────────────────
@@ -329,8 +422,24 @@ def ensure_tables(conn: sqlite3.Connection):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_receiver_id ON messages(receiver_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_nutrition_plans_user_id ON nutrition_plans(user_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_applications_user_id ON applications(user_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_applications_flow_status ON applications(flow_status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_applications_pet_owner_id ON applications(pet_owner_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_agent_trace_logs_trace_id ON agent_trace_logs(trace_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_adoption_ai_reviews_application_id ON adoption_ai_reviews(application_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_adoption_ai_reviews_trace_id ON adoption_ai_reviews(trace_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_adoption_followups_application_id ON adoption_followups(application_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_adoption_case_memory_application_id ON adoption_case_memory(application_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_adoption_flow_events_application_id ON adoption_flow_events(application_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_adoption_flow_events_type ON adoption_flow_events(event_type)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_adoption_signal_weights_type_key ON adoption_signal_weights(signal_type, signal_key)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_credit_events_user_id ON credit_events(user_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_user_sanctions_user_id ON user_sanctions(user_id)")
+
+    # ── email_codes ────────────────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS email_codes (
+        email TEXT PRIMARY KEY,
+        code TEXT NOT NULL,
+        expire_at DATETIME NOT NULL
+    )''')
 
     conn.commit()

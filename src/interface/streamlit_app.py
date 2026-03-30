@@ -10,9 +10,7 @@ import asyncio
 # --- 1. 路径与 Agent 导入 ---
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from src.agents.agents import llm, run_knowledge_expert, run_pet_crew, run_pet_chat, run_audit_task
-from src.agents.medical_expert import get_medical_expert_agent
 from src.agents.pet_expert import get_pet_expert_agent
-from src.agents.navigator import get_navigator_agent
 from crewai import Task, Crew, Process
 try:
     from src.database.db_config import SQLITE_DB_PATH
@@ -121,9 +119,9 @@ st.session_state.theme_color = st.sidebar.selectbox("选择主题色", list(THEM
 
 # --- 5. 导航栏渲染 ---
 def render_top_nav(role):
-    menu_items = {"individual": ["智能寻找", "医疗预诊", "我的申请", "发布送养"],
+    menu_items = {"individual": ["智能寻找", "我的申请", "发布送养"],
                   "org_admin": ["申请审核", "宠物上架", "数据大盘"]}
-    icons = {"智能寻找": "🔍", "医疗预诊": "🩺", "我的申请": "📋", "发布送养": "📤",
+    icons = {"智能寻找": "🔍", "我的申请": "📋", "发布送养": "📤",
              "申请审核": "⚖️", "宠物上架": "➕", "数据大盘": "📈"}
     
     if 'page' not in st.session_state:
@@ -201,10 +199,6 @@ else:
                         st.write(resp_text)
                         if audio_b64:
                             st.audio(base64.b64decode(audio_b64), format="audio/mp3", autoplay=True)
-
-    elif page == "医疗预诊":
-        st.subheader("🩺 AI 宠物全科医生")
-        st.info("医疗预诊功能开发中...")
 
     elif page == "申请审核":
         st.subheader("⚖️ 领养申请审核")

@@ -147,7 +147,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="max-w-5xl mx-auto h-[calc(100vh-7rem)] md:h-[85vh] flex gap-4 md:gap-6 pb-6 md:pb-10 px-3 md:px-4">
+  <div class="chat-view max-w-5xl mx-auto h-[calc(100vh-7rem)] md:h-[85vh] flex gap-4 md:gap-6 pb-6 md:pb-10 px-3 md:px-4">
     <!-- 左侧联系人列表 -->
     <BaseCard class="hidden md:flex flex-col w-80 !p-0 overflow-hidden border-white/5 bg-black/40">
       <div class="p-6 border-b border-white/5 flex items-center justify-between">
@@ -289,4 +289,54 @@ onUnmounted(() => {
 <style scoped>
 @reference "tailwindcss";
 .scrollbar-hide::-webkit-scrollbar { display: none; }
+
+:global(html:not(.dark)) .chat-view [class~="text-white"] {
+  color: #111827 !important;
+}
+
+:global(html:not(.dark)) .chat-view [class~="text-gray-400"] {
+  color: #475569 !important;
+}
+
+:global(html:not(.dark)) .chat-view [class~="text-gray-300"] {
+  color: #64748b !important;
+}
+
+:global(html:not(.dark)) .chat-view [class~="text-gray-200"] {
+  color: #334155 !important;
+}
+
+:global(html:not(.dark)) .chat-view [class~="bg-white/5"] {
+  background-color: #f8fafc !important;
+}
+
+:global(html:not(.dark)) .chat-view [class~="bg-white/10"] {
+  background-color: rgba(241, 245, 249, 0.95) !important;
+}
+
+:global(html:not(.dark)) .chat-view [class~="bg-black/20"] {
+  background-color: rgba(248, 250, 252, 0.95) !important;
+}
+
+:global(html:not(.dark)) .chat-view [class~="bg-black/40"] {
+  background-color: rgba(241, 245, 249, 0.98) !important;
+}
+
+:global(html:not(.dark)) .chat-view [class~="border-white/5"] {
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+:global(html:not(.dark)) .chat-view [class~="border-white/10"] {
+  border-color: rgba(148, 163, 184, 0.24) !important;
+}
+
+:global(html:not(.dark)) .chat-view [class*="hover:bg-white/5"]:hover {
+  background-color: #f1f5f9 !important;
+}
+
+:global(html:not(.dark)) .chat-view input,
+:global(html:not(.dark)) .chat-view textarea {
+  color: #111827 !important;
+  caret-color: #f97316;
+}
 </style>

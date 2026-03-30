@@ -1,5 +1,5 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends
-from typing import Optional
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends, BackgroundTasks
+from typing import Optional, Any
 import json
 import logging
 from src.web.schemas import (
@@ -7,17 +7,28 @@ from src.web.schemas import (
     NutritionFeedbackRequest, NutritionReplanRequest, AdoptionAssessmentRequest,
     MatchFollowupRequest, AdoptionFeedbackRequest, PetChatRequest,
     MutualAidTaskCreate, MutualAidMatchRequest, MutualAidAcceptRequest,
-    MutualAidReportRequest
+    MutualAidReportRequest, AdoptionEvaluationFollowupRequest,
+    AdoptionEvaluationReviewRequest, AdoptionEvaluationFeedbackRequest
 )
 from src.agents.agents import analyze_pet_interview, run_pet_chat
+from src.agents.tools import search_pet_knowledge_hits
 from src.web.services.ai_service import (
     get_agent_reply, generate_nutrition_plan,
     get_smart_match, get_match_followup_questions, submit_adoption_feedback,
     submit_nutrition_feedback, replan_nutrition,
     run_adoption_assessment_service, get_mutual_aid_match,
-    get_db
+    get_db, ai_service
 )
 from src.web.services.assessment_service import AdoptionAssessmentService
+from src.web.services.adoption_flow_engine import flow_engine
+from src.web.services.adoption_memory import (
+    build_case_summary,
+    persist_ai_review,
+    persist_followup_records,
+    sync_publisher_preferences,
+    update_signal_weights_from_feedback,
+    upsert_case_memory,
+)
 from src.web.dependencies import get_current_user
 from src.web.limiter import limiter
 from src.agents.coordinator import CoordinatorAgent
@@ -53,6 +64,197 @@ class LLMWrapper:
 
 coordinator = CoordinatorAgent(LLMWrapper(), get_db)
 assessment_service = AdoptionAssessmentService()
+
+
+def _parse_json_payload(raw_value: Any, fallback: Any):
+    if raw_value in (None, "", b""):
+        return fallback
+    if isinstance(raw_value, (dict, list)):
+        return raw_value
+    try:
+        loaded = json.loads(raw_value)
+        return loaded if isinstance(loaded, type(fallback)) else fallback
+    except Exception:
+        return fallback
+
+
+def _normalize_target_species(raw_value: str) -> str:
+    text = (raw_value or "").lower()
+    if any(token in text for token in ("dog", "犬", "狗")):
+        return "dog"
+    return "cat"
+
+
+def _load_application_row(application_id: int):
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT a.*, p.name AS pet_name, p.species AS pet_species, p.adoption_preferences AS pet_preferences
+            FROM applications a
+            LEFT JOIN pets p ON p.id = a.pet_id
+            WHERE a.id=?
+            """,
+            (application_id,),
+        )
+        row = cursor.fetchone()
+    return dict(row) if row else None
+
+
+def _ensure_application_access(app_row: dict, current_user: dict):
+    if not app_row:
+        raise HTTPException(status_code=404, detail="申请记录不存在")
+    if current_user.get("role") == "org_admin":
+        return
+    if current_user["id"] not in {app_row.get("user_id"), app_row.get("pet_owner_id")}:
+        raise HTTPException(status_code=403, detail="无权访问该申请")
+
+
+def _build_assessment_payload(app_row: dict) -> dict:
+    payload = _parse_json_payload(app_row.get("assessment_payload"), {})
+    publisher_preferences = _parse_json_payload(app_row.get("pet_preferences"), {})
+    payload["target_pet_name"] = payload.get("target_pet_name") or app_row.get("pet_name") or "未命名宠物"
+    payload["target_species"] = _normalize_target_species(
+        payload.get("target_species") or app_row.get("pet_species") or ""
+    )
+    payload["application_reason"] = payload.get("application_reason") or app_row.get("apply_reason") or ""
+    payload["applicant_info"] = payload.get("applicant_info") or app_row.get("apply_reason") or "申请人提交了领养申请"
+    payload["publisher_preferences"] = publisher_preferences
+    return payload
+
+
+async def _run_adoption_evaluation(application_id: int):
+    app_row = _load_application_row(application_id)
+    if not app_row:
+        return
+
+    payload = _build_assessment_payload(app_row)
+
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        previous_flow_status = app_row.get("flow_status") or "submitted"
+        conn.execute(
+            """
+            UPDATE applications
+            SET flow_status='evaluating',
+                evaluation_started_at=CURRENT_TIMESTAMP,
+                evaluation_finished_at=NULL,
+                evaluation_error=NULL,
+                publisher_feedback='',
+                manual_review_reason=''
+            WHERE id=?
+            """,
+            (application_id,),
+        )
+        flow_engine.append_event(
+            conn,
+            application_id=application_id,
+            event_type="assessment_started",
+            from_status=previous_flow_status,
+            to_status="evaluating",
+            actor_role="system",
+            actor_id=app_row.get("user_id"),
+            payload={"trigger": "background_evaluation"},
+        )
+        conn.commit()
+
+    try:
+        result = await assessment_service.run_full_assessment(
+            user_id=app_row["user_id"],
+            applicant_data=payload,
+        )
+        sync_publisher_preferences(app_row.get("pet_owner_id"), app_row.get("pet_id"), payload.get("publisher_preferences"))
+
+        confidence_level = result.get("confidence_level")
+        consensus_score = None
+        if confidence_level is not None:
+            consensus_score = confidence_level * 100 if confidence_level <= 1 else confidence_level
+
+        with get_db() as conn:
+            from src.web.services.db_service import ensure_tables
+            ensure_tables(conn)
+            persisted_payload = dict(payload)
+            persisted_payload["latest_assessment"] = result
+            next_flow_status = flow_engine.resolve_result_flow_status(result)
+            conn.execute(
+                """
+                UPDATE applications
+                SET ai_decision=?,
+                    ai_readiness_score=?,
+                    ai_summary=?,
+                    assessment_payload=?,
+                    flow_status=?,
+                    risk_level=?,
+                    consensus_score=?,
+                    missing_fields=?,
+                    conflict_notes=?,
+                    followup_questions=?,
+                    evaluation_trace_id=?,
+                    evaluation_finished_at=CURRENT_TIMESTAMP,
+                    evaluation_error=NULL
+                WHERE id=?
+                """,
+                (
+                    result.get("decision"),
+                    result.get("readiness_score"),
+                    result.get("final_summary") or result.get("review_note") or "",
+                    json.dumps(persisted_payload, ensure_ascii=False),
+                    next_flow_status,
+                    result.get("risk_level") or "Medium",
+                    consensus_score,
+                    json.dumps(result.get("missing_fields") or [], ensure_ascii=False),
+                    json.dumps(result.get("conflict_notes") or [], ensure_ascii=False),
+                    json.dumps(result.get("followup_questions") or [], ensure_ascii=False),
+                    result.get("trace_id") or "",
+                    application_id,
+                ),
+            )
+            flow_engine.append_event(
+                conn,
+                application_id=application_id,
+                event_type="assessment_completed",
+                from_status="evaluating",
+                to_status=next_flow_status,
+                actor_role="system",
+                actor_id=app_row.get("user_id"),
+                payload={
+                    "decision": result.get("decision"),
+                    "route_decision": result.get("route_decision"),
+                    "consensus_result": result.get("consensus_result"),
+                },
+            )
+            persist_ai_review(application_id, result)
+            conn.commit()
+    except Exception as exc:
+        logger.exception("adoption evaluation background task failed")
+        with get_db() as conn:
+            from src.web.services.db_service import ensure_tables
+            ensure_tables(conn)
+            conn.execute(
+                """
+                UPDATE applications
+                SET flow_status='manual_review',
+                    evaluation_finished_at=CURRENT_TIMESTAMP,
+                    evaluation_error=?,
+                    publisher_feedback='评估服务执行异常，请由送养方或管理员人工确认'
+                WHERE id=?
+                """,
+                (str(exc), application_id),
+            )
+            flow_engine.append_event(
+                conn,
+                application_id=application_id,
+                event_type="assessment_failed",
+                from_status="evaluating",
+                to_status="manual_review",
+                actor_role="system",
+                actor_id=app_row.get("user_id"),
+                payload={"error": str(exc)[:240]},
+            )
+            conn.commit()
 
 
 @router.get("/knowledge/stats")
@@ -93,33 +295,46 @@ async def knowledge_search(req: dict):
     keyword = req.get("keyword", "")
     if not keyword:
         raise HTTPException(status_code=400, detail="keyword is required")
+
+    async def build_llm_fallback(message: str):
+        try:
+            fallback_answer = await ai_service.ask(
+                f"用户提问：{keyword}\n"
+                f"当前知识库检索情况：{message}\n"
+                "请给出简洁、友好的宠物知识补充回答。要求："
+                "1）开头明确说明这是 AI 通用知识补充，不是知识库命中结果；"
+                "2）不要编造来源；"
+                "3）若涉及疾病、持续异常或用药风险，提醒咨询兽医。"
+            )
+        except Exception:
+            fallback_answer = "当前知识库没有检索到合适内容，我先基于通用宠物知识为你补充回答；若涉及疾病、用药或持续异常，建议尽快咨询专业兽医。"
+        return {
+            "results": [],
+            "keyword": keyword,
+            "source": "llm_fallback",
+            "message": message,
+            "fallback_answer": fallback_answer,
+        }
+
     try:
-        import chromadb
-        from src.database.db_config import CHROMA_DB_PATH
-        client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-        collection = client.get_or_create_collection(name="pet_knowledge")
-        if collection.count() == 0:
-            return {"results": [], "message": "知识库尚未初始化"}
-        results = collection.query(
-            query_texts=[keyword],
-            n_results=min(5, collection.count()),
-            include=["documents", "metadatas", "distances"]
-        )
+        hits = search_pet_knowledge_hits(keyword, limit=5)
+        if not hits:
+            return await build_llm_fallback("知识库中没有直接匹配当前问题的内容，以下为 AI 通用知识补充。")
         items = []
-        for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0]
-        ):
+        for hit in hits:
+            meta = hit.get("meta") or {}
             items.append({
-                "text": doc[:300],
+                "text": str(hit.get("text", ""))[:300],
                 "category": meta.get("category"),
-                "similarity": round(1 - dist, 3),
+                "similarity": hit.get("similarity", 0),
                 "meta": meta
             })
-        return {"results": items, "keyword": keyword}
+        if not items:
+            return await build_llm_fallback("知识库中暂无高度相关内容，以下为 AI 通用知识补充。")
+        return {"results": items, "keyword": keyword, "source": "knowledge_base"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.warning(f"knowledge_search failed, falling back to llm: {e}")
+        return await build_llm_fallback("知识库检索暂时不可用，以下为 AI 通用知识补充。")
 
 
 @router.post("/chat")
@@ -230,6 +445,307 @@ async def adoption_assess(
         applicant_data=req.model_dump()
     )
     return result
+
+
+@router.post("/adoption/evaluate/{application_id}")
+async def start_adoption_evaluation(
+    application_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user),
+):
+    app_row = _load_application_row(application_id)
+    _ensure_application_access(app_row, current_user)
+
+    if not _parse_json_payload(app_row.get("assessment_payload"), {}):
+        raise HTTPException(status_code=400, detail="该申请缺少评估输入，无法启动生命周期评估")
+    if app_row.get("status") in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="该申请已是最终状态，无需再次评估")
+
+    background_tasks.add_task(_run_adoption_evaluation, application_id)
+    return {
+        "status": "accepted",
+        "application_id": application_id,
+        "flow_status": "evaluating",
+        "message": "评估任务已启动，请稍后刷新状态。"
+    }
+
+
+@router.get("/adoption/evaluate/{application_id}/status")
+async def get_adoption_evaluation_status(
+    application_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    app_row = _load_application_row(application_id)
+    _ensure_application_access(app_row, current_user)
+
+    response = dict(app_row)
+    for field in ("missing_fields", "conflict_notes", "followup_questions"):
+        response[field] = _parse_json_payload(response.get(field), [])
+    response["assessment_payload"] = _parse_json_payload(response.get("assessment_payload"), {})
+    response["pet_preferences"] = _parse_json_payload(response.get("pet_preferences"), {})
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        response["flow_timeline"] = flow_engine.get_timeline(conn, application_id, limit=8)
+    return response
+
+
+@router.post("/adoption/evaluate/{application_id}/followup")
+async def submit_adoption_evaluation_followup(
+    application_id: int,
+    req: AdoptionEvaluationFollowupRequest,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user),
+):
+    app_row = _load_application_row(application_id)
+    _ensure_application_access(app_row, current_user)
+
+    if current_user.get("role") != "org_admin" and current_user["id"] != app_row.get("user_id"):
+        raise HTTPException(status_code=403, detail="只有申请人可以补充评估信息")
+
+    payload = _build_assessment_payload(app_row)
+    existing_questions = _parse_json_payload(app_row.get("followup_questions"), [])
+    if req.applicant_info is not None:
+        payload["applicant_info"] = req.applicant_info
+    if req.application_reason is not None:
+        payload["application_reason"] = req.application_reason
+    if req.monthly_budget is not None:
+        payload["monthly_budget"] = req.monthly_budget
+    if req.daily_companion_hours is not None:
+        payload["daily_companion_hours"] = req.daily_companion_hours
+    if req.has_pet_experience is not None:
+        payload["has_pet_experience"] = req.has_pet_experience
+    if req.housing_type is not None:
+        payload["housing_type"] = req.housing_type
+    if req.existing_pets is not None:
+        payload["existing_pets"] = req.existing_pets
+    if req.supplement_text:
+        supplement = req.supplement_text.strip()
+        applicant_info = payload.get("applicant_info", "").strip()
+        payload["applicant_info"] = f"{applicant_info}\n补充说明：{supplement}".strip()
+        app_reason = payload.get("application_reason", "").strip()
+        payload["application_reason"] = f"{app_reason}\n补充说明：{supplement}".strip()
+
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        previous_flow_status = app_row.get("flow_status") or "need_more_info"
+        conn.execute(
+            """
+            UPDATE applications
+            SET apply_reason=?,
+                assessment_payload=?,
+                flow_status='evaluating',
+                followup_questions='[]',
+                conflict_notes='[]',
+                missing_fields='[]',
+                evaluation_error=NULL,
+                publisher_feedback=''
+            WHERE id=?
+            """,
+            (
+                payload.get("application_reason") or payload.get("applicant_info") or app_row.get("apply_reason") or "",
+                json.dumps(payload, ensure_ascii=False),
+                application_id,
+            ),
+        )
+        flow_engine.append_event(
+            conn,
+            application_id=application_id,
+            event_type="followup_submitted",
+            from_status=previous_flow_status,
+            to_status="evaluating",
+            actor_role="applicant" if current_user.get("role") != "org_admin" else "admin",
+            actor_id=current_user["id"],
+            payload={
+                "supplement_text": (req.supplement_text or "")[:240],
+                "updated_fields": [key for key, value in req.model_dump().items() if value not in (None, "", [])],
+            },
+        )
+        conn.commit()
+
+    persist_followup_records(
+        application_id,
+        existing_questions,
+        req.supplement_text or payload.get("application_reason") or payload.get("applicant_info") or "",
+    )
+    background_tasks.add_task(_run_adoption_evaluation, application_id)
+    return {
+        "status": "accepted",
+        "application_id": application_id,
+        "flow_status": "evaluating",
+        "message": "补充信息已收到，系统正在重新评估。"
+    }
+
+
+@router.post("/adoption/evaluate/{application_id}/review")
+async def review_adoption_evaluation(
+    application_id: int,
+    req: AdoptionEvaluationReviewRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    app_row = _load_application_row(application_id)
+    _ensure_application_access(app_row, current_user)
+
+    is_admin = current_user.get("role") == "org_admin"
+    is_owner = current_user["id"] == app_row.get("pet_owner_id")
+    if not (is_admin or is_owner):
+        raise HTTPException(status_code=403, detail="只有送养方或管理员可以处理该申请")
+    if app_row.get("status") in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="该申请已是最终状态")
+
+    previous_flow_status = app_row.get("flow_status") or "waiting_publisher"
+    flow_status = flow_engine.resolve_terminal_flow_status(req.status)
+    owner_followed_ai = None
+    ai_decision = (app_row.get("ai_decision") or "").lower()
+    if req.status in ("approved", "rejected") and ai_decision:
+        ai_positive = ai_decision in ("pass", "conditional_pass", "approved", "通过", "建议通过")
+        owner_followed_ai = 1 if ai_positive == (req.status == "approved") else 0
+
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE applications
+            SET status=?,
+                flow_status=?,
+                owner_note=?,
+                publisher_feedback=?,
+                manual_review_reason=?,
+                owner_followed_ai=?,
+                decision_by=?,
+                decision_time=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (
+                req.status,
+                flow_status,
+                req.note,
+                req.note if req.status in ("approved", "rejected", "probing", "human_review") else "",
+                req.note if req.status == "human_review" else "",
+                owner_followed_ai,
+                current_user["id"],
+                application_id,
+            ),
+        )
+        flow_engine.append_event(
+            conn,
+            application_id=application_id,
+            event_type="review_completed",
+            from_status=previous_flow_status,
+            to_status=flow_status,
+            actor_role="admin" if is_admin else "publisher",
+            actor_id=current_user["id"],
+            payload={
+                "requested_status": req.status,
+                "note": req.note[:240],
+                "owner_followed_ai": owner_followed_ai,
+            },
+        )
+
+        if req.status == "approved":
+            cursor.execute(
+                "SELECT COUNT(1) AS cnt FROM adopt_records WHERE user_id=? AND pet_id=?",
+                (app_row["user_id"], app_row["pet_id"]),
+            )
+            record_exists = cursor.fetchone()["cnt"]
+            if not record_exists:
+                cursor.execute(
+                    "INSERT INTO adopt_records (user_id, pet_id) VALUES (?, ?)",
+                    (app_row["user_id"], app_row["pet_id"]),
+                )
+            cursor.execute("UPDATE pets SET status='已领养' WHERE id=?", (app_row["pet_id"],))
+
+        conn.commit()
+
+    upsert_case_memory(
+        application_id=application_id,
+        case_summary=build_case_summary(app_row, {"decision": req.status, "readiness_score": app_row.get("ai_readiness_score"), "risk_level": app_row.get("risk_level")}),
+        decision_result=req.status,
+        owner_followed_ai=owner_followed_ai,
+        risk_tags=(_parse_json_payload(_parse_json_payload(app_row.get("assessment_payload"), {}).get("latest_assessment", {}).get("consensus_result"), {}) or {}).get("risk_tags", []),
+    )
+
+    return {"status": "success", "application_id": application_id, "new_status": req.status}
+
+
+@router.post("/adoption/evaluate/{application_id}/feedback")
+async def write_adoption_evaluation_feedback(
+    application_id: int,
+    req: AdoptionEvaluationFeedbackRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    app_row = _load_application_row(application_id)
+    _ensure_application_access(app_row, current_user)
+
+    if app_row.get("status") != "approved":
+        raise HTTPException(status_code=400, detail="只有已通过的领养申请才能提交回访反馈")
+    if current_user.get("role") != "org_admin" and current_user["id"] != app_row.get("user_id"):
+        raise HTTPException(status_code=403, detail="只有申请人可以提交回访反馈")
+    if app_row.get("feedback_written"):
+        raise HTTPException(status_code=400, detail="该申请已提交过回访反馈")
+
+    feedback_id = submit_adoption_feedback(
+        user_id=app_row["user_id"],
+        pet_id=app_row["pet_id"],
+        pet_name=app_row.get("pet_name") or f"宠物{app_row['pet_id']}",
+        overall_satisfaction=req.overall_satisfaction,
+        bond_level=req.bond_level,
+        unexpected_challenges=req.unexpected_challenges,
+        would_recommend=req.would_recommend,
+        free_feedback=req.free_feedback,
+    )
+
+    with get_db() as conn:
+        from src.web.services.db_service import ensure_tables
+        ensure_tables(conn)
+        next_flow_status = flow_engine.resolve_feedback_flow_status(app_row.get("flow_status"))
+        conn.execute(
+            "UPDATE applications SET feedback_written=1, flow_status=? WHERE id=?",
+            (next_flow_status, application_id),
+        )
+        flow_engine.append_event(
+            conn,
+            application_id=application_id,
+            event_type="feedback_written",
+            from_status=app_row.get("flow_status") or "adopted",
+            to_status=next_flow_status,
+            actor_role="applicant" if current_user.get("role") != "org_admin" else "admin",
+            actor_id=current_user["id"],
+            payload={
+                "overall_satisfaction": req.overall_satisfaction,
+                "bond_level": req.bond_level,
+                "would_recommend": req.would_recommend,
+            },
+        )
+        conn.commit()
+
+    latest_assessment = _parse_json_payload(app_row.get("assessment_payload"), {}).get("latest_assessment", {})
+    feedback_summary = (
+        f"满意度 {req.overall_satisfaction}/5，亲密度 {req.bond_level}，"
+        f"是否推荐：{'是' if req.would_recommend else '否'}；挑战：{req.unexpected_challenges or '无'}"
+    )
+    upsert_case_memory(
+        application_id=application_id,
+        case_summary=build_case_summary(app_row, feedback_summary=feedback_summary),
+        decision_result=app_row.get("status") or "approved",
+        owner_followed_ai=app_row.get("owner_followed_ai"),
+        followup_outcome=feedback_summary,
+        risk_tags=latest_assessment.get("consensus_result", {}).get("risk_tags", []),
+        feedback_id=feedback_id,
+        embedding_status="synced",
+    )
+    update_signal_weights_from_feedback(
+        route_decision=(latest_assessment.get("route_decision") or {}).get("next_action", ""),
+        risk_tags=latest_assessment.get("consensus_result", {}).get("risk_tags", []),
+        followup_questions=latest_assessment.get("followup_questions", []) or _parse_json_payload(app_row.get("followup_questions"), []),
+        overall_satisfaction=req.overall_satisfaction,
+        would_recommend=req.would_recommend,
+    )
+
+    return {"status": "success", "feedback_id": feedback_id}
 
 @router.get("/pet-chat/history")
 async def get_pet_chat_history(pet_name: str, user_id: int):
@@ -412,8 +928,10 @@ async def create_mutual_aid_task(req: MutualAidTaskCreate, current_user: dict = 
              req.start_time, req.end_time, req.location, req.description)
         )
         task_id = cursor.lastrowid
+        cursor.execute("SELECT * FROM mutual_aid_tasks WHERE id=?", (task_id,))
+        created_task = dict(cursor.fetchone())
         conn.commit()
-    return {"status": "success", "task_id": task_id}
+    return {"status": "success", "task_id": task_id, "task": created_task}
 
 
 @router.get("/mutual-aid/tasks")

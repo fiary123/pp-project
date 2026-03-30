@@ -18,8 +18,9 @@ if not SECRET_KEY:
     )
 
 ALGORITHM = "HS256"
-# Token 有效期：优先读取环境变量 ACCESS_TOKEN_EXPIRE_MINUTES，默认 60 分钟
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+# Token 有效期：优先读取环境变量 ACCESS_TOKEN_EXPIRE_MINUTES
+# 本地/演示环境默认放宽到 24 小时，避免频繁重新登录；生产环境请按需收紧。
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 
 # 密码哈希上下文
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

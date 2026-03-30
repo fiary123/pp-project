@@ -8,6 +8,14 @@ from src.web.dependencies import get_current_user
 
 router = APIRouter(prefix="/api", tags=["posts"])
 
+DEMO_COMMENT_TEXTS = {
+    "这张抓拍太有氛围了，狗狗状态也很好。",
+    "它们玩了好久，回家都累坏啦。",
+    "收藏了，正准备接第一只猫回家。",
+    "真的好可爱，希望它能尽快遇到合适的家。",
+    "目前状态稳定，已完成基础驱虫。",
+}
+
 
 def _ensure_demo_posts(cursor):
     cursor.execute("SELECT id, role, username FROM users WHERE role IN ('individual', 'org_admin') ORDER BY id ASC")
@@ -16,8 +24,6 @@ def _ensure_demo_posts(cursor):
         return
 
     individual = next((u for u in users if u["role"] == "individual"), users[0])
-    org_admin = next((u for u in users if u["role"] == "org_admin"), users[0])
-
     demo_posts = [
         {
             "title": "今天在公园遇到了超可爱的柴犬！",
@@ -26,10 +32,6 @@ def _ensure_demo_posts(cursor):
             "type": "daily",
             "likes": 12,
             "user_id": individual["id"],
-            "comments": [
-                {"user_id": org_admin["id"], "content": "这张抓拍太有氛围了，狗狗状态也很好。"},
-                {"user_id": individual["id"], "content": "它们玩了好久，回家都累坏啦。"},
-            ],
         },
         {
             "title": "新手养猫避坑指南",
@@ -37,10 +39,7 @@ def _ensure_demo_posts(cursor):
             "image_url": "https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=1200&q=80",
             "type": "experience",
             "likes": 18,
-            "user_id": org_admin["id"],
-            "comments": [
-                {"user_id": individual["id"], "content": "收藏了，正准备接第一只猫回家。"},
-            ],
+            "user_id": individual["id"],
         },
         {
             "title": "【急寻领养】温顺橘猫寻找温暖的家",
@@ -48,17 +47,13 @@ def _ensure_demo_posts(cursor):
             "image_url": "https://images.unsplash.com/photo-1548247416-ec66f4900b2e?auto=format&fit=crop&w=1200&q=80",
             "type": "adopt_help",
             "likes": 26,
-            "user_id": org_admin["id"],
+            "user_id": individual["id"],
             "pet_name": "小橘",
             "pet_gender": "unknown",
             "pet_age": "3个月",
             "pet_breed": "橘猫",
             "adopt_reason": "小区救助后暂时安置，现希望找到长期稳定的家庭。",
             "location": "成都市高新区",
-            "comments": [
-                {"user_id": individual["id"], "content": "真的好可爱，希望它能尽快遇到合适的家。"},
-                {"user_id": org_admin["id"], "content": "目前状态稳定，已完成基础驱虫。"},
-            ],
         },
     ]
 
@@ -92,17 +87,10 @@ def _ensure_demo_posts(cursor):
             )
             post_id = cursor.lastrowid
 
-        for comment in post.get("comments", []):
-            cursor.execute(
-                "SELECT 1 FROM comments WHERE post_id=? AND user_id=? AND content=?",
-                (post_id, comment["user_id"], comment["content"]),
-            )
-            if cursor.fetchone():
-                continue
-            cursor.execute(
-                "INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)",
-                (post_id, comment["user_id"], comment["content"]),
-            )
+        cursor.execute(
+            "DELETE FROM comments WHERE post_id=? AND content IN ({})".format(",".join(["?"] * len(DEMO_COMMENT_TEXTS))),
+            (post_id, *DEMO_COMMENT_TEXTS),
+        )
 
 
 def _default_adoption_preferences():
@@ -111,12 +99,65 @@ def _default_adoption_preferences():
         "soft_preferences": ["住房稳定性", "陪伴时间", "责任意识"],
         "allow_novice": True,
         "accept_renting": True,
+        "require_stable_housing": False,
+        "require_financial_capacity": False,
         "prefer_local": False,
         "require_family_agreement": False,
+        "prefer_quiet_household": False,
+        "prefer_multi_pet_experience": False,
         "focus_experience": False,
         "focus_companionship": True,
         "focus_stability": True,
+        "risk_tolerance": "medium",
     }
+
+
+def _normalize_adoption_preferences(raw_value):
+    pref = _default_adoption_preferences()
+    if isinstance(raw_value, str):
+        try:
+            raw_value = json.loads(raw_value)
+        except Exception:
+            raw_value = None
+    if isinstance(raw_value, dict):
+        pref.update(raw_value)
+    pref["hard_preferences"] = list(dict.fromkeys(pref.get("hard_preferences") or []))
+    pref["soft_preferences"] = list(dict.fromkeys(pref.get("soft_preferences") or []))
+    return pref
+
+
+def _sync_preference_labels(pref: dict):
+    hard_preferences = list(dict.fromkeys(pref.get("hard_preferences") or []))
+    soft_preferences = list(dict.fromkeys(pref.get("soft_preferences") or []))
+
+    def set_hard(label: str, enabled: bool):
+        if enabled and label not in hard_preferences:
+            hard_preferences.append(label)
+        if not enabled and label in hard_preferences:
+            hard_preferences.remove(label)
+
+    def set_soft(label: str, enabled: bool):
+        if enabled and label not in soft_preferences:
+            soft_preferences.append(label)
+        if not enabled and label in soft_preferences:
+            soft_preferences.remove(label)
+
+    set_hard("有养宠经验", not pref.get("allow_novice", True) or pref.get("focus_experience", False))
+    set_hard("优先同城或本地领养", pref.get("prefer_local", False))
+    set_hard("需稳定住房或自有住房", not pref.get("accept_renting", True))
+    set_hard("稳定居住环境", pref.get("require_stable_housing", False) or pref.get("focus_stability", False))
+    set_hard("基础经济能力", pref.get("require_financial_capacity", False))
+    set_hard("家庭成员同意", pref.get("require_family_agreement", False))
+
+    set_soft("陪伴时间", pref.get("focus_companionship", False))
+    set_soft("住房稳定性", pref.get("focus_stability", False))
+    set_soft("责任意识", True)
+    set_soft("安静家庭", pref.get("prefer_quiet_household", False))
+    set_soft("多宠相处经验", pref.get("prefer_multi_pet_experience", False))
+
+    pref["hard_preferences"] = hard_preferences
+    pref["soft_preferences"] = soft_preferences
+    return pref
 
 
 def _extract_pet_profile(req: PostCreate | PostUpdate):
@@ -145,27 +186,34 @@ def _extract_pet_profile(req: PostCreate | PostUpdate):
     if not tags:
         tags = ["亲人", "待了解"]
 
-    pref = _default_adoption_preferences()
+    pref = _normalize_adoption_preferences(getattr(req, "adoption_preferences", None))
     if any(word in text for word in ["有经验优先", "养宠经验", "不适合新手", "谢绝新手"]):
         pref["allow_novice"] = False
         pref["focus_experience"] = True
-        pref["hard_preferences"].append("有养宠经验")
     if any(word in text for word in ["仅限同城", "限同城", "本地优先", "仅限本地", "限自提"]):
         pref["prefer_local"] = True
-        pref["hard_preferences"].append("优先同城或本地领养")
     if any(word in text for word in ["不接受租房", "谢绝租房", "仅限自有住房"]):
         pref["accept_renting"] = False
-        pref["hard_preferences"].append("需稳定住房或自有住房")
+        pref["require_stable_housing"] = True
+    if any(word in text for word in ["稳定住房", "稳定居住", "不要频繁搬家", "长期稳定"]):
+        pref["require_stable_housing"] = True
+    if any(word in text for word in ["经济能力", "基础预算", "看病预算", "能承担医疗", "有稳定收入"]):
+        pref["require_financial_capacity"] = True
     if any(word in text for word in ["家人同意", "全家同意", "室友同意"]):
         pref["require_family_agreement"] = True
     if any(word in text for word in ["粘人", "分离焦虑", "需要陪伴", "陪陪它", "不适合长期独处"]):
         pref["focus_companionship"] = True
-        if "陪伴时间" not in pref["soft_preferences"]:
-            pref["soft_preferences"].append("陪伴时间")
     if any(word in text for word in ["稳定工作", "稳定住所", "不要搬家", "长期负责"]):
         pref["focus_stability"] = True
-        if "住房稳定性" not in pref["soft_preferences"]:
-            pref["soft_preferences"].append("住房稳定性")
+    if any(word in text for word in ["安静家庭", "环境安静", "不要太吵", "怕吵"]):
+        pref["prefer_quiet_household"] = True
+    if any(word in text for word in ["有猫相处经验", "有狗相处经验", "多宠家庭经验", "原住民相处经验"]):
+        pref["prefer_multi_pet_experience"] = True
+    if any(word in text for word in ["要求高", "慎重领养", "宁缺毋滥", "严格筛选"]):
+        pref["risk_tolerance"] = "conservative"
+    elif any(word in text for word in ["条件合适即可", "真心对它好即可", "要求不高", "有爱心即可"]):
+        pref["risk_tolerance"] = "relaxed"
+    pref = _sync_preference_labels(pref)
 
     age_text = getattr(req, "pet_age", "") or ""
     age_match = re.search(r"(\d+)", age_text)
@@ -263,9 +311,17 @@ def get_posts(skip: int = 0, limit: int = 20):
             SELECT p.id, p.user_id, p.title, p.content, p.image_url,
                    p.image_urls, p.type, p.likes, p.create_time,
                    p.pet_name, p.pet_gender, p.pet_age, p.pet_breed, p.adopt_reason, p.location,
-                   u.username, u.role
+                   pet.adoption_preferences,
+                   u.username, u.role,
+                   COALESCE(cc.comment_count, 0) AS comment_count
             FROM posts p
             JOIN users u ON p.user_id = u.id
+            LEFT JOIN pets pet ON pet.source_post_id = p.id
+            LEFT JOIN (
+                SELECT post_id, COUNT(*) AS comment_count
+                FROM comments
+                GROUP BY post_id
+            ) cc ON cc.post_id = p.id
             ORDER BY p.create_time DESC
             LIMIT ? OFFSET ?
             """,
@@ -325,7 +381,7 @@ async def update_post(post_id: int, req: PostUpdate, current_user: dict = Depend
              req.adopt_reason, req.location, post_id),
         )
         merged = dict(post)
-        for key in ["title", "content", "image_url", "image_urls", "pet_name", "pet_gender", "pet_age", "pet_breed", "adopt_reason", "location"]:
+        for key in ["title", "content", "image_url", "image_urls", "pet_name", "pet_gender", "pet_age", "pet_breed", "adopt_reason", "location", "adoption_preferences"]:
             new_val = getattr(req, key, None)
             if new_val is not None:
                 merged[key] = new_val
@@ -344,6 +400,7 @@ async def update_post(post_id: int, req: PostUpdate, current_user: dict = Depend
                 pet_breed=merged.get("pet_breed"),
                 adopt_reason=merged.get("adopt_reason"),
                 location=merged.get("location"),
+                adoption_preferences=merged.get("adoption_preferences"),
             )
             extracted_profile = _sync_adoption_post_pet(cursor, post_id, merged_req, current_user["id"])
         conn.commit()

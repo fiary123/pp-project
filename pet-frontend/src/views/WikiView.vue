@@ -1900,35 +1900,35 @@ const handleAsk = async () => {
 </script>
 
 <template>
-  <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-[1600px] mx-auto px-4">
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-[1600px] mx-auto px-4 text-gray-900 dark:text-white">
     
     <!-- 左侧：推文流 (占 7 列) -->
     <div class="lg:col-span-7">
       <transition name="fade-slide" mode="out-in">
         <div v-if="!selectedArticleId" key="list" class="space-y-8">
-          <div class="flex items-end justify-between border-b border-white/10 pb-6">
+          <div class="flex items-end justify-between border-b border-gray-200 dark:border-white/10 pb-6">
             <div>
-              <h2 class="text-4xl font-black text-white italic tracking-tighter uppercase text-orange-500">宠物百科</h2>
-              <p class="text-gray-400 font-bold text-xs uppercase tracking-[0.3em] mt-1">智能百科知识库</p>
+              <h2 class="text-4xl font-black italic tracking-tighter uppercase text-orange-500">宠物百科</h2>
+              <p class="text-gray-600 dark:text-gray-400 font-bold text-xs uppercase tracking-[0.3em] mt-1">智能百科知识库</p>
             </div>
             <div class="flex gap-4">
               <button v-for="c in [{v:'all',n:'全部'},{v:'cat',n:'猫咪'},{v:'dog',n:'狗狗'},{v:'bird',n:'鸟类'},{v:'reptile',n:'爬宠'},{v:'fish',n:'鱼类'}]" :key="c.v" @click="activeCategory = c.v"
                       :class="activeCategory === c.v ? 'text-orange-500 font-black border-b-2 border-orange-500' : 'text-gray-500'"
-                      class="text-xs uppercase font-bold transition-all hover:text-white px-2">{{ c.n }}</button>
+                      class="text-xs uppercase font-bold transition-all hover:text-gray-900 dark:hover:text-white px-2">{{ c.n }}</button>
             </div>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div v-for="post in filteredPosts" :key="post.id" @click="selectedArticleId = post.id"
-                 class="group bg-[#1a1a1a] rounded-[2.5rem] overflow-hidden border border-white/5 hover:border-orange-500/40 transition-all cursor-pointer shadow-2xl">
+                 class="group bg-white dark:bg-[#1a1a1a] rounded-[2.5rem] overflow-hidden border border-gray-200 dark:border-white/5 hover:border-orange-500/40 transition-all cursor-pointer shadow-2xl">
               <div class="h-56 overflow-hidden relative">
                 <img :src="getPostCover(post)" @error="markCoverError(post.id)" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" />
                 <div class="absolute top-4 left-4 bg-orange-500 text-white text-[10px] font-black px-2 py-1 rounded-full uppercase">{{ categoryNames[post.category] || post.category }}</div>
               </div>
               <div class="p-8 space-y-4">
-                <h3 class="text-xl font-bold text-white group-hover:text-orange-400 leading-tight transition-colors">{{ post.title }}</h3>
-                <p class="text-xs text-gray-500 leading-relaxed line-clamp-2">{{ post.summary }}</p>
-                <div class="flex items-center justify-between pt-4 border-t border-white/5 text-gray-500 text-xs md:text-sm font-bold">
+                <h3 class="text-xl font-bold text-gray-900 dark:text-white group-hover:text-orange-400 leading-tight transition-colors">{{ post.title }}</h3>
+                <p class="text-xs text-gray-600 dark:text-gray-500 leading-relaxed line-clamp-2">{{ post.summary }}</p>
+                <div class="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-white/5 text-gray-500 text-xs md:text-sm font-bold">
                   <span class="flex items-center gap-1.5"><Eye :size="14"/> {{ post.views }} 阅读</span>
                   <span class="text-orange-500 uppercase tracking-[0.18em] text-sm md:text-base">阅读全文</span>
                 </div>
@@ -1970,21 +1970,21 @@ const handleAsk = async () => {
     <!-- 右侧：AI 问答侧边栏 (解决滚动失效版) -->
     <div class="lg:col-span-5 h-[800px] sticky top-28">
       <!-- 放弃 BaseCard，改用原生 div 确保 flex 布局高度严格受控 -->
-      <div class="h-full flex flex-col rounded-[2.5rem] border border-orange-500/30 bg-[#121212]/95 backdrop-blur-2xl shadow-[0_30px_60px_rgba(0,0,0,0.5)] overflow-hidden">
+      <div class="h-full flex flex-col rounded-[2.5rem] border border-orange-500/20 dark:border-orange-500/30 bg-white/95 dark:bg-[#121212]/95 backdrop-blur-2xl shadow-[0_30px_60px_rgba(0,0,0,0.18)] dark:shadow-[0_30px_60px_rgba(0,0,0,0.5)] overflow-hidden">
         
         <!-- 头部 (高度固定) -->
-        <div class="p-8 border-b border-white/5 bg-gradient-to-br from-orange-500/10 to-transparent flex-shrink-0">
+        <div class="p-8 border-b border-gray-200 dark:border-white/5 bg-gradient-to-br from-orange-500/10 to-transparent flex-shrink-0">
           <div class="flex items-center gap-5">
             <div class="p-4 bg-orange-500 rounded-2xl text-white shadow-lg shadow-orange-500/40"><Sparkles :size="28" /></div>
             <div>
-              <h4 class="text-xl font-black text-white uppercase tracking-tighter italic">AI 智能百科</h4>
+              <h4 class="text-xl font-black text-gray-900 dark:text-white uppercase tracking-tighter italic">AI 智能百科</h4>
               <p class="text-xs text-orange-400 font-bold tracking-widest mt-1 uppercase">全天候专家助手</p>
             </div>
           </div>
         </div>
 
         <!-- 知识库状态面板 -->
-        <div v-if="kbStats" class="px-8 py-4 border-b border-white/5 bg-white/2 flex-shrink-0">
+        <div v-if="kbStats" class="px-8 py-4 border-b border-gray-200 dark:border-white/5 bg-gray-50 dark:bg-white/2 flex-shrink-0">
           <div class="flex items-center gap-2 mb-2">
             <Database class="text-orange-500" :size="14" />
             <span class="text-[10px] font-black text-orange-500 uppercase tracking-widest">向量知识库 · ChromaDB RAG</span>
@@ -1992,7 +1992,7 @@ const handleAsk = async () => {
           </div>
           <div class="flex flex-wrap gap-2">
             <span v-for="(count, cat) in kbStats.categories" :key="cat"
-              class="text-[9px] bg-white/5 text-gray-400 px-2 py-1 rounded-lg border border-white/5">
+              class="text-[9px] bg-white dark:bg-white/5 text-gray-600 dark:text-gray-400 px-2 py-1 rounded-lg border border-gray-200 dark:border-white/5">
               {{ kbStats.category_labels?.[cat] || cat }} · {{ count }}
             </span>
           </div>
@@ -2004,14 +2004,14 @@ const handleAsk = async () => {
           class="flex-1 p-8 overflow-y-auto space-y-8 scrollbar-custom"
         >
           <div v-for="(m, i) in chatHistory" :key="i" :class="m.role === 'ai' ? 'items-start' : 'items-end'" class="flex flex-col gap-3">
-            <div :class="m.role === 'ai' ? 'bg-white/5 text-gray-100 rounded-tr-[2rem]' : 'bg-orange-500 text-white rounded-tl-[2rem] shadow-2xl shadow-orange-500/30'"
-                 class="max-w-[95%] p-6 rounded-b-[2rem] text-base leading-relaxed border border-white/5 font-medium tracking-wide break-words whitespace-pre-wrap">
+            <div :class="m.role === 'ai' ? 'bg-gray-100 dark:bg-white/5 text-gray-800 dark:text-gray-100 rounded-tr-[2rem]' : 'bg-orange-500 text-white rounded-tl-[2rem] shadow-2xl shadow-orange-500/30'"
+                 class="max-w-[95%] p-6 rounded-b-[2rem] text-base leading-relaxed border border-gray-200 dark:border-white/5 font-medium tracking-wide break-words whitespace-pre-wrap">
               {{ m.text }}
             </div>
           </div>
           
           <!-- Thinking 动画 -->
-          <div v-if="isThinking" class="flex items-center gap-4 p-5 bg-white/5 rounded-3xl w-max">
+          <div v-if="isThinking" class="flex items-center gap-4 p-5 bg-gray-100 dark:bg-white/5 rounded-3xl w-max">
             <div class="flex gap-1.5">
               <span class="w-2 h-2 bg-orange-500 rounded-full animate-bounce"></span>
               <span class="w-2 h-2 bg-orange-500 rounded-full animate-bounce [animation-delay:0.2s]"></span>
@@ -2022,13 +2022,13 @@ const handleAsk = async () => {
         </div>
 
         <!-- 输入区域 (高度固定) -->
-        <div class="p-8 bg-black/40 border-t border-white/5 flex-shrink-0">
+        <div class="p-8 bg-gray-50 dark:bg-black/40 border-t border-gray-200 dark:border-white/5 flex-shrink-0">
           <div class="relative flex gap-4">
             <input 
               v-model="userInput" 
               @keyup.enter="handleAsk" 
               placeholder="在此输入您的问题..." 
-              class="flex-1 bg-white/5 border border-white/10 rounded-[1.5rem] py-5 px-8 text-base text-white focus:border-orange-500 outline-none transition-all placeholder:text-gray-600" 
+              class="flex-1 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-[1.5rem] py-5 px-8 text-base text-gray-900 dark:text-white focus:border-orange-500 outline-none transition-all placeholder:text-gray-400 dark:placeholder:text-gray-600" 
             />
             <button 
               @click="handleAsk" 

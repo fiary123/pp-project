@@ -41,6 +41,8 @@ def rule_engine_prescreen(
     hard_block = False
     
     prefs = publisher_preferences or {}
+    risk_tolerance = str(prefs.get("risk_tolerance", "medium")).lower()
+    strict_multiplier = 1.2 if risk_tolerance == "conservative" else 0.8 if risk_tolerance == "relaxed" else 1.0
 
     # --- 1. 平台极简底线 (仅拦截非法或确定违规) ---
     if any(kw in applicant_info for kw in ["禁止养宠", "房东明确拒绝"]):
@@ -50,24 +52,44 @@ def rule_engine_prescreen(
     # --- 2. 发布者硬性要求 (这部分尊重发布者的自主权) ---
     if not prefs.get("allow_novice", True) and not has_pet_experience:
         risk_flags.append("🟡 [送养方偏好] 发布者更倾向有经验的领养人")
-        penalty_score += 15 # 仅扣分，不直接拦截
+        penalty_score += int(15 * strict_multiplier) # 仅扣分，不直接拦截
 
     if not prefs.get("accept_renting", True) and housing_type == "apartment" and "租" in applicant_info:
         risk_flags.append("🟡 [送养方偏好] 发布者更倾向有自住房的领养人")
-        penalty_score += 10
+        penalty_score += int(10 * strict_multiplier)
+
+    if prefs.get("require_stable_housing") and any(kw in applicant_info for kw in ["短租", "经常搬家", "不稳定", "暂住"]):
+        risk_flags.append("🟠 [送养方硬性条件] 当前居住稳定性不足，建议补充长期安置计划")
+        penalty_score += int(16 * strict_multiplier)
+
+    if prefs.get("require_financial_capacity") and 0 < monthly_budget < (_SPECIES_MIN_COST.get(target_species, 180) + 100):
+        risk_flags.append("🟠 [送养方硬性条件] 当前预算接近底线，建议补充基础开销与医疗储备说明")
+        penalty_score += int(14 * strict_multiplier)
+
+    if prefs.get("require_family_agreement") and any(kw in applicant_info for kw in ["家里有人反对", "家人犹豫", "室友不确定"]):
+        risk_flags.append("🟠 [送养方硬性条件] 家庭内部尚未形成明确共识")
+        penalty_score += int(14 * strict_multiplier)
 
     # --- 3. 弹性校验 (大幅放宽) ---
     # 财务：只要能覆盖基础开销就不算红旗
     min_cost = _SPECIES_MIN_COST.get(target_species, 180)
     if 0 < monthly_budget < min_cost:
         risk_flags.append("🟡 [建议] 预算略低于建议基准，建议未来根据宠物情况适当调整")
-        penalty_score += 5
+        penalty_score += int(5 * strict_multiplier)
 
     # 时间：尊重快节奏生活
     min_hours = _SPECIES_MIN_COMPANION_HOURS.get(target_species, 0.8)
     if 0 < daily_companion_hours < min_hours:
         risk_flags.append("🟡 [提醒] 陪伴时间较短，建议考虑通过智能设备或家人协作弥补")
-        penalty_score += 5
+        penalty_score += int(5 * strict_multiplier)
+
+    if prefs.get("prefer_quiet_household") and any(kw in applicant_info for kw in ["经常聚会", "家里热闹", "噪音大"]):
+        risk_flags.append("🟡 [送养方软偏好] 当前家庭环境可能与宠物需要的安静氛围不完全匹配")
+        penalty_score += int(6 * strict_multiplier)
+
+    if prefs.get("prefer_multi_pet_experience") and existing_pets.strip() and not has_pet_experience:
+        risk_flags.append("🟡 [送养方软偏好] 若有原住宠物，送养方更希望申请人具备多宠磨合经验")
+        penalty_score += int(6 * strict_multiplier)
 
     # 新手友好：鼓励学习
     if not has_pet_experience:
@@ -75,7 +97,8 @@ def rule_engine_prescreen(
 
     prescreen_summary = (
         f"预筛完成：系统标记了 {len(risk_flags)} 个建议点。 "
-        f"平台底线校验通过，{'命中发布者特定要求' if penalty_score > 20 else '整体条件良好'}，已提交给 AI 专家进行深度匹配分析。"
+        f"平台底线校验通过，{'命中发布者特定要求' if penalty_score > 20 else '整体条件良好'}，"
+        f"送养方风险偏好为{'保守型' if risk_tolerance == 'conservative' else '宽松型' if risk_tolerance == 'relaxed' else '中性'}，已提交给 AI 专家进行深度匹配分析。"
     )
 
     return {

@@ -6,10 +6,12 @@ import {
   ClipboardList, AlertTriangle
 } from 'lucide-vue-next'
 import BaseCard from '../components/BaseCard.vue'
+import AppSelect from '../components/AppSelect.vue'
 import axios from '../api/index'
 import { useAuthStore } from '../store/authStore'
 
 const authStore = useAuthStore()
+const LOCAL_MUTUAL_AID_KEY = 'mutual_aid_local_tasks_v1'
 
 // ── Tab ──────────────────────────────────────────────────
 const activeTab = ref<'list' | 'publish' | 'mine'>('list')
@@ -17,13 +19,101 @@ const activeTab = ref<'list' | 'publish' | 'mine'>('list')
 // ── 任务列表（大厅） ───────────────────────────────────────
 const tasks = ref<any[]>([])
 const isLoadingTasks = ref(false)
+const taskLoadError = ref('')
+
+const getRequestErrorMessage = (err: any, fallback: string) => {
+  if (!err?.response) return `${fallback}，当前后端服务未连接，请先启动 8000 端口服务`
+  return err.response?.data?.detail || fallback
+}
+
+const getLocalTaskStorageKey = () => `${LOCAL_MUTUAL_AID_KEY}_${authStore.user?.id || 'guest'}`
+
+const readLocalTasks = () => {
+  try {
+    const raw = localStorage.getItem(getLocalTaskStorageKey())
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+const writeLocalTasks = (items: any[]) => {
+  try {
+    localStorage.setItem(getLocalTaskStorageKey(), JSON.stringify(items))
+  } catch {
+    // 忽略本地存储异常
+  }
+}
+
+const normalizeTask = (task: any) => ({
+  ...task,
+  local_only: Boolean(task.local_only),
+  sync_status: task.sync_status || (task.local_only ? 'local_pending' : 'synced'),
+})
+
+const mergeWithLocalTasks = (serverTasks: any[]) => {
+  const localTasks = readLocalTasks().map(normalizeTask)
+  const normalizedServer = (serverTasks || []).map(normalizeTask)
+  const seen = new Set(normalizedServer.map((task) => String(task.id)))
+  const pendingOnly = localTasks.filter((task) => !seen.has(String(task.id)))
+  return [...pendingOnly, ...normalizedServer]
+}
+
+const saveLocalTask = (task: any) => {
+  const current = readLocalTasks()
+  current.unshift(normalizeTask(task))
+  writeLocalTasks(current)
+}
+
+const removeLocalTask = (taskId: any) => {
+  const next = readLocalTasks().filter((item) => String(item.id) !== String(taskId))
+  writeLocalTasks(next)
+}
+
+const ensureAuthForAction = (targetError: { value: string }, actionLabel: string) => {
+  if (authStore.user?.id && authStore.token) return true
+  targetError.value = `${actionLabel}前请先重新登录，当前登录状态可能已失效。`
+  return false
+}
+
+const formatTaskTime = (value: string) => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+const buildLocalTaskPayload = () => ({
+  id: `local-${Date.now()}`,
+  user_id: authStore.user?.id,
+  task_type: form.value.task_type,
+  pet_name: form.value.pet_name,
+  pet_species: form.value.pet_species,
+  start_time: formatTaskTime(form.value.start_time),
+  end_time: form.value.end_time ? formatTaskTime(form.value.end_time) : '',
+  location: form.value.location,
+  description: form.value.description,
+  status: 'open',
+  local_only: true,
+  sync_status: 'local_pending'
+})
 
 const fetchTasks = async () => {
   isLoadingTasks.value = true
+  taskLoadError.value = ''
   try {
     const res = await axios.get('/api/mutual-aid/tasks', { params: { status: 'open' } })
-    tasks.value = res.data
-  } catch { tasks.value = [] }
+    tasks.value = mergeWithLocalTasks(res.data || [])
+  } catch (err: any) {
+    tasks.value = mergeWithLocalTasks([])
+    taskLoadError.value = getRequestErrorMessage(err, '互助大厅加载失败')
+  }
   finally { isLoadingTasks.value = false }
 }
 
@@ -31,14 +121,20 @@ const fetchTasks = async () => {
 const myPublished = ref<any[]>([])
 const myAccepted  = ref<any[]>([])
 const isLoadingMine = ref(false)
+const mineLoadError = ref('')
 
 const fetchMine = async () => {
   isLoadingMine.value = true
+  mineLoadError.value = ''
   try {
     const res = await axios.get('/api/mutual-aid/tasks/mine')
-    myPublished.value = res.data.published
-    myAccepted.value  = res.data.accepted
-  } catch { myPublished.value = []; myAccepted.value = [] }
+    myPublished.value = mergeWithLocalTasks(res.data.published || [])
+    myAccepted.value  = (res.data.accepted || []).map(normalizeTask)
+  } catch (err: any) {
+    myPublished.value = mergeWithLocalTasks([])
+    myAccepted.value = []
+    mineLoadError.value = getRequestErrorMessage(err, '我的互助加载失败')
+  }
   finally { isLoadingMine.value = false }
 }
 
@@ -56,6 +152,7 @@ const form = ref({
 const taskTypes = ['上门喂养', '上门铲屎', '代遛狗', '宠物陪伴', '其他互助']
 const isPublishing = ref(false)
 const publishSuccess = ref(false)
+const publishError = ref('')
 
 // 日期时间拆分选择器辅助状态
 const genDateOptions = () => {
@@ -80,6 +177,11 @@ const genTimeOptions = () => {
 
 const dateOptions = genDateOptions()
 const timeOptions = genTimeOptions()
+const petSpeciesOptions = ['猫', '狗', '其他']
+const startDateSelectOptions = dateOptions
+const startTimeSelectOptions = timeOptions
+const endDateSelectOptions = [{ label: '不限结束日期', value: '' }, ...dateOptions.map((item) => ({ label: item, value: item }))]
+const endTimeSelectOptions = timeOptions
 
 // 实际用于选择的中间状态
 const startDate = ref('') // e.g. "03-25(周二)"
@@ -109,25 +211,51 @@ const publishTask = async () => {
   form.value.start_time = buildDatetime(startDate.value, startTime.value)
   form.value.end_time   = buildDatetime(endDate.value, endTime.value)
   if (!form.value.pet_name || !form.value.location || !startDate.value) return
+  if (!ensureAuthForAction(publishError, '发布互助需求')) return
   isPublishing.value = true
   publishSuccess.value = false
+  publishError.value = ''
   try {
-    await axios.post('/api/mutual-aid/tasks', { ...form.value, user_id: authStore.user?.id })
+    const res = await axios.post('/api/mutual-aid/tasks', { ...form.value }, {
+      headers: { 'X-Graceful-401': '1' }
+    })
+    const createdTask = normalizeTask(res.data?.task || {})
+    if (createdTask.id) removeLocalTask(createdTask.id)
     publishSuccess.value = true
     form.value = { task_type: '上门喂养', pet_name: '', pet_species: '猫', start_time: '', end_time: '', location: '', description: '' }
     startDate.value = ''; startTime.value = '09:00'; endDate.value = ''; endTime.value = '18:00'
     await fetchTasks()
-    switchTab('list')
-  } catch { } finally { isPublishing.value = false }
+    await fetchMine()
+    if (createdTask.id) {
+      myPublished.value = mergeWithLocalTasks([createdTask, ...myPublished.value.filter(task => String(task.id) !== String(createdTask.id))])
+    }
+    switchTab('mine')
+  } catch (err: any) {
+    const isAuthError = err?.response?.status === 401
+    if (!err?.response || isAuthError) {
+      const localTask = buildLocalTaskPayload()
+      saveLocalTask(localTask)
+      publishSuccess.value = false
+      publishError.value = isAuthError
+        ? '登录状态已失效，互助需求已先保存到本地暂存。请重新登录后再同步发布。'
+        : '后端暂时未连接，已为你保存在本地草稿中；恢复后仍可在“我的互助”里查看。'
+      myPublished.value = mergeWithLocalTasks(myPublished.value)
+      tasks.value = mergeWithLocalTasks(tasks.value)
+      activeTab.value = 'mine'
+    } else {
+      publishError.value = getRequestErrorMessage(err, '互助需求发布失败')
+    }
+  } finally { isPublishing.value = false }
 }
 
 // ── 接单 ──────────────────────────────────────────────────
 const acceptingId = ref<number | null>(null)
 
 const acceptTask = async (taskId: number) => {
+  if (!ensureAuthForAction(taskLoadError, '接单')) return
   acceptingId.value = taskId
   try {
-    await axios.post(`/api/mutual-aid/tasks/${taskId}/accept`, { helper_id: authStore.user?.id })
+    await axios.post(`/api/mutual-aid/tasks/${taskId}/accept`, {})
     await fetchTasks()
   } catch { } finally { acceptingId.value = null }
 }
@@ -136,6 +264,7 @@ const acceptTask = async (taskId: number) => {
 const completingId = ref<number | null>(null)
 
 const completeTask = async (taskId: number) => {
+  if (!ensureAuthForAction(mineLoadError, '完成任务')) return
   completingId.value = taskId
   try {
     await axios.post(`/api/mutual-aid/tasks/${taskId}/complete`)
@@ -157,10 +286,10 @@ const openReport = (taskId: number) => {
 
 const submitReport = async () => {
   if (!reportTarget.value || !reportReason.value.trim()) return
+  if (!ensureAuthForAction(taskLoadError, '举报')) return
   isReporting.value = true
   try {
     await axios.post(`/api/mutual-aid/tasks/${reportTarget.value}/report`, {
-      reporter_id: authStore.user?.id,
       reason: reportReason.value
     })
     reportSuccess.value = true
@@ -205,21 +334,22 @@ const statusLabel: Record<string, { text: string; cls: string }> = {
   accepted:  { text: '已接单', cls: 'bg-blue-500/20 text-blue-400' },
   completed: { text: '已完成', cls: 'bg-gray-500/20 text-gray-400' },
   cancelled: { text: '已下架', cls: 'bg-red-500/20 text-red-400' },
+  local_pending: { text: '本地暂存', cls: 'bg-yellow-500/20 text-yellow-500' },
 }
 
 onMounted(fetchTasks)
 </script>
 
 <template>
-  <div class="max-w-7xl mx-auto space-y-10 px-4">
+  <div class="max-w-7xl mx-auto space-y-10 px-4 text-gray-900 dark:text-white">
 
     <!-- 顶部标题 -->
     <div class="text-center space-y-4">
       <div class="inline-flex items-center gap-2 px-4 py-2 bg-orange-500/10 border border-orange-500/20 rounded-full text-orange-500 text-xs font-bold uppercase tracking-[0.2em]">
         <BrainCircuit :size="14" /> 多智能体协同系统
       </div>
-      <h2 class="text-5xl font-black text-white drop-shadow-2xl italic">宠物互助平台</h2>
-      <p class="text-gray-400 max-w-2xl mx-auto text-lg font-medium">发布上门喂养、代遛等互助需求，或接单帮助其他宠主，AI 智能为你匹配最合适的方案</p>
+      <h2 class="text-5xl font-black drop-shadow-2xl italic" style="color: var(--text-primary);">宠物互助平台</h2>
+      <p class="max-w-2xl mx-auto text-lg font-medium" style="color: var(--text-secondary);">发布上门喂养、代遛等互助需求，或接单帮助其他宠主，AI 智能为你匹配最合适的方案</p>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -227,7 +357,7 @@ onMounted(fetchTasks)
       <div class="lg:col-span-6 space-y-6">
 
         <!-- Tab 切换 -->
-        <div class="flex gap-2 p-1 bg-white/5 rounded-2xl border border-white/10">
+        <div class="flex gap-2 p-1 bg-gray-100 dark:bg-white/5 rounded-2xl border border-gray-200 dark:border-white/10">
           <button v-for="tab in [
             { key: 'list',    label: '互助大厅',  icon: ListChecks },
             { key: 'publish', label: '发布需求',  icon: PlusCircle },
@@ -235,7 +365,7 @@ onMounted(fetchTasks)
           ]" :key="tab.key"
             @click="switchTab(tab.key as any)"
             :class="['flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 transition-all',
-              activeTab === tab.key ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/30' : 'text-gray-400 hover:text-white']"
+              activeTab === tab.key ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/30' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white']"
           >
             <component :is="tab.icon" :size="15" />{{ tab.label }}
           </button>
@@ -243,6 +373,9 @@ onMounted(fetchTasks)
 
         <!-- ── 互助大厅 ── -->
         <div v-if="activeTab === 'list'" class="space-y-4">
+          <div v-if="taskLoadError" class="p-4 rounded-2xl border border-red-500/20 bg-red-500/10 text-red-300 text-sm font-bold">
+            {{ taskLoadError }}
+          </div>
           <div v-if="isLoadingTasks" class="flex items-center justify-center py-20 text-gray-500">
             <Loader2 class="animate-spin mr-2" :size="20" /> 加载中...
           </div>
@@ -256,18 +389,23 @@ onMounted(fetchTasks)
               <div class="flex-1 space-y-2 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
                   <span :class="['text-xs font-bold px-3 py-1 rounded-full', typeColor[task.task_type] || 'bg-gray-500/20 text-gray-400']">{{ task.task_type }}</span>
-                  <span class="text-xs font-bold px-3 py-1 rounded-full bg-green-500/20 text-green-400">待接单</span>
+                  <span :class="['text-xs font-bold px-3 py-1 rounded-full', statusLabel[task.sync_status || task.status]?.cls || 'bg-gray-500/20 text-gray-400']">
+                    {{ statusLabel[task.sync_status || task.status]?.text || task.status }}
+                  </span>
                 </div>
-                <p class="font-bold text-white text-lg">
+                <p class="font-bold text-gray-900 dark:text-white text-lg">
                   <Cat :size="16" class="inline mr-1 text-orange-400" />{{ task.pet_name }}（{{ task.pet_species }}）
                 </p>
-                <p class="text-gray-400 text-sm flex items-center gap-1"><MapPin :size="13" class="text-orange-400 shrink-0" />{{ task.location }}</p>
-                <p class="text-gray-400 text-sm flex items-center gap-1"><Clock :size="13" class="text-orange-400 shrink-0" />{{ task.start_time }} ~ {{ task.end_time || '待定' }}</p>
-                <p v-if="task.description" class="text-gray-500 text-sm line-clamp-2">{{ task.description }}</p>
+                <p class="text-gray-600 dark:text-gray-400 text-sm flex items-center gap-1"><MapPin :size="13" class="text-orange-400 shrink-0" />{{ task.location }}</p>
+                <p class="text-gray-600 dark:text-gray-400 text-sm flex items-center gap-1"><Clock :size="13" class="text-orange-400 shrink-0" />{{ task.start_time }} ~ {{ task.end_time || '待定' }}</p>
+                <p v-if="task.description" class="text-gray-500 dark:text-gray-500 text-sm line-clamp-2">{{ task.description }}</p>
+                <p v-if="task.local_only" class="text-xs text-yellow-600 dark:text-yellow-400 font-bold">
+                  当前为本地暂存记录，待后端恢复后可重新同步。
+                </p>
               </div>
               <div class="shrink-0 flex flex-col gap-2">
                 <!-- 接单按钮（非本人任务） -->
-                <button v-if="task.user_id !== authStore.user?.id"
+                <button v-if="!task.local_only && task.user_id !== authStore.user?.id"
                   @click="acceptTask(task.id)" :disabled="acceptingId === task.id"
                   class="flex items-center gap-1 px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-700 text-white text-sm font-bold rounded-xl transition-all"
                 >
@@ -275,8 +413,8 @@ onMounted(fetchTasks)
                   <Handshake v-else :size="14" />接单
                 </button>
                 <!-- 举报按钮 -->
-                <button @click="openReport(task.id)"
-                  class="flex items-center gap-1 px-3 py-1.5 border border-white/10 text-gray-500 hover:text-red-400 hover:border-red-500/30 text-xs font-bold rounded-xl transition-all"
+                <button v-if="!task.local_only" @click="openReport(task.id)"
+                  class="flex items-center gap-1 px-3 py-1.5 border border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-500 hover:text-red-400 hover:border-red-500/30 text-xs font-bold rounded-xl transition-all"
                 >
                   <Flag :size="12" />举报
                 </button>
@@ -287,75 +425,61 @@ onMounted(fetchTasks)
 
         <!-- ── 发布需求 ── -->
         <BaseCard v-if="activeTab === 'publish'" class="space-y-5">
-          <h3 class="font-bold text-xl text-white flex items-center gap-2">
+          <h3 class="font-bold text-xl text-gray-900 dark:text-white flex items-center gap-2">
             <PlusCircle :size="20" class="text-orange-400" /> 发布互助需求
           </h3>
           <div v-if="publishSuccess" class="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/30 rounded-2xl text-green-400 font-bold">
             <CheckCircle2 :size="20" /> 发布成功！
           </div>
+          <div v-if="publishError" class="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-300 font-bold text-sm">
+            <AlertTriangle :size="18" /> {{ publishError }}
+          </div>
           <div>
-            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">互助类型</label>
+            <label class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2 block">互助类型</label>
             <div class="flex flex-wrap gap-2">
               <button v-for="t in taskTypes" :key="t" @click="form.task_type = t"
                 :class="['px-4 py-2 rounded-xl text-sm font-bold border transition-all',
-                  form.task_type === t ? 'bg-orange-500 border-orange-400 text-white' : 'border-white/10 text-gray-400 hover:border-orange-500/50 hover:text-white']">
+                  form.task_type === t ? 'bg-orange-500 border-orange-400 text-white' : 'border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-400 hover:border-orange-500/50 hover:text-gray-900 dark:hover:text-white']">
                 {{ t }}
               </button>
             </div>
           </div>
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">宠物名字 *</label>
+              <label class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2 block">宠物名字 *</label>
               <input v-model="form.pet_name" placeholder="例如：小橘"
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all" />
+                class="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder-gray-400 dark:placeholder-gray-600" />
             </div>
             <div>
-              <label class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">宠物种类</label>
-              <select v-model="form.pet_species"
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all">
-                <option value="猫">猫</option><option value="狗">狗</option><option value="其他">其他</option>
-              </select>
+              <label class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2 block">宠物种类</label>
+              <AppSelect v-model="form.pet_species" :options="petSpeciesOptions" />
             </div>
           </div>
           <!-- 开始时间 -->
           <div>
-            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">开始时间 *</label>
+            <label class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2 block">开始时间 *</label>
             <div class="grid grid-cols-2 gap-3">
-              <select v-model="startDate"
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all">
-                <option value="" disabled>选择日期</option>
-                <option v-for="d in dateOptions" :key="d" :value="d">{{ d }}</option>
-              </select>
-              <select v-model="startTime"
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all">
-                <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
-              </select>
+              <AppSelect v-model="startDate" :options="startDateSelectOptions" placeholder="选择日期" />
+              <AppSelect v-model="startTime" :options="startTimeSelectOptions" />
             </div>
           </div>
           <!-- 结束时间 -->
           <div>
-            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">结束时间 <span class="text-gray-600 normal-case font-normal">（选填）</span></label>
+            <label class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2 block">结束时间 <span class="text-gray-500 dark:text-gray-600 normal-case font-normal">（选填）</span></label>
             <div class="grid grid-cols-2 gap-3">
-              <select v-model="endDate"
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all">
-                <option value="">不限结束日期</option>
-                <option v-for="d in dateOptions" :key="d" :value="d">{{ d }}</option>
-              </select>
-              <select v-model="endTime"
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all">
-                <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
-              </select>
+              <AppSelect v-model="endDate" :options="endDateSelectOptions" />
+              <AppSelect v-model="endTime" :options="endTimeSelectOptions" />
             </div>
           </div>
           <div>
-            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">地点 *</label>
+            <label class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2 block">地点 *</label>
             <input v-model="form.location" placeholder="例如：上海市浦东新区 XX 小区"
-              class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all" />
+              class="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder-gray-400 dark:placeholder-gray-600" />
           </div>
           <div>
-            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">补充说明</label>
+            <label class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2 block">补充说明</label>
             <textarea v-model="form.description" rows="3" placeholder="例如：猫咪每天喂两次，饮水盆需加满..."
-              class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-all resize-none" />
+              class="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-orange-500 transition-all resize-none placeholder-gray-400 dark:placeholder-gray-600" />
           </div>
           <!-- 未填完提示 -->
           <p v-if="!form.pet_name || !startDate || !form.location" class="text-xs text-yellow-500/80 text-center flex items-center justify-center gap-1">
@@ -375,13 +499,16 @@ onMounted(fetchTasks)
 
         <!-- ── 我的互助 ── -->
         <div v-if="activeTab === 'mine'" class="space-y-6">
+          <div v-if="mineLoadError" class="p-4 rounded-2xl border border-red-500/20 bg-red-500/10 text-red-300 text-sm font-bold">
+            {{ mineLoadError }}
+          </div>
           <div v-if="isLoadingMine" class="flex items-center justify-center py-20 text-gray-500">
             <Loader2 class="animate-spin mr-2" :size="20" /> 加载中...
           </div>
           <template v-else>
             <!-- 我发布的 -->
             <div>
-              <h4 class="text-sm font-black text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+              <h4 class="text-sm font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
                 <PlusCircle :size="14" class="text-orange-400" /> 我发布的任务（{{ myPublished.length }}）
               </h4>
               <div v-if="myPublished.length === 0" class="text-center py-8 text-gray-600 text-sm border border-dashed border-white/5 rounded-2xl">暂无发布记录</div>
@@ -390,11 +517,12 @@ onMounted(fetchTasks)
                   <div class="flex-1 space-y-1.5">
                     <div class="flex items-center gap-2 flex-wrap">
                       <span :class="['text-xs font-bold px-2 py-0.5 rounded-full', typeColor[task.task_type] || 'bg-gray-500/20 text-gray-400']">{{ task.task_type }}</span>
-                      <span :class="['text-xs font-bold px-2 py-0.5 rounded-full', statusLabel[task.status]?.cls || 'bg-gray-500/20 text-gray-400']">{{ statusLabel[task.status]?.text || task.status }}</span>
+                      <span :class="['text-xs font-bold px-2 py-0.5 rounded-full', statusLabel[task.sync_status || task.status]?.cls || 'bg-gray-500/20 text-gray-400']">{{ statusLabel[task.sync_status || task.status]?.text || task.status }}</span>
                     </div>
-                    <p class="font-bold text-white">{{ task.pet_name }}（{{ task.pet_species }}）</p>
-                    <p class="text-gray-400 text-xs flex items-center gap-1"><MapPin :size="11" class="text-orange-400" />{{ task.location }}</p>
-                    <p class="text-gray-400 text-xs flex items-center gap-1"><Clock :size="11" class="text-orange-400" />{{ task.start_time }}</p>
+                    <p class="font-bold text-gray-900 dark:text-white">{{ task.pet_name }}（{{ task.pet_species }}）</p>
+                    <p class="text-gray-600 dark:text-gray-400 text-xs flex items-center gap-1"><MapPin :size="11" class="text-orange-400" />{{ task.location }}</p>
+                    <p class="text-gray-600 dark:text-gray-400 text-xs flex items-center gap-1"><Clock :size="11" class="text-orange-400" />{{ task.start_time }}</p>
+                    <p v-if="task.local_only" class="text-xs text-yellow-600 dark:text-yellow-400 font-bold">本地暂存：网络恢复后可再次尝试同步。</p>
                     <!-- 接单人信息 -->
                     <div v-if="task.helper_name" class="flex items-center gap-2 mt-2 p-2 bg-blue-500/10 border border-blue-500/20 rounded-xl text-xs text-blue-300">
                       <Handshake :size="13" />
@@ -402,7 +530,7 @@ onMounted(fetchTasks)
                     </div>
                   </div>
                   <!-- 确认完成按钮 -->
-                  <button v-if="task.status === 'accepted'"
+                  <button v-if="!task.local_only && task.status === 'accepted'"
                     @click="completeTask(task.id)" :disabled="completingId === task.id"
                     class="shrink-0 flex items-center gap-1 px-3 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-700 text-white text-xs font-bold rounded-xl transition-all"
                   >
@@ -418,7 +546,7 @@ onMounted(fetchTasks)
 
             <!-- 我接的单 -->
             <div>
-              <h4 class="text-sm font-black text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+              <h4 class="text-sm font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
                 <Handshake :size="14" class="text-orange-400" /> 我接的单（{{ myAccepted.length }}）
               </h4>
               <div v-if="myAccepted.length === 0" class="text-center py-8 text-gray-600 text-sm border border-dashed border-white/5 rounded-2xl">暂无接单记录</div>
@@ -429,10 +557,10 @@ onMounted(fetchTasks)
                       <span :class="['text-xs font-bold px-2 py-0.5 rounded-full', typeColor[task.task_type] || 'bg-gray-500/20 text-gray-400']">{{ task.task_type }}</span>
                       <span :class="['text-xs font-bold px-2 py-0.5 rounded-full', statusLabel[task.status]?.cls || 'bg-gray-500/20 text-gray-400']">{{ statusLabel[task.status]?.text || task.status }}</span>
                     </div>
-                    <p class="font-bold text-white">{{ task.pet_name }}（{{ task.pet_species }}）</p>
-                    <p class="text-gray-400 text-xs flex items-center gap-1"><MapPin :size="11" class="text-orange-400" />{{ task.location }}</p>
-                    <p class="text-gray-400 text-xs flex items-center gap-1"><Clock :size="11" class="text-orange-400" />{{ task.start_time }}</p>
-                    <p v-if="task.description" class="text-gray-500 text-xs line-clamp-2">{{ task.description }}</p>
+                    <p class="font-bold text-gray-900 dark:text-white">{{ task.pet_name }}（{{ task.pet_species }}）</p>
+                    <p class="text-gray-600 dark:text-gray-400 text-xs flex items-center gap-1"><MapPin :size="11" class="text-orange-400" />{{ task.location }}</p>
+                    <p class="text-gray-600 dark:text-gray-400 text-xs flex items-center gap-1"><Clock :size="11" class="text-orange-400" />{{ task.start_time }}</p>
+                    <p v-if="task.description" class="text-gray-500 dark:text-gray-500 text-xs line-clamp-2">{{ task.description }}</p>
                   </div>
                   <!-- 完成按钮 -->
                   <button v-if="task.status === 'accepted'"
@@ -455,14 +583,14 @@ onMounted(fetchTasks)
       <!-- 右侧：AI 匹配 -->
       <div class="lg:col-span-6 space-y-6">
         <BaseCard class="space-y-5">
-          <h3 class="font-bold text-xl text-white flex items-center gap-3">
+          <h3 class="font-bold text-xl text-gray-900 dark:text-white flex items-center gap-3">
             <div class="p-2 bg-orange-500/20 text-orange-400 rounded-xl"><BrainCircuit :size="20" /></div>
             AI 智能匹配
           </h3>
-          <p class="text-gray-400 text-sm">描述你的互助需求，AI 多智能体将分析需求并推荐最合适的互助方案。</p>
+          <p class="text-gray-600 dark:text-gray-400 text-sm">描述你的互助需求，AI 多智能体将分析需求并推荐最合适的互助方案。</p>
           <textarea v-model="matchQuery" :disabled="isMatching" rows="4"
             placeholder="例如：我下周三到周五出差，需要有人帮我喂猫，猫咪在上海浦东，两岁英短，比较认生..."
-            class="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white text-sm focus:outline-none focus:border-orange-500 transition-all resize-none placeholder:text-gray-600" />
+            class="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl px-5 py-4 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-orange-500 transition-all resize-none placeholder:text-gray-400 dark:placeholder:text-gray-600" />
           <button @click="runAIMatch" :disabled="isMatching || !matchQuery.trim()"
             class="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-700 text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-2 transition-all active:scale-95">
             <Loader2 v-if="isMatching" class="animate-spin" :size="20" />
@@ -472,18 +600,18 @@ onMounted(fetchTasks)
         </BaseCard>
 
         <!-- 推理过程 -->
-        <BaseCard v-if="isMatching || matchThoughts.length > 0" class="border-orange-500/20 bg-black/20">
+        <BaseCard v-if="isMatching || matchThoughts.length > 0" class="border-orange-500/20 bg-gray-50 dark:bg-black/20">
           <div class="flex items-center justify-between mb-4">
             <h4 class="text-xs font-black text-orange-500 uppercase tracking-widest flex items-center gap-2">
               <BrainCircuit :size="14" /> 智能体推理过程
             </h4>
             <span class="text-[10px] font-mono text-gray-500">{{ matchProgress }}%</span>
           </div>
-          <div class="h-1.5 w-full bg-white/5 rounded-full overflow-hidden mb-6">
+          <div class="h-1.5 w-full bg-gray-200 dark:bg-white/5 rounded-full overflow-hidden mb-6">
             <div class="h-full bg-orange-500 transition-all duration-1000" :style="{ width: matchProgress + '%' }"></div>
           </div>
           <div class="space-y-3">
-            <div v-for="(thought, i) in matchThoughts" :key="i" class="flex items-start gap-3 text-[13px] font-mono text-gray-400">
+            <div v-for="(thought, i) in matchThoughts" :key="i" class="flex items-start gap-3 text-[13px] font-mono text-gray-600 dark:text-gray-400">
               <CheckCircle2 v-if="i < matchThoughts.length - 1 || matchProgress === 100" class="text-green-500 mt-0.5 shrink-0" :size="15" />
               <Loader2 v-else class="text-orange-500 animate-spin mt-0.5 shrink-0" :size="15" />
               {{ thought }}
@@ -511,7 +639,7 @@ onMounted(fetchTasks)
           class="flex flex-col items-center justify-center p-16 border-4 border-dashed border-white/5 rounded-[3rem] text-gray-700 text-center space-y-4">
           <Handshake :size="64" class="opacity-10" />
           <div class="space-y-1">
-            <p class="text-xl font-black text-white/20">等待匹配需求</p>
+            <p class="text-xl font-black text-gray-300 dark:text-white/20">等待匹配需求</p>
             <p class="text-sm max-w-xs mx-auto">在上方输入你的互助需求，AI 专家团将为你分析并推荐</p>
           </div>
         </div>
@@ -526,20 +654,20 @@ onMounted(fetchTasks)
           @click.self="reportTarget = null">
           <BaseCard class="w-full max-w-md space-y-5 shadow-2xl">
             <div class="flex items-center justify-between">
-              <h3 class="font-black text-white flex items-center gap-2">
+              <h3 class="font-black text-gray-900 dark:text-white flex items-center gap-2">
                 <AlertTriangle :size="18" class="text-red-400" /> 举报任务
               </h3>
-              <button @click="reportTarget = null" class="text-gray-500 hover:text-white transition-colors"><X :size="18" /></button>
+              <button @click="reportTarget = null" class="text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors"><X :size="18" /></button>
             </div>
             <div v-if="reportSuccess" class="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/30 rounded-2xl text-green-400 font-bold text-sm">
               <CheckCircle2 :size="18" /> 举报已提交，管理员将在 24 小时内处理
             </div>
             <template v-else>
               <div>
-                <label class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">举报原因 *</label>
+                <label class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2 block">举报原因 *</label>
                 <textarea v-model="reportReason" rows="4"
                   placeholder="请描述违规内容，例如：虚假信息、诈骗、违禁物品代运..."
-                  class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-red-500 transition-all resize-none" />
+                  class="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-3 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-red-500 transition-all resize-none placeholder-gray-400 dark:placeholder-gray-600" />
               </div>
               <button @click="submitReport" :disabled="isReporting || !reportReason.trim()"
                 class="w-full bg-red-500 hover:bg-red-600 disabled:bg-gray-700 text-white py-3 rounded-2xl font-black flex items-center justify-center gap-2 transition-all">
