@@ -18,8 +18,9 @@ class AIService:
     """统一的 AI 服务接口"""
     def __init__(self):
         api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
+        model_name = os.getenv("AI_MODEL_NAME", "qwen-plus")
         self.llm = ChatOpenAI(
-            model="deepseek-chat",
+            model=model_name,
             openai_api_key=api_key,
             openai_api_base=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
             temperature=0.3

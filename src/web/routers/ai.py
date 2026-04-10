@@ -29,7 +29,7 @@ from src.web.services.adoption_memory import (
     update_signal_weights_from_feedback,
     upsert_case_memory,
 )
-from src.web.dependencies import get_current_user
+from src.web.dependencies import get_current_user, get_optional_user
 from src.web.limiter import limiter
 from src.agents.coordinator import CoordinatorAgent
 from langchain_openai import ChatOpenAI
@@ -361,6 +361,7 @@ async def chat(request: Request, req: ChatRequest, current_user: dict = Depends(
 @router.post("/nutrition/plan")
 @limiter.limit("10/minute")
 async def create_nutrition_plan(request: Request, req: NutritionPlanRequest):
+    # 这里接收宠物基础指标，调用营养规划服务生成首版喂养方案与解释文本。
     plan, markdown, trace_id, plan_id = generate_nutrition_plan(req.model_dump())
     return {
         "status": "success",
@@ -369,16 +370,17 @@ async def create_nutrition_plan(request: Request, req: NutritionPlanRequest):
         "trace_id": trace_id,
         "plan_id": plan_id
     }
-
 @router.post("/nutrition/feedback")
 async def nutrition_feedback(req: NutritionFeedbackRequest):
     """提交营养方案执行反馈"""
+    # 先记录执行反馈，再由再规划接口读取这些反馈做闭环优化。
     feedback_id = submit_nutrition_feedback(req.model_dump())
     return {"status": "success", "feedback_id": feedback_id}
 
 @router.post("/nutrition/replan")
 async def nutrition_replan(req: NutritionReplanRequest):
     """基于反馈进行方案再规划"""
+    # 再规划不是重新随机生成，而是基于“旧方案 + 反馈结果”做动态调整。
     try:
         new_plan, markdown, trace_id = replan_nutrition(req.plan_id, req.feedback_id)
         return {
@@ -393,17 +395,16 @@ async def nutrition_replan(req: NutritionReplanRequest):
 @router.post("/pets/match-followup")
 async def match_followup(req: MatchFollowupRequest):
     """
-    创新点1：基于用户初始描述，生成 2-3 个追问问题（需求显化）。
+    1：基于用户初始描述，生成 2-3 个追问问题（需求显化）。
     """
     questions = get_match_followup_questions(req.user_query)
     return {"questions": questions}
-
-
 @router.post("/pets/smart-match")
 async def smart_match(req: SmartMatchRequest):
     """
-    创新点1+3：LLM 语义匹配 + 结构化可解释推荐。
+    2：LLM 语义匹配 + 结构化可解释推荐。
     """
+    # 前端提交用户偏好描述，后端返回候选宠物及匹配分数，供结果页排序展示。
     matches = get_smart_match(req.user_query, req.pet_list, req.followup_answers)
     return {"matches": matches}
 
@@ -434,14 +435,16 @@ async def adoption_feedback(
 async def adoption_assess(
     request: Request,
     req: AdoptionAssessmentRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict | None = Depends(get_optional_user)
 ):
     """
     领养资质多智能体评估接口（创新架构版）
     结合规则引擎与 LLM 语义推理，输出可解释的结构化报告。
     """
+    # 评审说明：
+    # 该接口先生成“即时评估结果”，前端可在正式提交申请前展示给用户参考。
     result = await assessment_service.run_full_assessment(
-        user_id=current_user["id"],
+        user_id=current_user["id"] if current_user else 0,
         applicant_data=req.model_dump()
     )
     return result
@@ -453,6 +456,9 @@ async def start_adoption_evaluation(
     background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user),
 ):
+    # 评审说明：
+    # 正式申请提交后，系统通过后台任务继续执行完整评估，
+    # 避免前端长时间等待，同时保留完整审核生命周期记录。
     app_row = _load_application_row(application_id)
     _ensure_application_access(app_row, current_user)
 
@@ -801,9 +807,10 @@ async def get_pet_chat_profile(pet_name: str, user_id: int):
 @limiter.limit("10/minute")
 async def pet_chat(request: Request, req: PetChatRequest):
     """
-    宠物拟人化聊天接口：以宠物口吻回复用户，并返回 Edge-TTS 语音 base64。
+    宠物拟人化聊天接口：以宠物口吻回复用户。
     支持长期记忆：从数据库读取历史对话注入上下文，并将本轮对话存入数据库。
     """
+    # 该功能不仅返回一句聊天文本，还会持续沉淀用户画像，服务后续领养判断。
     history = []
     observer_profile = {
         "user_traits": [],
@@ -816,9 +823,9 @@ async def pet_chat(request: Request, req: PetChatRequest):
     }
     response_text = "我刚刚有点紧张，不过我还是很想继续认识你。你愿意再和我说说你的生活节奏吗？"
     audio_base64 = None
-
     try:
         if req.user_id:
+            # 先读取既有对话与画像，保证“同一用户-同一宠物”聊天具有上下文连续性。
             with get_db() as conn:
                 from src.web.services.db_service import ensure_tables
                 ensure_tables(conn)
@@ -873,6 +880,7 @@ async def pet_chat(request: Request, req: PetChatRequest):
             response_text = "我刚刚有点紧张，不过还是想继续认识你。你愿意再和我说说你的照顾计划吗？"
 
     if req.user_id:
+        # 对话结束后把“用户发言 + 宠物回复 + 画像摘要”一起入库，形成长期记忆。
         try:
             with get_db() as conn:
                 from src.web.services.db_service import ensure_tables
@@ -916,6 +924,8 @@ async def pet_chat(request: Request, req: PetChatRequest):
 @router.post("/mutual-aid/tasks")
 async def create_mutual_aid_task(req: MutualAidTaskCreate, current_user: dict = Depends(get_current_user)):
     """发布互助任务"""
+    # 评审说明：
+    # 互助任务发布后写入 mutual_aid_tasks 表，并以 open 状态进入任务大厅。
     with get_db() as conn:
         from src.web.services.db_service import ensure_tables
         ensure_tables(conn)
@@ -952,6 +962,7 @@ async def list_mutual_aid_tasks(status: str = "open", limit: int = 20):
 @router.post("/mutual-aid/tasks/{task_id}/accept")
 async def accept_mutual_aid_task(task_id: int, req: MutualAidAcceptRequest, current_user: dict = Depends(get_current_user)):
     """接单"""
+    # 这里会同时更新任务状态和接单记录，保证“任务状态”和“订单状态”一致。
     with get_db() as conn:
         from src.web.services.db_service import ensure_tables
         ensure_tables(conn)
@@ -977,6 +988,7 @@ async def accept_mutual_aid_task(task_id: int, req: MutualAidAcceptRequest, curr
 @limiter.limit("10/minute")
 async def mutual_aid_match(request: Request, req: MutualAidMatchRequest, current_user: dict = Depends(get_current_user)):
     """AI 多智能体互助匹配推荐"""
+    # 前端输入自然语言需求后，此处调用 AI 服务生成互助方案说明文本。
     reply, trace_id = get_mutual_aid_match(req.query, current_user["id"])
     return {"reply": reply, "trace_id": trace_id}
 
@@ -984,6 +996,7 @@ async def mutual_aid_match(request: Request, req: MutualAidMatchRequest, current
 @router.post("/mutual-aid/tasks/{task_id}/complete")
 async def complete_mutual_aid_task(task_id: int, current_user: dict = Depends(get_current_user)):
     """完成任务：发布人或接单人均可标记完成"""
+    # 只有任务发布者或接单人可以完结任务，避免无关用户篡改任务状态。
     with get_db() as conn:
         from src.web.services.db_service import ensure_tables
         ensure_tables(conn)
@@ -995,7 +1008,8 @@ async def complete_mutual_aid_task(task_id: int, current_user: dict = Depends(ge
         if row["status"] not in ("accepted",):
             raise HTTPException(status_code=400, detail="只有已接单的任务才能标记完成")
         # 验证操作人是发布人或接单人
-        cursor.execute("SELECT helper_id FROM mutual_aid_orders WHERE task_id=? AND status='accepted'", (task_id,))
+        cursor.execute("SELECT helper_id FROM mutual_aid_orders WHERE task_id=? AND status='accepted'",
+                       (task_id,))
         order = cursor.fetchone()
         allowed = [row["user_id"]]
         if order:
@@ -1012,6 +1026,7 @@ async def complete_mutual_aid_task(task_id: int, current_user: dict = Depends(ge
 @router.get("/mutual-aid/tasks/mine")
 async def get_my_mutual_aid_tasks(current_user: dict = Depends(get_current_user)):
     """我的互助：我发布的任务 + 我接的单（含接单人信息）"""
+    # 该接口把“我发布的”和“我接的”两类数据整合返回，减少前端多次请求。
     with get_db() as conn:
         from src.web.services.db_service import ensure_tables
         ensure_tables(conn)
@@ -1047,6 +1062,7 @@ async def report_mutual_aid_task(
     current_user: dict = Depends(get_current_user)
 ):
     """举报互助任务"""
+    # 举报前先做“任务存在性”和“重复举报”校验，避免无效或刷举报数据。
     with get_db() as conn:
         from src.web.services.db_service import ensure_tables
         ensure_tables(conn)

@@ -58,6 +58,7 @@ def ensure_tables(conn: sqlite3.Connection):
         energy_level TEXT,
         description TEXT,
         image_url TEXT,
+        image_urls TEXT,
         adoption_preferences TEXT,
         tags TEXT DEFAULT '[]',
         lng REAL,
@@ -66,6 +67,10 @@ def ensure_tables(conn: sqlite3.Connection):
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
+    try:
+        cur.execute('ALTER TABLE pets ADD COLUMN image_urls TEXT')
+    except Exception:
+        pass
     try:
         cur.execute('ALTER TABLE pets ADD COLUMN adoption_preferences TEXT')
     except Exception:
@@ -434,6 +439,18 @@ def ensure_tables(conn: sqlite3.Connection):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_adoption_signal_weights_type_key ON adoption_signal_weights(signal_type, signal_key)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_credit_events_user_id ON credit_events(user_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_user_sanctions_user_id ON user_sanctions(user_id)")
+
+    # ── notifications ──────────────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,         -- system, moderation, credit
+        title TEXT,
+        content TEXT NOT NULL,
+        is_read INTEGER DEFAULT 0,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id)")
 
     # ── email_codes ────────────────────────────────────────────────────────
     cur.execute('''CREATE TABLE IF NOT EXISTS email_codes (

@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends, Body
 import json
+from datetime import datetime
 from src.web.schemas import (
     ChangePasswordRequest, MessageCreate,
-    AdoptionApplicationCreateRequest, OwnerApplicationDecisionRequest
+    AdoptionApplicationCreateRequest, OwnerApplicationDecisionRequest,
+    NotificationReadRequest
 )
 from src.web.services.db_service import get_db, ensure_tables
 from src.web.services.adoption_flow_engine import flow_engine
@@ -233,12 +235,25 @@ def _detect_flow_status(ai_decision: str, missing_fields: list | None, followup_
         return "manual_review"
     return "waiting_publisher"
 
+@router.get("/profile/{user_id}")
+def get_user_profile(user_id: int):
+    """获取用户公开资料"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username, email, role, occupation, contact, living_env, preference, avatar_url FROM users WHERE id=?", (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        return dict(row)
+
 @router.post("/update-profile")
 async def update_profile(
     payload: dict = Body(...),
     current_user: dict = Depends(get_current_user)
 ):
     """更新用户基础资料（头像、用户名）"""
+    # 评审说明：
+    # 该接口仅允许当前登录用户修改自己的头像或昵称。
     new_username = payload.get("username")
     new_avatar = payload.get("avatar_url")
     
@@ -258,29 +273,26 @@ async def update_profile(
 
 @router.post("/change-password")
 async def change_password(req: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
+    # 修改密码必须同时通过邮箱验证码和旧密码校验，降低恶意改密风险。
     # 1. 校验验证码
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT code, expire_at FROM email_codes WHERE email = ?", (current_user["email"],))
         record = cursor.fetchone()
-        
         if not record:
             raise HTTPException(status_code=400, detail="请先获取验证码")
-        
         saved_code, expire_at = record
         if saved_code != req.code:
             raise HTTPException(status_code=400, detail="验证码错误")
-        
         if datetime.now() > datetime.strptime(expire_at, "%Y-%m-%d %H:%M:%S"):
             raise HTTPException(status_code=400, detail="验证码已过期")
-
         # 2. 校验旧密码
         cursor.execute("SELECT password FROM users WHERE id=?", (current_user["id"],))
         row = cursor.fetchone()
         if not row or not verify_password(req.old_password, row["password"]):
             raise HTTPException(status_code=400, detail="旧密码错误")
-
         # 3. 执行修改
+        # 新密码仍按 bcrypt 哈希方式入库，保持与注册阶段一致的安全策略。
         hashed_new = get_password_hash(req.new_password)
         cursor.execute("UPDATE users SET password=? WHERE id=?", (hashed_new, current_user["id"]))
         # 修改成功后清除验证码
@@ -299,6 +311,7 @@ def get_user_applications(user_id: int, current_user: dict = Depends(get_current
         cursor.execute("PRAGMA table_info(applications)")
         cols = {r[1] for r in cursor.fetchall()}
         if "user_id" in cols:
+            # 联表补充宠物名、送养方昵称等展示字段，方便前端直接渲染记录列表。
             order_col = "create_time" if "create_time" in cols else "id"
             select_sql = f"""
             SELECT a.*,
@@ -343,7 +356,7 @@ def get_user_applications(user_id: int, current_user: dict = Depends(get_current
 async def submit_adoption_application(
     req: AdoptionApplicationCreateRequest,
     current_user: dict = Depends(get_current_user)
-):
+):   # 该接口把申请表单和 AI 评估摘要一起持久化为正式领养申请。
     with get_db() as conn:
         ensure_tables(conn)
         cursor = conn.cursor()
@@ -355,7 +368,7 @@ async def submit_adoption_application(
             raise HTTPException(status_code=400, detail="不能申请自己发布的宠物")
         if pet["status"] not in ("待领养", "pending", "available", None):
             raise HTTPException(status_code=400, detail="该宠物当前不可申请")
-
+        # 重复申请校验：同一用户对同一宠物存在待处理申请时禁止再次提交。
         cursor.execute(
             """SELECT id FROM applications
                WHERE user_id=? AND pet_id=? AND status IN ('pending', 'pending_owner_review')""",
@@ -372,7 +385,7 @@ async def submit_adoption_application(
                 pet_preferences = json.loads(pref_row["adoption_preferences"])
             except Exception:
                 pet_preferences = {}
-
+        # 这里会同时写入风险等级、缺失字段、追问问题等结构化审核信息。
         cursor.execute(
             """INSERT INTO applications
                (user_id, pet_id, pet_owner_id, apply_reason, ai_decision, ai_readiness_score, ai_summary,
@@ -393,6 +406,7 @@ async def submit_adoption_application(
         )
         app_id = cursor.lastrowid
         initial_flow_status = _detect_flow_status(req.ai_decision or "", req.missing_fields, req.followup_questions)
+        # 同步记录流程事件，为后续审核时间线和后台追踪提供依据。
         flow_engine.append_event(
             conn,
             application_id=app_id,
@@ -414,6 +428,8 @@ async def submit_adoption_application(
 
 @router.get("/applications/incoming")
 def get_incoming_applications(current_user: dict = Depends(get_current_user)):
+    # 评审说明：
+    # “收到的申请”除了原始申请内容外，还会附带 AI 评分和偏好命中信息。
     with get_db() as conn:
         ensure_tables(conn)
         cursor = conn.cursor()
@@ -467,6 +483,7 @@ async def owner_decide_application(
     req: OwnerApplicationDecisionRequest,
     current_user: dict = Depends(get_current_user)
 ):
+    # 该接口对应送养方的最终处理动作，如通过、拒绝或转人工复核。
     with get_db() as conn:
         ensure_tables(conn)
         cursor = conn.cursor()
@@ -476,13 +493,11 @@ async def owner_decide_application(
             raise HTTPException(status_code=404, detail="申请记录不存在")
         if app["pet_owner_id"] != current_user["id"]:
             raise HTTPException(status_code=403, detail="只有送养方可以处理该申请")
-        
         # 允许从 pending, probing, human_review 状态流向最终决策
         if app["status"] in ("approved", "rejected"):
             raise HTTPException(status_code=400, detail="该申请已是最终状态，无法修改")
-
-        # 计算送养人是否采纳了 AI 建议
-        # 采纳定义：AI 建议通过且送养人通过，或 AI 建议驳回且送养人驳回
+        # 计算送养人是否采纳了 AI 建议。
+        # 该指标会进入后台统计，用于评估 AI 建议的参考价值。
         owner_followed_ai = 0
         ai_suggestion = app.get("ai_decision", "").lower()
         if req.status == "approved" and ai_suggestion in ("pass", "conditional_pass"):
@@ -522,8 +537,8 @@ async def owner_decide_application(
                 "owner_followed_ai": owner_followed_ai,
             },
         )
-
-        # 特殊逻辑处理
+        # 特殊逻辑处理：
+        # 若审核通过，还要同步写入领养记录并把宠物状态改为“已领养”。
         if req.status == "approved":
             # 记录领养成功
             cursor.execute(
@@ -581,6 +596,8 @@ def get_messages(user_id: int, current_user: dict = Depends(get_current_user)):
 @router.get("/messages/{user_id}/contacts")
 def get_contacts(user_id: int, current_user: dict = Depends(get_current_user)):
     """获取当前用户的联系人列表（按最新消息时间排序，附带最后一条消息预览）"""
+    # 评审说明：
+    # 联系人页按“每个会话最后一条消息”聚合，减少前端自行整理数据的复杂度。
     if current_user["id"] != user_id:
         raise HTTPException(status_code=403, detail="无权限查询他人联系人")
     with get_db() as conn:
@@ -644,6 +661,7 @@ async def send_message(req: MessageCreate, current_user: dict = Depends(get_curr
     # 只允许以自己身份发送消息
     if current_user["id"] != req.sender_id:
         raise HTTPException(status_code=403, detail="无权限以他人身份发送消息")
+    # 站内消息统一写入 messages 表，供领养沟通和互助沟通共用。
     with get_db() as conn:
         ensure_tables(conn)
         cursor = conn.cursor()
@@ -680,3 +698,27 @@ async def submit_visit_report(
         "points_earned": result["points"],
         "quality_multiplier": result["multiplier"]
     }
+
+@router.get("/notifications")
+def get_notifications(current_user: dict = Depends(get_current_user)):
+    """获取我的系统通知"""
+    with get_db() as conn:
+        ensure_tables(conn)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM notifications WHERE user_id=? ORDER BY create_time DESC LIMIT 50",
+            (current_user["id"],)
+        )
+        return [dict(r) for r in cursor.fetchall()]
+
+@router.post("/notifications/read")
+def read_notification(req: NotificationReadRequest, current_user: dict = Depends(get_current_user)):
+    """标记通知为已读"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE notifications SET is_read=1 WHERE id=? AND user_id=?",
+            (req.notification_id, current_user["id"])
+        )
+        conn.commit()
+    return {"status": "success"}

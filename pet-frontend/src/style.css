@@ -19,6 +19,11 @@
   --border-color: rgba(255, 255, 255, 0.05);
 }
 
+/* 统一缩减过大的标题 */
+h1 { @apply text-3xl md:text-4xl; }
+h2 { @apply text-2xl md:text-3xl; }
+h3 { @apply text-xl md:text-2xl; }
+
 body {
   @apply antialiased transition-colors duration-300;
   background-color: var(--bg-primary);

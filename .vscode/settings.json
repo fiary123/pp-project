@@ -1,5 +1,7 @@
 {
     "python-envs.defaultEnvManager": "ms-python.python:conda",
     "python-envs.defaultPackageManager": "ms-python.python:conda",
-    "css.lint.unknownAtRules": "ignore"
+    "css.lint.unknownAtRules": "ignore",
+    "github.copilot.chat.exploreAgent.model": "Claude Haiku 4.5 (copilot)",
+    "github.copilot.chat.githubMcpServer.enabled": true
 }

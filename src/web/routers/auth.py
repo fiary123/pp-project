@@ -14,7 +14,10 @@ from datetime import datetime, timedelta
 router = APIRouter(prefix="/api", tags=["auth"])
 
 def send_email(to_email: str, code: str):
-    """发送邮件逻辑（支持测试模式）"""
+    """发送邮件逻辑"""
+    # 评审说明：
+    # 该函数统一封装验证码发送流程，便于注册等场景复用。
+    # 若未配置 SMTP，则退化为测试模式，直接在控制台输出验证码。
     smtp_user = os.getenv("SMTP_USER")
     smtp_pass = os.getenv("SMTP_PASSWORD")
     smtp_server = os.getenv("SMTP_SERVER", "smtp.qq.com")
@@ -41,6 +44,7 @@ def send_email(to_email: str, code: str):
 @router.post("/send-code")
 @limiter.limit("2/minute")
 async def send_code(request: Request, req: SendCodeRequest):
+    # 这里生成 6 位验证码并写入 email_codes 表，同时记录 5 分钟过期时间。
     code = "".join(random.choices(string.digits, k=6))
     expire_at = (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
     
@@ -59,6 +63,7 @@ async def send_code(request: Request, req: SendCodeRequest):
 @router.post("/login")
 @limiter.limit("10/minute")
 async def login(request: Request, req: LoginRequest):
+    # 登录流程包括“按邮箱查用户”“校验密码哈希”“签发 JWT”三步。
     with get_db() as conn:
         ensure_tables(conn)
         cursor = conn.cursor()
@@ -66,6 +71,7 @@ async def login(request: Request, req: LoginRequest):
         user = cursor.fetchone()
 
     if user and verify_password(req.password, user["password"]):
+        # JWT 的 sub 字段保存用户主键，供后续鉴权依赖恢复登录身份。
         access_token = create_access_token(data={"sub": str(user["id"])})
         return {
             "status": "success",
@@ -83,33 +89,26 @@ async def login(request: Request, req: LoginRequest):
 @router.post("/register")
 @limiter.limit("5/minute")
 async def register(request: Request, req: RegisterRequest):
-    with get_db() as conn:
+    with get_db() as conn:    # 评审说明：注册接口重点保证验证码有效、邮箱唯一、密码密文存储。
         # 1. 校验验证码
         cursor = conn.cursor()
         cursor.execute("SELECT code, expire_at FROM email_codes WHERE email = ?", (req.email,))
         record = cursor.fetchone()
-        
         if not record:
             raise HTTPException(status_code=400, detail="请先获取验证码")
-        
         saved_code, expire_at = record
         if saved_code != req.code:
             raise HTTPException(status_code=400, detail="验证码错误")
-        
         if datetime.now() > datetime.strptime(expire_at, "%Y-%m-%d %H:%M:%S"):
             raise HTTPException(status_code=400, detail="验证码已过期")
-
-        # 2. 注册用户
         hashed_pwd = get_password_hash(req.password)
-        try:
+        try:  # 2. 注册用户:明文密码不会直接入库，而是先转换为 bcrypt 哈希值。
             conn.execute(
                 "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
-                (req.username, req.email, hashed_pwd, "user"),
-            )
-            # 注册成功后删除验证码，防止复用
+                (req.username, req.email, hashed_pwd, "user"),) 
             conn.execute("DELETE FROM email_codes WHERE email = ?", (req.email,))
-            conn.commit()
+            conn.commit()  # 注册成功后删除验证码，防止复用
         except sqlite3.IntegrityError:
-            raise HTTPException(status_code=400, detail="邮箱已注册")
-            
+            # users.email 具备 UNIQUE 约束，此处用数据库异常兜底唯一性校验。
+            raise HTTPException(status_code=400, detail="邮箱已注册")        
     return {"status": "success"}

@@ -560,18 +560,53 @@ const reactivateUser = async (userId: number) => {
     userActionLoading.value[userId] = false
   }
 }
+const takedownPost = async () => {
+  const postId = window.prompt('请输入要下架的帖子 ID')
+  if (!postId) return
+  const reason = window.prompt('请输入下架理由', '违反社区规定')
+  if (!reason) return
+  
+  isLoading.value = true
+  try {
+    await axios.post(`/api/admin/posts/${postId}/takedown`, { 
+      reason, 
+      admin_id: authStore.user?.id 
+    })
+    window.alert('帖子已成功下架，反馈理由已同步发送给作者。')
+    if (activeMainTab.value === 'logs') await fetchLogs()
+  } catch (err: any) {
+    window.alert('下架失败：' + (err.response?.data?.detail || 'ID 可能不存在或权限不足'))
+  } finally {
+    isLoading.value = false
+  }
+}
+
 const cancelTask = async (taskId: number) => {
   const reason = window.prompt('请输入下架原因', '违规内容')
-  if (reason == null) return
+  if (!reason) return
   taskActionLoading.value[`task-${taskId}`] = true
   try {
-    await axios.post(`/api/admin/mutual-aid/tasks/${taskId}/cancel`, { reason })
+    await axios.post(`/api/admin/mutual-aid/tasks/${taskId}/takedown`, { 
+      reason,
+      admin_id: authStore.user?.id
+    })
+    window.alert('互助任务已成功下架，反馈理由已通知发布者。')
     await fetchMutualAid()
+  } catch (err: any) {
+    window.alert('下架失败：' + (err.response?.data?.detail || '未知错误'))
   } finally {
     taskActionLoading.value[`task-${taskId}`] = false
   }
 }
+
 const resolveReport = async (reportId: number, action: 'cancel' | 'dismiss') => {
+  if (action === 'cancel') {
+    const report = mutualAidReports.value.find(r => r.id === reportId)
+    if (report) {
+      await cancelTask(report.task_id)
+      return
+    }
+  }
   const note = window.prompt(action === 'cancel' ? '请输入下架处理说明' : '请输入驳回说明', '')
   if (note == null) return
   reportActionLoading.value[reportId] = true
@@ -933,30 +968,30 @@ onUnmounted(() => {
       <div v-else-if="activeMainTab === 'logs'" class="space-y-6">
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <h2 class="dash-section-title text-2xl font-black flex items-center gap-3"><div class="p-2 bg-orange-500/10 text-orange-500 rounded-lg"><ScrollText :size="20" /></div>内容治理日志</h2>
-          <p class="text-[10px] md:text-xs text-gray-500 uppercase tracking-widest font-black">审核处置日志与 AI Trace 双视图</p>
+          <p class="dash-card-label text-[10px] md:text-xs uppercase tracking-widest font-black">审核处置日志与 AI Trace 双视图</p>
         </div>
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
           <BaseCard class="!p-6 space-y-4">
             <div class="dash-card-header flex items-center gap-2 font-black"><ShieldCheck :size="18" class="text-rose-400" /> 内容处置日志</div>
             <div v-if="moderationLogs.length" class="space-y-4 max-h-[34rem] overflow-y-auto pr-1">
-              <div v-for="log in moderationLogs" :key="log.id" class="rounded-2xl bg-white/5 border border-white/10 p-4 space-y-2">
-                <div class="flex items-center justify-between gap-3"><span class="dash-text-strong font-black">目标 ID #{{ log.target_id }}</span><div class="flex items-center gap-2"><span v-if="log.is_demo" class="px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">演示</span><span class="text-xs text-gray-500">{{ formatDateTime(log.delete_time) }}</span></div></div>
-                <p class="text-sm text-gray-500 leading-7">{{ log.reason }}</p>
-                <p class="text-xs text-gray-400 uppercase tracking-widest">管理员：{{ log.admin_id || '未知' }}</p>
+              <div v-for="log in moderationLogs" :key="log.id" class="dash-log-card rounded-2xl p-4 space-y-2">
+                <div class="flex items-center justify-between gap-3"><span class="dash-text-strong font-black">目标 ID #{{ log.target_id }}</span><div class="flex items-center gap-2"><span v-if="log.is_demo" class="px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">演示</span><span class="dash-card-label text-xs">{{ formatDateTime(log.delete_time) }}</span></div></div>
+                <p class="dash-log-desc text-sm leading-7">{{ log.reason }}</p>
+                <p class="dash-log-meta text-xs uppercase tracking-widest">管理员：{{ log.admin_id || '未知' }}</p>
               </div>
             </div>
-            <div v-else class="rounded-2xl bg-white/5 border border-white/10 p-8 text-center text-gray-500">当前没有内容治理日志。</div>
+            <div v-else class="dash-log-empty rounded-2xl p-8 text-center">当前没有内容治理日志。</div>
           </BaseCard>
           <BaseCard class="!p-6 space-y-4">
             <div class="dash-card-header flex items-center gap-2 font-black"><Sparkles :size="18" class="text-cyan-400" /> AI 执行轨迹</div>
             <div v-if="aiTraces.length" class="space-y-4 max-h-[34rem] overflow-y-auto pr-1">
-              <div v-for="trace in aiTraces" :key="trace.id" class="rounded-2xl bg-white/5 border border-white/10 p-4 space-y-2">
-                <div class="flex items-center justify-between gap-3"><span class="dash-text-strong font-black">{{ shortTrace(trace.trace_id) }}</span><div class="flex items-center gap-2"><span v-if="trace.is_demo" class="px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">演示</span><span class="text-xs text-gray-500">{{ formatDateTime(trace.create_time) }}</span></div></div>
-                <p class="text-xs text-gray-400 uppercase tracking-widest">接口：{{ trace.endpoint || '未记录' }}</p>
-                <p class="text-sm text-gray-500 leading-7 line-clamp-3">{{ trace.message || trace.summary || '该记录未携带额外说明。' }}</p>
+              <div v-for="trace in aiTraces" :key="trace.id" class="dash-log-card rounded-2xl p-4 space-y-2">
+                <div class="flex items-center justify-between gap-3"><span class="dash-text-strong font-black">{{ shortTrace(trace.trace_id) }}</span><div class="flex items-center gap-2"><span v-if="trace.is_demo" class="px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">演示</span><span class="dash-card-label text-xs">{{ formatDateTime(trace.create_time) }}</span></div></div>
+                <p class="dash-log-meta text-xs uppercase tracking-widest">接口：{{ trace.endpoint || '未记录' }}</p>
+                <p class="dash-log-desc text-sm leading-7 line-clamp-3">{{ trace.message || trace.summary || '该记录未携带额外说明。' }}</p>
               </div>
             </div>
-            <div v-else class="rounded-2xl bg-white/5 border border-white/10 p-8 text-center text-gray-500">当前没有 AI 轨迹日志。</div>
+            <div v-else class="dash-log-empty rounded-2xl p-8 text-center">当前没有 AI 轨迹日志。</div>
           </BaseCard>
         </div>
       </div>
@@ -1066,53 +1101,72 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.dash-section-title, .dash-card-header, .dash-text-strong { color: #ffffff; }
-.dash-card-label { color: #94a3b8; }
+/* 默认模式（白天模式）- 使用深色文字 */
+.dash-section-title, .dash-card-header, .dash-text-strong { color: #0f172a; }
+.dash-card-label { color: #475569; }
+.dash-log-desc { color: #334155; }
+.dash-log-meta { color: #64748b; }
+
+.dash-log-card {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+.dash-log-empty {
+  background-color: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+}
+
 .overview-panel-head {
   padding: 0.95rem 1rem;
   border-radius: 1.25rem;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(135deg, #fff7ed 0%, #ffffff 100%);
+  border: 1px solid #fed7aa;
+  box-shadow: 0 8px 24px rgba(249, 115, 22, 0.08);
 }
 .overview-panel-body {
   padding: 1rem;
   border-radius: 1.5rem;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-:global(html:not(.dark)) .dashboard-view { color: #0f172a; }
-:global(html:not(.dark)) .dash-section-title,
-:global(html:not(.dark)) .dash-card-header,
-:global(html:not(.dark)) .dash-text-strong { color: #111827 !important; }
-:global(html:not(.dark)) .dash-card-label { color: #475569 !important; }
-:global(html:not(.dark)) .overview-panel-head {
-  background: linear-gradient(135deg, #fff7ed 0%, #ffffff 100%);
-  border-color: #fed7aa;
-  box-shadow: 0 8px 24px rgba(249, 115, 22, 0.08);
-}
-:global(html:not(.dark)) .overview-panel-body {
   background: #f8fafc;
-  border-color: #dbe4f0;
+  border: 1px solid #dbe4f0;
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.08);
 }
-:global(html:not(.dark)) .dashboard-view [class~="text-white"] { color: #111827 !important; }
-:global(html:not(.dark)) .dashboard-view [class~="text-gray-300"] { color: #334155 !important; }
-:global(html:not(.dark)) .dashboard-view [class~="text-gray-400"] { color: #334155 !important; }
-:global(html:not(.dark)) .dashboard-view [class~="text-gray-500"] { color: #475569 !important; }
-:global(html:not(.dark)) .dashboard-view [class~="bg-white/5"] {
-  background-color: #f8fafc !important;
-  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.08);
+
+/* 深色模式（Dark Mode）- 只有在 .dark 类存在时才切换为白色文字 */
+:global(.dark) .dash-section-title, 
+:global(.dark) .dash-card-header, 
+:global(.dark) .dash-text-strong { color: #ffffff !important; }
+
+:global(.dark) .dash-card-label { color: #94a3b8 !important; }
+
+:global(.dark) .dash-log-card {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
-:global(html:not(.dark)) .dashboard-view [class~="bg-white/10"] { background-color: #e2e8f0 !important; }
-:global(html:not(.dark)) .dashboard-view [class~="border-white/5"] { border-color: #dbe4f0 !important; }
-:global(html:not(.dark)) .dashboard-view [class~="border-white/10"] { border-color: #cbd5e1 !important; }
-:global(html:not(.dark)) .dashboard-view .border-b.border-white\/5 { border-bottom-color: #dbe4f0 !important; }
-:global(html:not(.dark)) .dashboard-view button[class*="text-gray-500"] { color: #475569 !important; }
-:global(html:not(.dark)) .dashboard-view thead[class*="bg-white/5"] { background-color: #eef2f7 !important; }
-:global(html:not(.dark)) .dashboard-view tbody tr:hover { background-color: rgba(241, 245, 249, 0.88); }
+:global(.dark) .dash-log-desc { color: #94a3b8 !important; }
+:global(.dark) .dash-log-meta { color: #64748b !important; }
+:global(.dark) .dash-log-empty {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #64748b !important;
+}
+
+:global(.dark) .overview-panel-head {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: none !important;
+}
+:global(.dark) .overview-panel-body {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  box-shadow: none !important;
+}
+
+/* 额外的兜底：处理全局选择器 */
 :global(html:not(.dark)) .dashboard-view input,
 :global(html:not(.dark)) .dashboard-view textarea,
-:global(html:not(.dark)) .dashboard-view pre { color: #0f172a !important; }
-:global(html:not(.dark)) .dashboard-view input::placeholder,
-:global(html:not(.dark)) .dashboard-view textarea::placeholder { color: #64748b !important; }
+:global(html:not(.dark)) .dashboard-view pre {
+  color: #0f172a !important;
+  background-color: #f8fafc !important;
+}
 </style>

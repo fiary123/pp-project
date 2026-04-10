@@ -71,6 +71,14 @@ useThemeStore()
 .app-root {
   background-color: var(--bg-main);
   color: var(--text-primary);
+  font-size: 15px; /* 微调全局基础字体，防止过大 */
+}
+
+/* 智能内容缩放：针对超大屏幕微调比例 */
+@media (min-width: 1536px) {
+  .app-root {
+    font-size: 16px;
+  }
 }
 
 /* 丝滑的全局色彩过渡 */

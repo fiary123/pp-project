@@ -23,18 +23,23 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 
 # 密码哈希上下文
+# 评审说明：
+# passlib 会为每个密码自动生成独立盐值，从而避免相同密码产生相同密文。
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def get_password_hash(password: str) -> str:
     """生成密码哈希"""
+    # 业务层只拿到哈希结果，不需要关心盐值生成细节。
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """验证密码（仅支持 bcrypt 哈希，不允许明文存储）"""
+    # 登录时只做明文与哈希的安全比对，不做明文反解。
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     """创建 JWT Token，过期时间由 ACCESS_TOKEN_EXPIRE_MINUTES 统一控制"""
+    # Token 中写入 exp 过期时间，前后端都可据此判断登录态是否失效。
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})

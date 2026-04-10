@@ -30,25 +30,56 @@ from src.web.services.adoption_contract import (
 )
 
 # ==========================================
-# 1. 环境与模型配置
+# 1. 环境与模型配置 (混合模型分流架构)
 # ==========================================
 
 from dotenv import load_dotenv
 load_dotenv()
 
-_DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
-_DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+# --- 1.1 厂商凭证分离 ---
+# DeepSeek 凭据
+DS_KEY = os.getenv("DEEPSEEK_API_KEY")
+DS_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
-crewai_llm = LLM(
-    model="openai/deepseek-chat",
-    api_key=_DEEPSEEK_API_KEY,
-    base_url=_DEEPSEEK_BASE_URL,
-    temperature=0.3
-)
-llm = crewai_llm
+# Qwen (阿里云) 凭据
+QWEN_KEY = os.getenv("QWEN_API_KEY")
+QWEN_URL = os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+
+# --- 1.2 功能分流逻辑 ---
+def create_llm_instance(feature_name: str):
+    """根据功能名创建对应的 LLM 实例（DeepSeek 或 Qwen）"""
+    # 获取配置，例如：FEATURE_ADOPTION_PROVIDER=DEEPSEEK
+    provider = os.getenv(f"FEATURE_{feature_name.upper()}_PROVIDER", "DEEPSEEK")
+    model = os.getenv(f"FEATURE_{feature_name.upper()}_MODEL")
+    
+    if provider.upper() == "QWEN":
+        return LLM(
+            model=model or "qwen-plus",
+            api_key=QWEN_KEY,
+            base_url=QWEN_URL,
+            temperature=0.3
+        )
+    else:
+        # 默认使用 DeepSeek
+        return LLM(
+            model=model or "openai/deepseek-chat",
+            api_key=DS_KEY,
+            base_url=DS_URL,
+            temperature=0.3
+        )
+
+# 1.3 为不同功能初始化对应的 LLM
+# 推荐：评估用 DeepSeek (强逻辑)，聊天用 Qwen (强文学性)
+adoption_llm = create_llm_instance("ADOPTION") 
+chat_llm     = create_llm_instance("CHAT")
+common_llm   = create_llm_instance("COMMON")
+
+# 保持兼容性别名
+llm = common_llm
+crewai_llm = common_llm
 
 # ==========================================
-# 2. 辅助工具函数
+# 2. 辅助工具函数 (略)
 # ==========================================
 
 def _extract_json_payload(raw_text: str) -> Dict[str, Any]:
@@ -228,7 +259,7 @@ def _run_llm_knowledge_fallback(user_query: str, retrieval_hint: str = "") -> st
         role='宠物百科兜底顾问',
         goal='在知识库未命中时，基于通用宠物知识给出谨慎、友好的补充回答。',
         backstory='你擅长在缺少知识库命中时提供清晰的常识型解释，并主动提示不确定性与风险边界。',
-        llm=llm,
+        llm=common_llm,
         verbose=True,
         allow_delegation=False,
     )
@@ -269,7 +300,7 @@ async def analyze_pet_interview(user_msg: str, pet_name: str, pet_species: str, 
         role="领养访谈观察员",
         goal="从自然对话中提取领养人的真实画像，并设计下一轮测试点。",
         backstory="你是一名数字分身背后的观察员，识别责任感、稳定性等信号。",
-        llm=crewai_llm,
+        llm=common_llm,
         verbose=True,
         allow_delegation=False,
     )
@@ -295,7 +326,7 @@ async def analyze_pet_interview(user_msg: str, pet_name: str, pet_species: str, 
     }
 
 async def run_pet_chat(user_msg: str, pet_name: str, pet_species: str, pet_desc: str, history: list = None, observer_profile: Optional[Dict[str, Any]] = None):
-    persona_agent = get_pet_persona_agent(crewai_llm, pet_name, pet_species, pet_desc)
+    persona_agent = get_pet_persona_agent(chat_llm, pet_name, pet_species, pet_desc)
     history_context = "\n".join([f"{('主人' if h['role'] == 'user' else pet_name)}：{h['content']}" for h in history[-6:]]) if history else ""
     observer_context = f"画像参考：{json.dumps(observer_profile or {}, ensure_ascii=False)}\n" if observer_profile else ""
     task = Task(description=f'{observer_context}{history_context}\n用户说："{user_msg}"。请回复并自然带出一句轻量追问。', expected_output='一段简短回复。', agent=persona_agent)
@@ -318,7 +349,7 @@ async def run_pet_chat(user_msg: str, pet_name: str, pet_species: str, pet_desc:
         return response_text, None
 
 def run_pet_crew(user_message: str) -> str:
-    p, a = get_pet_expert_agent(llm), get_audit_expert_agent(llm)
+    p, a = get_pet_expert_agent(common_llm), get_audit_expert_agent(common_llm)
     t1 = Task(description=f'查询宠物需求："{user_message}"。', expected_output='列表。', agent=p)
     t2 = Task(description='进行匹配分析。', expected_output='报告。', agent=a, context=[t1])
     return str(Crew(agents=[p, a], tasks=[t1, t2], process=Process.sequential).kickoff())
@@ -371,8 +402,8 @@ def run_adoption_assessment(
             "final_summary": f"## 拦截\n原因：{prescreen['prescreen_summary']}",
         }
     
-    e_agent, p_agent, a_agent, c_agent, ch_agent = get_encyclopedia_agent(llm), get_adoption_profiler_agent(llm), get_audit_expert_agent(llm), get_consensus_coordinator_agent(llm), get_cohabitation_risk_agent(llm)
-    h_expert = Agent(role='历史复盘专家', goal='召回相似案例。', backstory='管理长期记忆。', llm=llm, tools=[recall_adoption_experience], verbose=True, allow_delegation=False)
+    e_agent, p_agent, a_agent, c_agent, ch_agent = get_encyclopedia_agent(adoption_llm), get_adoption_profiler_agent(adoption_llm), get_audit_expert_agent(adoption_llm), get_consensus_coordinator_agent(adoption_llm), get_cohabitation_risk_agent(adoption_llm)
+    h_expert = Agent(role='历史复盘专家', goal='召回相似案例。', backstory='管理长期记忆。', llm=adoption_llm, tools=[recall_adoption_experience], verbose=True, allow_delegation=False)
     
     t_recall = Task(description=f'检索画像相似反馈。可参考记忆上下文：{memory_context}', expected_output='复盘报告。', agent=h_expert, async_execution=True)
     t_ency = Task(description=f'提取【{target_species}】基准。可参考知识上下文：{knowledge_context}', expected_output='JSON。', agent=e_agent, async_execution=True)
@@ -392,7 +423,7 @@ def run_adoption_assessment(
     )
     
     try:
-        res = str(Crew(agents=[h_expert, e_agent, p_agent, a_agent, c_agent, ch_agent], tasks=[t_recall, t_ency, t_cohab, t_prop, t_audit, t_cons], process=Process.hierarchical, manager_llm=llm, memory=True).kickoff())
+        res = str(Crew(agents=[h_expert, e_agent, p_agent, a_agent, c_agent, ch_agent], tasks=[t_recall, t_ency, t_cohab, t_prop, t_audit, t_cons], process=Process.hierarchical, manager_llm=adoption_llm, memory=True).kickoff())
         latency = round(time.time() - start_time, 2)
     except: res, latency = "评估中断", 0
     
@@ -403,8 +434,8 @@ def run_adoption_assessment(
 # ─────────────────────────────────────────────────────────────
 
 def run_knowledge_expert(user_query: str) -> str:
-    r = Agent(role='知识检索员', goal='优先从宠物知识库中检索相关内容。', backstory='擅长提炼用户问题中的核心关键词并检索知识库。', llm=llm, tools=[pet_health_knowledge_search], verbose=True, allow_delegation=False)
-    a = Agent(role='百科顾问', goal='基于检索结果组织清晰回答。', backstory='资深宠物养护顾问，能够区分知识库命中与模型常识补充。', llm=llm, tools=[], verbose=True, allow_delegation=False)
+    r = Agent(role='知识检索员', goal='优先从宠物知识库中检索相关内容。', backstory='擅长提炼用户问题中的核心关键词并检索知识库。', llm=common_llm, tools=[pet_health_knowledge_search], verbose=True, allow_delegation=False)
+    a = Agent(role='百科顾问', goal='基于检索结果组织清晰回答。', backstory='资深宠物养护顾问，能够区分知识库命中与模型常识补充。', llm=common_llm, tools=[], verbose=True, allow_delegation=False)
     t1 = Task(
         description=f'针对用户问题“{user_query}”调用 pet_health_knowledge_search 检索相关内容；若没有命中也要如实返回。',
         expected_output='检索摘要。',
@@ -444,9 +475,9 @@ def _parse_plan_from_tool_output(tool_output: str, profile: dict) -> dict:
     return plan
 
 def run_nutrition_expert(profile: dict) -> dict:
-    c = get_nutrition_expert_agent(llm)
-    p = get_nutrition_planner_agent(llm)
-    o = get_nutrition_optimizer_agent(llm)
+    c = get_nutrition_expert_agent(common_llm)
+    p = get_nutrition_planner_agent(common_llm)
+    o = get_nutrition_optimizer_agent(common_llm)
     t1 = Task(description='计算。', expected_output='数值。', agent=c)
     t2 = Task(description='规划。', expected_output='Markdown。', agent=p, context=[t1])
     t3 = Task(description='评审。', expected_output='报告。', agent=o, context=[t2])
@@ -454,13 +485,13 @@ def run_nutrition_expert(profile: dict) -> dict:
     return {'plan': _parse_plan_from_tool_output(str(res), profile), 'explanation_markdown': str(res)}
 
 def run_nutrition_replan(old_plan: dict, feedback: dict, species: str, history_context: str = '') -> str:
-    p, o = get_nutrition_planner_agent(llm), get_nutrition_optimizer_agent(llm)
+    p, o = get_nutrition_planner_agent(common_llm), get_nutrition_optimizer_agent(common_llm)
     t1 = Task(description='再规划。', expected_output='方案。', agent=p)
     t2 = Task(description='评审反馈。', expected_output='报告。', agent=o, context=[t1])
     return str(Crew(agents=[p, o], tasks=[t1, t2]).kickoff())
 
 def run_match_followup(user_query: str) -> list:
-    n = Agent(role='需求分析师', goal='生成追问。', backstory='分析需求。', llm=llm, tools=[generate_followup_questions], verbose=True, allow_delegation=False)
+    n = Agent(role='需求分析师', goal='生成追问。', backstory='分析需求。', llm=common_llm, tools=[generate_followup_questions], verbose=True, allow_delegation=False)
     task = Task(description=f'分析需求："{user_query}"。', expected_output='JSON追问。', agent=n)
     try:
         raw = str(Crew(agents=[n], tasks=[task]).kickoff())
@@ -468,8 +499,8 @@ def run_match_followup(user_query: str) -> list:
     except: return [{"key": "activity", "question": "活泼还是安静？", "options": ["活泼", "安静"]}]
 
 def run_smart_match(user_query: str, pet_list: list, followup_answers: dict | None = None) -> list:
-    s = Agent(role='评分员', goal='调用工具。', backstory='数据专员。', llm=llm, tools=[score_pet_match], verbose=True, allow_delegation=False)
-    a = Agent(role='顾问', goal='生成理由。', backstory='资深顾问。', llm=llm, tools=[], verbose=True, allow_delegation=False)
+    s = Agent(role='评分员', goal='调用工具。', backstory='数据专员。', llm=common_llm, tools=[score_pet_match], verbose=True, allow_delegation=False)
+    a = Agent(role='顾问', goal='生成理由。', backstory='资深顾问。', llm=common_llm, tools=[], verbose=True, allow_delegation=False)
     t1 = Task(description='评分。', expected_output='JSON。', agent=s)
     t2 = Task(description='理由。', expected_output='推荐。', agent=a, context=[t1])
     try:
@@ -478,7 +509,7 @@ def run_smart_match(user_query: str, pet_list: list, followup_answers: dict | No
     except: return [{"id": 1, "fit_score": 80, "reason": "推荐"}]
 
 def run_mutual_aid_match(user_query: str) -> str:
-    a, m = Agent(role='解析员', goal='检索。', backstory='分析员。', llm=llm, tools=[search_mutual_aid_tasks], verbose=True, allow_delegation=False), Agent(role='专家', goal='生成。', backstory='推荐专家。', llm=llm, tools=[], verbose=True, allow_delegation=False)
+    a, m = Agent(role='解析员', goal='检索。', backstory='分析员。', llm=common_llm, tools=[search_mutual_aid_tasks], verbose=True, allow_delegation=False), Agent(role='专家', goal='生成。', backstory='推荐专家。', llm=common_llm, tools=[], verbose=True, allow_delegation=False)
     t1 = Task(description=f'解析："{user_query}"。', expected_output='摘要。', agent=a)
     t2 = Task(description='生成报告。', expected_output='Markdown。', agent=m, context=[t1])
     return str(Crew(agents=[a, m], tasks=[t1, t2]).kickoff())

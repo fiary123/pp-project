@@ -55,6 +55,98 @@ def _ensure_demo_posts(cursor):
             "adopt_reason": "小区救助后暂时安置，现希望找到长期稳定的家庭。",
             "location": "成都市高新区",
         },
+        # 新增咨询类型帖子
+        {
+            "title": "咨询：兔子可以吃胡萝卜叶子吗？",
+            "content": "各位兔子家长好！我家兔子很喜欢吃胡萝卜，但是我听说叶子部分可能有问题。胡萝卜叶子可以喂兔子吗？需要注意什么？有没有推荐的兔子蔬菜清单？谢谢大家分享经验！",
+            "image_url": "https://images.unsplash.com/photo-1583337130417-3346a1be7dee?auto=format&fit=crop&w=1200&q=80",
+            "type": "consultation",
+            "likes": 8,
+            "user_id": individual["id"],
+        },
+        {
+            "title": "鸟类饲养咨询：鹦鹉需要什么营养？",
+            "content": "最近想养一只鹦鹉，但对鸟类营养不太了解。鹦鹉每天需要吃什么？有没有推荐的鸟粮品牌？除了鸟粮还需要补充什么维生素或矿物质吗？新手养鸟要注意哪些坑？",
+            "image_url": "https://images.unsplash.com/photo-1444464666168-49d633b86797?auto=format&fit=crop&w=1200&q=80",
+            "type": "consultation",
+            "likes": 15,
+            "user_id": individual["id"],
+        },
+        # 新增求助类型帖子
+        {
+            "title": "【紧急求助】我家猫咪跑出去找不到啦！",
+            "content": "求助！今天下午我家猫咪从阳台跑出去了，到现在已经6个小时了还没找到。猫咪是黑白花的，脖子上有铃铛。已经找遍了小区和周围的巷子，但还是没消息。各位有经验的家长，猫咪跑出去一般会去哪里？有什么找猫的方法吗？现在天黑了真的好担心...",
+            "image_url": "https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=1200&q=80",
+            "type": "help",
+            "likes": 22,
+            "user_id": individual["id"],
+        },
+        {
+            "title": "求助：仓鼠突然不爱动了，是生病了吗？",
+            "content": "我家仓鼠今天早上开始就不太对劲，一直蜷缩在角落不爱动，也不吃东西。平时很活泼的，现在看起来很虚弱。各位仓鼠家长遇到过这种情况吗？需要带去看兽医吗？还是在家观察一下？好担心它...",
+            "image_url": "https://images.unsplash.com/photo-1425082661705-1834bfd09dca?auto=format&fit=crop&w=1200&q=80",
+            "type": "help",
+            "likes": 9,
+            "user_id": individual["id"],
+        },
+        # 新增晒宠物类型帖子（不局限于猫狗）
+        {
+            "title": "晒晒我家的金鱼宝宝们！",
+            "content": "今天给鱼缸换水的时候拍了几张照片，我家的金鱼们超级可爱！有红色的锦鲤和黑色的草金鱼，每天看它们游来游去心情都变好了。养鱼真的是一种很治愈的爱好，大家有养鱼的经验吗？",
+            "image_url": "https://images.unsplash.com/photo-1520637836862-4d197d17c1a8?auto=format&fit=crop&w=1200&q=80",
+            "type": "show_pet",
+            "likes": 31,
+            "user_id": individual["id"],
+        },
+        {
+            "title": "我的小乌龟今天学会了爬坡！",
+            "content": "哈哈哈，今天发现我家的小乌龟居然能爬上那个小斜坡了！虽然动作很慢，但每次成功后它都会停下来休息一下，看起来超级有成就感。小乌龟真的太可爱了，每天观察它们的成长都让我觉得生活充满了惊喜。",
+            "image_url": "https://images.unsplash.com/photo-1578662996442-48f60103fc96?auto=format&fit=crop&w=1200&q=80",
+            "type": "show_pet",
+            "likes": 17,
+            "user_id": individual["id"],
+        },
+        {
+            "title": "分享我家的蜥蜴爬宠日常",
+            "content": "我家养了一只豹纹守宫，每天早上它都会趴在加热垫上晒太阳，超级治愈。晚上它会出来活动，爬来爬去的样子太可爱了。养爬宠的朋友们，你们家的爬宠有什么有趣的日常吗？",
+            "image_url": "https://images.unsplash.com/photo-1544568100-847a948585b9?auto=format&fit=crop&w=1200&q=80",
+            "type": "show_pet",
+            "likes": 14,
+            "user_id": individual["id"],
+        },
+        # 新增分享养宠经验（不局限于猫狗）
+        {
+            "title": "养兔子一年经验分享：从新手到老司机",
+            "content": "养兔子一年了，分享一些经验：1. 兔粮一定要选好的，不要贪便宜；2. 兔笼要定期清理，但不要太频繁洗澡；3. 兔子很胆小，要慢慢建立信任；4. 定期剪指甲和体检很重要；5. 兔子喜欢啃东西，要准备足够的磨牙玩具。希望对新手家长有帮助！",
+            "image_url": "https://images.unsplash.com/photo-1583337130417-3346a1be7dee?auto=format&fit=crop&w=1200&q=80",
+            "type": "experience",
+            "likes": 28,
+            "user_id": individual["id"],
+        },
+        {
+            "title": "鸟类饲养经验：鹦鹉训练小技巧",
+            "content": "养鹦鹉三年了，分享一些训练经验：1. 从建立信任开始，每天固定时间互动；2. 教说话要用简单词语重复；3. 不要强迫，要用奖励的方式；4. 注意鹦鹉的情绪，压力大会生病；5. 定期更换玩具保持新鲜感。养鸟真的很有趣，但需要耐心！",
+            "image_url": "https://images.unsplash.com/photo-1444464666168-49d633b86797?auto=format&fit=crop&w=1200&q=80",
+            "type": "experience",
+            "likes": 35,
+            "user_id": individual["id"],
+        },
+        {
+            "title": "水族箱养鱼经验分享：水质管理很重要",
+            "content": "养鱼两年了，最重要的就是水质管理：1. 定期换水，但不要换太多；2. 过滤系统要保持清洁；3. 定期测试水质参数；4. 不要过度喂食；5. 新鱼要隔离观察。养鱼让我学会了耐心和细心，希望大家都能养出健康漂亮的鱼！",
+            "image_url": "https://images.unsplash.com/photo-1520637836862-4d197d17c1a8?auto=format&fit=crop&w=1200&q=80",
+            "type": "experience",
+            "likes": 19,
+            "user_id": individual["id"],
+        },
+        {
+            "title": "爬宠养护经验：守宫的日常护理",
+            "content": "养豹纹守宫一年多了，分享护理经验：1. 温度和湿度要控制好；2. UVB灯很重要；3. 饮食要多样化；4. 定期清理粪便；5. 注意观察健康状况。爬宠虽然安静，但照顾起来很有成就感！",
+            "image_url": "https://images.unsplash.com/photo-1544568100-847a948585b9?auto=format&fit=crop&w=1200&q=80",
+            "type": "experience",
+            "likes": 16,
+            "user_id": individual["id"],
+        },
     ]
 
     for post in demo_posts:
@@ -101,6 +193,7 @@ def _default_adoption_preferences():
         "accept_renting": True,
         "require_stable_housing": False,
         "require_financial_capacity": False,
+        "require_followup_updates": False,
         "prefer_local": False,
         "require_family_agreement": False,
         "prefer_quiet_household": False,
@@ -152,6 +245,7 @@ def _sync_preference_labels(pref: dict):
     set_soft("陪伴时间", pref.get("focus_companionship", False))
     set_soft("住房稳定性", pref.get("focus_stability", False))
     set_soft("责任意识", True)
+    set_soft("接受送养回访", pref.get("require_followup_updates", False))
     set_soft("安静家庭", pref.get("prefer_quiet_household", False))
     set_soft("多宠相处经验", pref.get("prefer_multi_pet_experience", False))
 
@@ -244,6 +338,7 @@ def _extract_pet_profile(req: PostCreate | PostUpdate):
 def _sync_adoption_post_pet(cursor, post_id: int, req: PostCreate | PostUpdate, user_id: int):
     profile = _extract_pet_profile(req)
     image_url = getattr(req, "image_url", None) or ""
+    image_urls = getattr(req, "image_urls", None) or "[]"
     cursor.execute("SELECT id FROM pets WHERE source_post_id=?", (post_id,))
     pet = cursor.fetchone()
     if pet:
@@ -257,6 +352,7 @@ def _sync_adoption_post_pet(cursor, post_id: int, req: PostCreate | PostUpdate, 
                 age=?,
                 description=?,
                 image_url=CASE WHEN ? != '' THEN ? ELSE image_url END,
+                image_urls=CASE WHEN ? != '[]' THEN ? ELSE image_urls END,
                 adoption_preferences=?,
                 tags=?,
                 updated_at=CURRENT_TIMESTAMP
@@ -270,6 +366,8 @@ def _sync_adoption_post_pet(cursor, post_id: int, req: PostCreate | PostUpdate, 
                 profile["description"],
                 image_url,
                 image_url,
+                image_urls,
+                image_urls,
                 profile["adoption_preferences"],
                 profile["tags"],
                 post_id,
@@ -279,8 +377,8 @@ def _sync_adoption_post_pet(cursor, post_id: int, req: PostCreate | PostUpdate, 
         cursor.execute(
             """
             INSERT INTO pets
-            (owner_id, source_post_id, owner_type, name, species, age, description, image_url, adoption_preferences, tags, status)
-            VALUES (?, ?, 'personal', ?, ?, ?, ?, ?, ?, ?, '待领养')
+            (owner_id, source_post_id, owner_type, name, species, age, description, image_url, image_urls, adoption_preferences, tags, status)
+            VALUES (?, ?, 'personal', ?, ?, ?, ?, ?, ?, ?, ?, '待领养')
             """,
             (
                 user_id,
@@ -290,6 +388,7 @@ def _sync_adoption_post_pet(cursor, post_id: int, req: PostCreate | PostUpdate, 
                 profile["age"],
                 profile["description"],
                 image_url,
+                image_urls,
                 profile["adoption_preferences"],
                 profile["tags"],
             ),
@@ -299,6 +398,7 @@ def _sync_adoption_post_pet(cursor, post_id: int, req: PostCreate | PostUpdate, 
 
 @router.get("/posts")
 def get_posts(skip: int = 0, limit: int = 20):
+    # 社区首页联表返回作者信息和评论数，减少前端重复请求。
     if limit > 100:
         limit = 100
     with get_db() as conn:
@@ -337,10 +437,12 @@ def get_posts(skip: int = 0, limit: int = 20):
 async def publish_post(req: PostCreate, current_user: dict = Depends(get_current_user)):
     if current_user["id"] != req.user_id:
         raise HTTPException(status_code=403, detail="无权限以他人身份发帖")
+    # 普通动态与送养帖共用发布接口；送养帖会额外同步生成 pets 记录。
     with get_db() as conn:
         ensure_tables(conn)
         cursor = conn.cursor()
-        cursor.execute(
+        cursor.execute(  
+    #参数化查询rameterized Query），通过 ? 占位符将业务逻辑与用户数据解耦，避免 SQL 注入风险。
             """INSERT INTO posts
                (user_id, title, content, image_url, image_urls, type,
                 pet_name, pet_gender, pet_age, pet_breed, adopt_reason, location)
@@ -359,6 +461,7 @@ async def publish_post(req: PostCreate, current_user: dict = Depends(get_current
 
 @router.put("/posts/{post_id}")
 async def update_post(post_id: int, req: PostUpdate, current_user: dict = Depends(get_current_user)):
+    # 编辑送养帖时，需要同步更新 pets 表，保持帖子展示与领养数据一致。
     with get_db() as conn:
         ensure_tables(conn)
         cursor = conn.cursor()
@@ -409,6 +512,7 @@ async def update_post(post_id: int, req: PostUpdate, current_user: dict = Depend
 
 @router.delete("/posts/{post_id}")
 async def delete_post(post_id: int, current_user: dict = Depends(get_current_user)):
+    # 删除帖子时会一并删除关联宠物映射，并写入治理日志保留操作痕迹。
     with get_db() as conn:
         ensure_tables(conn)
         cursor = conn.cursor()
@@ -441,6 +545,7 @@ async def like_post(post_id: int, current_user: dict = Depends(get_current_user)
 async def create_comment(req: CommentCreate, current_user: dict = Depends(get_current_user)):
     if current_user["id"] != req.user_id:
         raise HTTPException(status_code=403, detail="无权限以他人身份评论")
+    # 评论单独落表，便于后续扩展审核、通知和互动统计。
     with get_db() as conn:
         ensure_tables(conn)
         cursor = conn.cursor()

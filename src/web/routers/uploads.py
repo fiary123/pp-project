@@ -53,6 +53,25 @@ async def upload_file(
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
 ):
+    """单文件上传"""
+    url = await _save_upload_file(file)
+    return {"status": "success", "url": url}
+
+
+@router.post("/upload-batch")
+async def upload_files_batch(
+    files: list[UploadFile] = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """批量文件上传"""
+    urls = []
+    for file in files:
+        url = await _save_upload_file(file)
+        urls.append(url)
+    return {"status": "success", "urls": urls}
+
+
+async def _save_upload_file(file: UploadFile) -> str:
     # 1. 读取文件内容
     contents = await file.read()
 
@@ -60,12 +79,12 @@ async def upload_file(
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_FILE_SIZE // 1024 // 1024}MB")
 
-    # 3. 通过魔数检测真实 MIME 类型（防止伪装扩展名绕过）
+    # 3. 通过魔数检测真实 MIME 类型
     mime_type = detect_mime_type(contents[:16])
     if mime_type not in ALLOWED_MIME_PREFIXES:
-        raise HTTPException(status_code=400, detail="不支持的文件类型，仅允许上传图片（JPEG/PNG/WebP/GIF）")
+        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {file.filename}")
 
-    # 4. 用 UUID 生成文件名，完全忽略原始文件名（防路径遍历）
+    # 4. 生成新文件名
     ext = MIME_TO_EXT[mime_type]
     new_filename = f"{uuid.uuid4()}{ext}"
 
@@ -76,5 +95,4 @@ async def upload_file(
     # 6. 写入文件
     file_path.write_bytes(contents)
 
-    url = f"/static/uploads/{new_filename}"
-    return {"status": "success", "url": url}
+    return f"/static/uploads/{new_filename}"

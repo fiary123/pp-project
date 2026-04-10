@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, markRaw } from 'vue';
 import { 
   ArrowRight, ShieldCheck, Zap, Heart, Sparkles,
   Plus, Trash2, Loader2, X, Megaphone, RefreshCw, Calendar
@@ -89,7 +89,7 @@ const isRefreshing = ref(false);
 
 const refreshTips = () => {
   isRefreshing.value = true;
-  const shuffled = [...knowledgeTips].sort(() => 0.5 - Math.random());
+  const shuffled = knowledgeTips.sort(() => 0.5 - Math.random());
   setTimeout(() => {
     displayTips.value = shuffled.slice(0, 4);
     isRefreshing.value = false;
@@ -174,15 +174,15 @@ onMounted(() => {
       </div>
     </section>
 
-    <!-- 3. 功能特色 (略) -->
+    <!-- 3. 功能特色 -->
     <section class="container mx-auto px-4 md:px-6">
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
         <div v-for="feature in [
-          { icon: ShieldCheck, title: '智能资质评估', desc: 'AI 专家团深度分析领养人画像，降低弃养风险。', color: 'text-orange-500' },
-          { icon: Zap, title: '极速互助响应', desc: '社区化互助系统，临时寄养、上门喂食一键发布。', color: 'text-blue-500' },
-          { icon: Heart, title: '终身成长记录', desc: '记录爱宠从领养到老去的点滴，打造温情数字档案。', color: 'text-pink-500' }
+          { icon: markRaw(ShieldCheck), title: '智能资质评估', desc: 'AI 专家团深度分析领养人画像，降低弃养风险。', color: 'text-orange-500' },
+          { icon: markRaw(Zap), title: '极速互助响应', desc: '社区化互助系统，临时寄养、上门喂食一键发布。', color: 'text-blue-500' },
+          { icon: markRaw(Heart), title: '终身成长记录', desc: '记录爱宠从领养到老去的点滴，打造温情数字档案。', color: 'text-pink-500' }
         ]" :key="feature.title" class="p-10 bg-gray-50 dark:bg-white/[0.02] border border-gray-200 dark:border-white/5 rounded-[2.5rem] hover:bg-gray-100 dark:hover:bg-white/[0.05] transition-all shadow-sm dark:shadow-none">
-          <feature.icon :class="feature.color" :size="48" class="mb-8" />
+          <component :is="feature.icon" :class="feature.color" :size="48" class="mb-8" />
           <h3 class="text-xl font-black text-gray-900 dark:text-white mb-4 italic uppercase tracking-tight">{{ feature.title }}</h3>
           <p class="text-gray-600 dark:text-gray-500 leading-relaxed">{{ feature.desc }}</p>
         </div>
@@ -249,7 +249,7 @@ onMounted(() => {
       </transition>
     </Teleport>
 
-    <!-- 知识详情弹窗 (略) -->
+    <!-- 知识详情弹窗 -->
     <Teleport to="body">
       <transition name="fade">
         <div v-if="selectedTip" class="fixed inset-0 z-[1000] flex items-center justify-center p-4 md:p-8 bg-black/90 backdrop-blur-md" @click.self="selectedTip = null">
@@ -269,7 +269,7 @@ onMounted(() => {
       </transition>
     </Teleport>
 
-    <!-- 管理员发布公告弹窗 (略) -->
+    <!-- 管理员发布公告弹窗 -->
     <Teleport to="body">
       <transition name="fade">
         <div v-if="showAnnounceModal" class="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl">

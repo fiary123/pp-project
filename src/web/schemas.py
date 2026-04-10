@@ -261,31 +261,10 @@ class MutualAidReportRequest(BaseModel):
     reason: str
 
 
-class AdoptionAssessmentResponse(BaseModel):
-    """领养资质评估响应 - 符合需求文档的完整结构化输出"""
-    # 核心评分
-    readiness_score: int = Field(ge=0, le=100, description="领养准备度评分 0-100")
-    success_probability: float = Field(ge=0.0, le=1.0, description="稳定领养成功倾向 0-1")
-    confidence_level: float = Field(ge=0.0, le=1.0, description="AI 评估置信度 0-1")
-    # 决策结论
-    risk_level: Literal["Low", "Medium", "High"] = Field(description="综合风险等级")
-    decision: Literal["pass", "conditional_pass", "review_required", "reject"] = Field(
-        description="系统建议决策：pass=建议通过 / conditional_pass=条件通过 / review_required=人工复核 / reject=建议驳回"
-    )
-    need_manual_review: bool = Field(description="是否需要人工二次核验")
-    need_followup: bool = Field(default=False, description="是否建议继续追问补充信息")
-    # 详细分析
-    dimension_scores: List[AdoptionAssessmentDimension] = Field(default_factory=list, description="七维结构化评估结果")
-    missing_fields: List[str] = Field(default_factory=list, description="仍需补充确认的字段")
-    followup_questions: List[str] = Field(default_factory=list, description="建议继续追问的问题")
-    conflict_notes: List[str] = Field(default_factory=list, description="冲突点说明")
-    risk_factors: List[AdoptionRiskFactor] = Field(default_factory=list, description="风险因子列表")
-    recommendations: List[str] = Field(default_factory=list, description="个性化建议与补救策略")
-    review_note: str = Field(default="", description="给管理员的审核备注")
-    # 子报告
-    baseline_report: str = Field(description="品种养护基准报告")
-    profile_report: str = Field(description="申请人画像匹配报告")
-    cohabitation_report: str = Field(description="共处环境风险报告")
-    final_summary: str = Field(description="三专家综合摘要（Markdown）")
-    # 追踪
-    trace_id: str = Field(description="AI 执行链路 trace_id，可在管理后台溯源")
+class TakedownRequest(BaseModel):
+    reason: str
+    admin_id: Optional[int] = None
+    evidence_url: Optional[str] = ""
+
+class NotificationReadRequest(BaseModel):
+    notification_id: int
