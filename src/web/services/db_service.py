@@ -166,6 +166,8 @@ def ensure_tables(conn: sqlite3.Connection):
         ('owner_followed_ai', 'INTEGER'),
         ('decision_by', 'INTEGER'),
         ('decision_time', 'DATETIME'),
+        ('accept_return_visit', 'INTEGER DEFAULT 0'),
+        ('application_reason', 'TEXT'),
     ]:
         try:
             cur.execute(f'ALTER TABLE applications ADD COLUMN {col} {definition}')
