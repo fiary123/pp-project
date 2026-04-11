@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # 将项目根目录添加到 sys.path
 sys.path.append(str(BASE_DIR))
 
-from src.web.routers import auth, ai, admin, user, profile
+from src.web.routers import auth, ai, admin, user, profile, recommendation
 from src.web.routers import posts, pets, announcements, uploads
 from src.web.services.db_service import get_db, ensure_tables
 from src.database.sync_data import sync_knowledge_to_chroma
@@ -70,6 +70,7 @@ app.include_router(ai.router)
 app.include_router(admin.router)
 app.include_router(user.router)
 app.include_router(profile.router)
+app.include_router(recommendation.router)
 
 @app.on_event("startup")
 async def startup_event():

@@ -1,31 +1,32 @@
-from typing import List
-from src.web.recommendation.query import RecommendQuery, PetCandidate
-
 class HardConstraintFilter:
     """
-    硬性约束过滤器 - 过滤掉不满足发布者领养条件的申请人
+    硬性约束过滤器 - 过滤掉不满足发布者领养条件或用户偏好的候选对象
     """
-    @staticmethod
-    def filter(query: RecommendQuery, candidates: List[PetCandidate]) -> List[PetCandidate]:
-        passed = []
-        user_profile = query.profile
-        
-        for cand in candidates:
-            # 1. 经验要求 (简化逻辑: 如果要求经验且用户无经验，则过滤)
-            if cand.requirements.get('require_experience') and not user_profile.get('pet_experience'):
-                cand.filter_reason = "需要有养宠经验"
+    async def filter(self, query, candidates):
+        result = []
+        profile = query.user_profile
+        pref = query.user_preferences
+
+        for candidate in candidates:
+            pet = candidate.features.get("pet", {})
+            req = candidate.features.get("requirement", {})
+
+            # 1. 经验要求 (需要经验且用户无经验，直接过滤)
+            if req.get("require_experience") and req["require_experience"] != "无" and not profile.get("pet_experience"):
+                candidate.reasons.append("不满足养宠经验要求")
                 continue
-            
-            # 2. 稳定住房要求
-            if cand.requirements.get('require_stable_housing') and not user_profile.get('family_support'):
-                # 注意：这里我们假设 family_support 或 housing_type 某种程度上代表了稳定性
-                # 实际可以根据 housing_type == '自购' 等更精细判断
-                pass 
-                
-            # 3. 地区限制 (简单示例: 如果有地区限制且未匹配)
-            # region_limit = cand.requirements.get('region_limit')
-            # ...
-            
-            passed.append(cand)
-            
-        return passed
+
+            # 2. 特殊护理 (宠物需要特殊照护，但用户在偏好中明确表示不接受)
+            if pet.get("special_care_flag") and not pref.get("accept_special_care"):
+                candidate.reasons.append("用户不接受特殊照护宠物")
+                continue
+
+            # 3. 活力度与时间投入 (高活力宠物需要较多时间，如果用户可用时间极低则过滤)
+            # 假设 available_time < 1 小时被视为 low
+            if pet.get("energy_level") == "高" and profile.get("available_time", 0) < 1.0:
+                candidate.reasons.append("用户可用时间不足以照护高活力宠物")
+                continue
+
+            result.append(candidate)
+
+        return result
