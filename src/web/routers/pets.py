@@ -115,14 +115,14 @@ async def delete_pet(pet_id: int, current_user: dict = Depends(get_current_user)
 
 # --- Phase 1: 宠物特征与领养要求管理 ---
 
-@router.get("/pets/{pet_id}/features")
-async def get_pet_features(pet_id: int):
+@router.get("/pets/{pet_id}/feature")
+async def get_pet_feature(pet_id: int):
     """获取宠物推荐特征"""
-    features = ProfileService.get_pet_features(pet_id)
-    return features if features else {}
+    feature = ProfileService.get_pet_features(pet_id)
+    return feature if feature else {}
 
-@router.put("/pets/{pet_id}/features")
-async def update_pet_features(pet_id: int, features: PetFeatureUpdate, current_user: dict = Depends(get_current_user)):
+@router.put("/pets/{pet_id}/feature")
+async def update_pet_feature(pet_id: int, features: PetFeatureUpdate, current_user: dict = Depends(get_current_user)):
     """更新宠物推荐特征"""
     with get_db() as conn:
         cursor = conn.cursor()
@@ -136,14 +136,14 @@ async def update_pet_features(pet_id: int, features: PetFeatureUpdate, current_u
     ProfileService.update_pet_features(pet_id, features)
     return {"message": "宠物特征更新成功"}
 
-@router.get("/pets/{pet_id}/requirements")
-async def get_pet_requirements(pet_id: int):
+@router.get("/pets/{pet_id}/requirement")
+async def get_pet_requirement(pet_id: int):
     """获取宠物领养要求"""
     reqs = ProfileService.get_pet_requirements(pet_id)
     return reqs if reqs else {}
 
-@router.put("/pets/{pet_id}/requirements")
-async def update_pet_requirements(pet_id: int, reqs: PetRequirementUpdate, current_user: dict = Depends(get_current_user)):
+@router.put("/pets/{pet_id}/requirement")
+async def update_pet_requirement(pet_id: int, reqs: PetRequirementUpdate, current_user: dict = Depends(get_current_user)):
     """更新宠物领养要求"""
     with get_db() as conn:
         cursor = conn.cursor()
