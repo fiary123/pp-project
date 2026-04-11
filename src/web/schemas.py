@@ -268,3 +268,34 @@ class TakedownRequest(BaseModel):
 
 class NotificationReadRequest(BaseModel):
     notification_id: int
+
+# --- 推荐系统输入层模型 (New in Phase 1) ---
+
+class UserProfileUpdate(BaseModel):
+    housing_type: Optional[str] = Field(None, description="住房类型: 公寓, 别墅, 平房等")
+    housing_size: Optional[float] = Field(None, description="居住面积 (平米)")
+    rental_status: Optional[str] = Field(None, description="租赁状态: 自购, 租房")
+    pet_experience: Optional[str] = Field(None, description="养宠经验: 无, 1-3年, 3年以上")
+    available_time: Optional[float] = Field(None, description="每日可投入时间 (小时)")
+    family_support: Optional[bool] = Field(None, description="家庭是否支持")
+    budget_level: Optional[str] = Field(None, description="预算承受能力: 低, 中, 高")
+
+class UserPreferenceUpdate(BaseModel):
+    preferred_pet_type: Optional[str] = Field(None, description="偏好品种: 猫, 狗, 鸟等")
+    preferred_age_range: Optional[str] = Field(None, description="偏好年龄段: 幼年, 成年, 老年")
+    preferred_size: Optional[str] = Field(None, description="偏好体型: 小型, 中型, 大型")
+    accept_special_care: Optional[bool] = Field(None, description="是否接受特殊照顾宠物")
+    accept_high_energy: Optional[bool] = Field(None, description="是否接受高能量/活泼宠物")
+
+class PetFeatureUpdate(BaseModel):
+    energy_level: Optional[str] = Field(None, description="能量水平: 低, 中, 高")
+    care_level: Optional[str] = Field(None, description="照顾难度: 容易, 中等, 困难")
+    beginner_friendly: Optional[bool] = Field(None, description="是否新手友好")
+    social_level: Optional[str] = Field(None, description="社交能力: 孤僻, 友好, 极其亲人")
+    special_care_flag: Optional[bool] = Field(None, description="是否需要特殊照顾")
+
+class PetRequirementUpdate(BaseModel):
+    require_experience: Optional[str] = Field(None, description="经验要求: 无, 1-3年, 3年以上")
+    require_stable_housing: Optional[bool] = Field(None, description="是否要求稳定住房")
+    require_return_visit: Optional[bool] = Field(None, description="是否接受回访")
+    region_limit: Optional[str] = Field(None, description="地区限制")

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
-from src.web.schemas import PetUpdate, PetBatchCreate
+from src.web.schemas import PetUpdate, PetBatchCreate, PetFeatureUpdate, PetRequirementUpdate
 from src.web.services.db_service import get_db
+from src.web.services.profile_service import ProfileService
 from src.web.dependencies import get_current_user
 
 router = APIRouter(prefix="/api", tags=["pets"])
@@ -111,3 +112,47 @@ async def delete_pet(pet_id: int, current_user: dict = Depends(get_current_user)
         cursor.execute("DELETE FROM pets WHERE id = ?", (pet_id,))
         conn.commit()
     return {"status": "success"}
+
+# --- Phase 1: 宠物特征与领养要求管理 ---
+
+@router.get("/pets/{pet_id}/features")
+async def get_pet_features(pet_id: int):
+    """获取宠物推荐特征"""
+    features = ProfileService.get_pet_features(pet_id)
+    return features if features else {}
+
+@router.put("/pets/{pet_id}/features")
+async def update_pet_features(pet_id: int, features: PetFeatureUpdate, current_user: dict = Depends(get_current_user)):
+    """更新宠物推荐特征"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT owner_id FROM pets WHERE id=?", (pet_id,))
+        pet = cursor.fetchone()
+        if not pet:
+            raise HTTPException(status_code=404, detail="宠物不存在")
+        if pet["owner_id"] != current_user["id"] and current_user.get("role") not in ["admin", "org_admin"]:
+            raise HTTPException(status_code=403, detail="无权限修改该宠物特征")
+    
+    ProfileService.update_pet_features(pet_id, features)
+    return {"message": "宠物特征更新成功"}
+
+@router.get("/pets/{pet_id}/requirements")
+async def get_pet_requirements(pet_id: int):
+    """获取宠物领养要求"""
+    reqs = ProfileService.get_pet_requirements(pet_id)
+    return reqs if reqs else {}
+
+@router.put("/pets/{pet_id}/requirements")
+async def update_pet_requirements(pet_id: int, reqs: PetRequirementUpdate, current_user: dict = Depends(get_current_user)):
+    """更新宠物领养要求"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT owner_id FROM pets WHERE id=?", (pet_id,))
+        pet = cursor.fetchone()
+        if not pet:
+            raise HTTPException(status_code=404, detail="宠物不存在")
+        if pet["owner_id"] != current_user["id"] and current_user.get("role") not in ["admin", "org_admin"]:
+            raise HTTPException(status_code=403, detail="无权限修改该宠物领养要求")
+            
+    ProfileService.update_pet_requirements(pet_id, reqs)
+    return {"message": "领养要求更新成功"}

@@ -459,4 +459,55 @@ def ensure_tables(conn: sqlite3.Connection):
         expire_at DATETIME NOT NULL
     )''')
 
+    # ── user_profiles (Phase 1) ───────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS user_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        housing_type TEXT,
+        housing_size REAL,
+        rental_status TEXT,
+        pet_experience TEXT,
+        available_time REAL,
+        family_support INTEGER DEFAULT 1,
+        budget_level TEXT,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # ── user_preferences (Phase 1) ────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS user_preferences (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        preferred_pet_type TEXT,
+        preferred_age_range TEXT,
+        preferred_size TEXT,
+        accept_special_care INTEGER DEFAULT 0,
+        accept_high_energy INTEGER DEFAULT 1,
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # ── pet_features (Phase 1) ───────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS pet_features (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pet_id INTEGER UNIQUE NOT NULL REFERENCES pets(id) ON DELETE CASCADE,
+        energy_level TEXT,
+        care_level TEXT,
+        beginner_friendly INTEGER DEFAULT 1,
+        social_level TEXT,
+        special_care_flag INTEGER DEFAULT 0,
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # ── pet_requirements (Phase 1) ────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS pet_requirements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pet_id INTEGER UNIQUE NOT NULL REFERENCES pets(id) ON DELETE CASCADE,
+        require_experience TEXT,
+        require_stable_housing INTEGER DEFAULT 1,
+        require_return_visit INTEGER DEFAULT 1,
+        region_limit TEXT,
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
     conn.commit()

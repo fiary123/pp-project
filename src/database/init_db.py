@@ -27,6 +27,7 @@ def init_database():
         "nutrition_feedbacks", "nutrition_plans", "agent_trace_logs",
         "user_sanctions", "moderation_logs", "pet_chat_profiles", "pet_chat_history",
         "messages", "comments", "posts", "applications", "announcements", "pets", "users",
+        "user_profiles", "user_preferences", "pet_features", "pet_requirements"
     ]
     for t in tables_to_drop:
         cursor.execute(f"DROP TABLE IF EXISTS {t}")
@@ -43,6 +44,32 @@ def init_database():
         contact TEXT,
         living_env TEXT,
         preference TEXT
+    )''')
+
+    cursor.execute('''CREATE TABLE user_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        housing_type TEXT, -- 住房类型: 公寓, 别墅, 平房等
+        housing_size REAL, -- 居住面积 (平米)
+        rental_status TEXT, -- 租赁状态: 自购, 租房
+        pet_experience TEXT, -- 养宠经验: 无, 1-3年, 3年以上
+        available_time REAL, -- 每日可投入时间 (小时)
+        family_support INTEGER DEFAULT 1, -- 家庭是否支持: 1(是), 0(否)
+        budget_level TEXT, -- 预算承受能力: 低, 中, 高
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    cursor.execute('''CREATE TABLE user_preferences (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        preferred_pet_type TEXT, -- 偏好品种: 猫, 狗, 鸟等
+        preferred_age_range TEXT, -- 偏好年龄段: 幼年, 成年, 老年
+        preferred_size TEXT, -- 偏好体型: 小型, 中型, 大型
+        accept_special_care INTEGER DEFAULT 0, -- 是否接受特殊照顾宠物
+        accept_high_energy INTEGER DEFAULT 1, -- 是否接受高能量/活泼宠物
+        create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
 
     cursor.execute('''CREATE TABLE pets (
@@ -63,6 +90,27 @@ def init_database():
         status TEXT DEFAULT '待领养',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    cursor.execute('''CREATE TABLE pet_features (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pet_id INTEGER UNIQUE NOT NULL REFERENCES pets(id) ON DELETE CASCADE,
+        energy_level TEXT, -- 能量水平: 低, 中, 高
+        care_level TEXT, -- 照顾难度: 容易, 中等, 困难
+        beginner_friendly INTEGER DEFAULT 1, -- 是否新手友好
+        social_level TEXT, -- 社交能力: 孤僻, 友好, 极其亲人
+        special_care_flag INTEGER DEFAULT 0, -- 是否需要特殊照顾
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    cursor.execute('''CREATE TABLE pet_requirements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pet_id INTEGER UNIQUE NOT NULL REFERENCES pets(id) ON DELETE CASCADE,
+        require_experience TEXT, -- 经验要求: 无, 1-3年, 3年以上
+        require_stable_housing INTEGER DEFAULT 1, -- 是否要求稳定住房
+        require_return_visit INTEGER DEFAULT 1, -- 是否接受回访
+        region_limit TEXT, -- 地区限制
+        update_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
 
     cursor.execute('''CREATE TABLE applications (
