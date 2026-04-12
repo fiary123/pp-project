@@ -120,23 +120,38 @@ def get_admin_users():
 
 @router.get("/applications")
 def get_admin_applications():
-    # 后台审核列表会额外补充申请时间线，便于集中查看审核过程。
+    # 后台审核列表会额外补充申请时间线和推荐引擎评分，便于集中查看审核过程。
     conn = get_db_connection()
     ensure_tables(conn)
     cursor = conn.cursor()
+    
+    # 联表查询：加入推荐日志，获取最新的匹配建议
     cursor.execute("""
-        SELECT a.*, u.username as user_name, p.name as pet_name, o.username as owner_name 
+        SELECT a.*, u.username as user_name, p.name as pet_name, o.username as owner_name,
+               rl.final_score as rec_score, rl.reason_text as rec_reasons, rl.score_detail_json as rec_sub_scores
         FROM applications a 
         LEFT JOIN users u ON a.user_id = u.id 
         LEFT JOIN users o ON a.pet_owner_id = o.id 
         LEFT JOIN pets p ON a.pet_id = p.id 
+        LEFT JOIN recommendation_logs rl ON rl.scene = 'applicant_ranking' 
+             AND rl.target_id = a.pet_id AND rl.candidate_id = a.user_id
+        GROUP BY a.id -- 确保每个申请只出现一次 (取最新推荐日志)
         ORDER BY a.create_time DESC
     """)
+    
     rows = []
     for row in cursor.fetchall():
         item = dict(row)
+        # 解析 JSON 字段
+        item["rec_reasons"] = (item["rec_reasons"].split("; ") if item.get("rec_reasons") else [])
+        item["rec_sub_scores"] = _parse_json(item.get("rec_sub_scores"), {})
+        item["consensus_result"] = _parse_json(item.get("assessment_payload"), {}).get("latest_assessment", {}).get("consensus_result", {})
+        item["followup_questions"] = _parse_json(item.get("followup_questions"), [])
+        
+        # 补充时间线
         item["flow_timeline"] = flow_engine.get_timeline(conn, item["id"], limit=6)
         rows.append(item)
+        
     conn.close()
     return rows
 

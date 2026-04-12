@@ -4,7 +4,8 @@ import { useAuthStore } from '../store/authStore'
 import {
   Users, Loader2, ShieldCheck, Handshake, BarChart2, ClipboardList,
   FileText, Heart, Activity, AlertTriangle, Waypoints, Megaphone,
-  ScrollText, Sparkles, Ban, VolumeX, RefreshCcw, Plus, Trash2, PackagePlus
+  ScrollText, Sparkles, Ban, VolumeX, RefreshCcw, Plus, Trash2, PackagePlus,
+  Info, TrendingUp
 } from 'lucide-vue-next'
 import BaseCard from '../components/BaseCard.vue'
 import axios from '../api/index'
@@ -265,6 +266,9 @@ const buildDemoAuditApplications = () => ([
     flow_status: 'need_more_info',
     status: 'pending_owner_review',
     ai_readiness_score: 82,
+    rec_score: 85.5,
+    rec_reasons: ['陪伴时间充足', '居住环境稳定'],
+    rec_sub_scores: { "居住": 90, "行为": 82, "经验": 75 },
     consensus_result: { consensus_score: 0.86, disagreement_score: 0.18, risk_tags: ['居住稳定性待确认', '工作时长偏长'] },
     followup_questions: ['最近三个月是否有稳定照护时间安排？', '若出差时由谁照顾宠物？'],
     case_memory: { case_summary: '与两例城市公寓领养案例相似，补充照护计划后通过率较高。', risk_tags: ['居住稳定性待确认'] },
@@ -285,6 +289,9 @@ const buildDemoAuditApplications = () => ([
     flow_status: 'waiting_publisher',
     status: 'approved',
     ai_readiness_score: 91,
+    rec_score: 94.2,
+    rec_reasons: ['资深养宠经验', '别墅居住(带院子)', '全家支持'],
+    rec_sub_scores: { "居住": 98, "行为": 92, "经验": 95 },
     consensus_result: { consensus_score: 0.93, disagreement_score: 0.07, risk_tags: ['新手友好'] },
     followup_questions: [],
     case_memory: { case_summary: '申请人与历史高匹配样本特征接近，风险较低，适合直接交由发布者决策。', risk_tags: ['新手友好'] },
@@ -302,6 +309,9 @@ const buildDemoAuditApplications = () => ([
     flow_status: 'manual_review',
     status: 'pending',
     ai_readiness_score: 63,
+    rec_score: 58.0,
+    rec_reasons: ['工作极度繁忙', '有过敏风险', '无养宠经验'],
+    rec_sub_scores: { "居住": 60, "行为": 45, "经验": 50 },
     consensus_result: { consensus_score: 0.61, disagreement_score: 0.39, risk_tags: ['历史养宠经验不足', '作息冲突'] },
     followup_questions: ['是否能提供既往养宠或寄养证明？'],
     case_memory: { case_summary: '历史相似案例中，若无法提供稳定照护证明，后续满意度偏低。', risk_tags: ['作息冲突'] },
@@ -794,7 +804,9 @@ onUnmounted(() => {
       <div v-else-if="activeMainTab === 'audit'" class="space-y-6">
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <h2 class="text-2xl font-black flex items-center gap-3 text-slate-900 dark:text-white"><div class="p-2 bg-orange-500/10 text-orange-500 rounded-lg"><ClipboardList :size="20" /></div>领养审核中心</h2>
-          <p class="text-[10px] md:text-xs text-gray-500 uppercase tracking-widest font-black">共识融合 / 路由决策 / 案例记忆</p>
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-100 dark:bg-white/5 px-3 py-1 rounded-full border border-gray-200 dark:border-white/10">共识分流 / 匹配度排序</span>
+          </div>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
           <BaseCard class="!p-5 space-y-2"><p class="dash-card-label text-xs uppercase tracking-widest font-black">待补充信息</p><p class="text-3xl font-black text-orange-500">{{ overviewStats?.summary?.pending_followups || 0 }}</p></BaseCard>
@@ -805,25 +817,50 @@ onUnmounted(() => {
         <template v-if="auditApplications.length">
           <BaseCard v-for="app in auditApplications" :key="app.id" class="!p-6 space-y-5">
             <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
-              <div class="space-y-2">
+              <div class="space-y-3 flex-1">
                 <div class="flex flex-wrap items-center gap-2">
                   <h3 class="text-xl font-black text-slate-900 dark:text-white">{{ app.pet_name || `宠物 ${app.pet_id}` }}</h3>
                   <span v-if="app.is_demo" class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">演示</span>
                   <span :class="routeTone(app.route_decision)" class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest">{{ routeLabel(app.route_decision) }}</span>
                   <span :class="riskTone(app.risk_level)" class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest">{{ app.risk_level || 'Medium' }}</span>
                 </div>
+                
+                <!-- 新增：推荐结果摘要 -->
+                <div class="flex flex-col sm:flex-row gap-4 bg-blue-50/50 dark:bg-white/2 border border-blue-100/50 dark:border-white/5 rounded-2xl p-4">
+                  <div class="flex flex-col items-center justify-center px-4 border-r border-blue-100 dark:border-white/5">
+                    <TrendingUp class="text-blue-500 mb-1" :size="18" />
+                    <span class="text-2xl font-black text-blue-600 dark:text-blue-400">{{ Math.round(app.rec_score || app.ai_readiness_score) }}%</span>
+                    <span class="text-[8px] font-black text-gray-400 uppercase tracking-widest">匹配度</span>
+                  </div>
+                  <div class="flex-1 space-y-2">
+                    <div class="flex items-center gap-2 text-xs font-black text-blue-600/80 dark:text-blue-400/80 uppercase tracking-widest">
+                      <Sparkles :size="12" /> 推荐引擎评价
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                      <span v-for="reason in (app.rec_reasons || [])" :key="reason" class="text-[10px] font-bold text-gray-600 dark:text-gray-300 flex items-center gap-1.5">
+                        <CheckCircle2 :size="10" class="text-green-500" /> {{ reason }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
                 <p class="text-sm text-slate-600 dark:text-slate-400">申请人：<span class="font-bold text-slate-900 dark:text-white">{{ app.user_name || '未知用户' }}</span> · 发布者：<span class="font-bold text-slate-900 dark:text-white">{{ app.owner_name || '未知送养方' }}</span></p>
-                <p class="text-sm text-slate-600 dark:text-slate-400">流程状态：<span class="font-bold text-slate-900 dark:text-white">{{ flowStatusLabel(app.flow_status) }}</span> · 当前状态：<span class="font-bold text-slate-900 dark:text-white">{{ app.status }}</span></p>
+                <p class="text-sm text-slate-600 dark:text-slate-400">流程状态：<span class="font-bold text-slate-900 dark:text-white">{{ flowStatusLabel(app.flow_status) }}</span></p>
               </div>
-              <div class="grid grid-cols-3 gap-3 min-w-[280px]">
-                <div class="rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3 dark:bg-white/5 dark:border-white/10"><p class="text-[10px] uppercase tracking-widest font-black text-slate-500 dark:text-slate-400">准备度</p><p class="text-2xl font-black text-orange-500">{{ app.ai_readiness_score ?? app.latest_ai_review?.overall_score ?? 'N/A' }}</p></div>
-                <div class="rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3 dark:bg-white/5 dark:border-white/10"><p class="text-[10px] uppercase tracking-widest font-black text-slate-500 dark:text-slate-400">共识分</p><p class="text-2xl font-black text-cyan-500">{{ formatConsensus(app.latest_ai_review?.consensus_score ?? app.consensus_result?.consensus_score) }}</p></div>
-                <div class="rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3 dark:bg-white/5 dark:border-white/10"><p class="text-[10px] uppercase tracking-widest font-black text-slate-500 dark:text-slate-400">分歧度</p><p class="text-2xl font-black text-rose-500">{{ formatConsensus(app.latest_ai_review?.disagreement_score ?? app.consensus_result?.disagreement_score) }}</p></div>
+              
+              <!-- 评分细则看板 -->
+              <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 gap-3 min-w-[280px]">
+                <div v-for="(val, key) in (app.rec_sub_scores || { '居住': 85, '陪伴': 78, '经验': 90, '共识': 88 })" :key="key" 
+                  class="rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3 dark:bg-white/5 dark:border-white/10">
+                  <p class="text-[10px] uppercase tracking-widest font-black text-slate-500 dark:text-slate-400">{{ key }}匹配</p>
+                  <p class="text-xl font-black text-slate-900 dark:text-white">{{ Math.round(val) }}</p>
+                </div>
               </div>
             </div>
-            <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+
+            <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 border-t border-slate-100 dark:border-white/5 pt-5">
               <div class="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-3 dark:bg-white/5 dark:border-white/10">
-                <p class="text-[10px] uppercase tracking-widest font-black text-slate-500 dark:text-slate-400">风险标签</p>
+                <p class="text-[10px] uppercase tracking-widest font-black text-slate-500 dark:text-slate-400">风险标签 (共识提取)</p>
                 <div class="flex flex-wrap gap-2">
                   <span v-for="tag in (app.consensus_result?.risk_tags || app.case_memory?.risk_tags || [])" :key="tag" class="px-3 py-1 rounded-full bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300 text-[10px] font-black uppercase tracking-widest">{{ tag }}</span>
                   <span v-if="!(app.consensus_result?.risk_tags || app.case_memory?.risk_tags || []).length" class="text-sm text-slate-500 dark:text-slate-400">暂无风险标签</span>
@@ -832,23 +869,13 @@ onUnmounted(() => {
               <div class="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-3 dark:bg-white/5 dark:border-white/10">
                 <p class="text-[10px] uppercase tracking-widest font-black text-slate-500 dark:text-slate-400">建议追问</p>
                 <ul v-if="app.followup_questions?.length" class="space-y-2">
-                  <li v-for="question in app.followup_questions.slice(0, 3)" :key="question" class="text-sm leading-6 text-slate-600 dark:text-slate-300">? {{ question }}</li>
+                  <li v-for="question in app.followup_questions.slice(0, 3)" :key="question" class="text-sm leading-6 text-slate-600 dark:text-slate-300 flex items-start gap-2"><Info :size="14" class="mt-1 shrink-0 text-orange-400" /> {{ question }}</li>
                 </ul>
                 <p v-else class="text-sm text-slate-500 dark:text-slate-400">当前无需额外追问。</p>
               </div>
               <div class="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-3 dark:bg-white/5 dark:border-white/10">
-                <p class="text-[10px] uppercase tracking-widest font-black text-slate-500 dark:text-slate-400">案例记忆摘要</p>
-                <p class="text-sm leading-6 text-slate-600 dark:text-slate-300">{{ app.case_memory?.case_summary || '当前尚未生成案例记忆摘要。' }}</p>
-              </div>
-            </div>
-            <div v-if="app.recent_followups?.length" class="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-3 dark:bg-white/5 dark:border-white/10">
-              <p class="text-[10px] uppercase tracking-widest font-black text-slate-500 dark:text-slate-400">最近追问记录</p>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div v-for="item in app.recent_followups" :key="`${item.question}-${item.created_at}`" class="rounded-xl bg-white border border-slate-200 p-3 space-y-2 dark:bg-white/5 dark:border-white/5">
-                  <p class="text-xs font-black text-orange-500">{{ item.question }}</p>
-                  <p class="text-xs leading-6 text-slate-600 dark:text-slate-300">{{ item.answer || '未填写回答' }}</p>
-                  <p class="text-[10px] text-slate-400 uppercase tracking-widest dark:text-slate-500">来源：{{ item.source }}</p>
-                </div>
+                <p class="text-[10px] uppercase tracking-widest font-black text-slate-500 dark:text-slate-400">历史相似案例参考</p>
+                <p class="text-sm leading-6 text-slate-600 dark:text-slate-300 italic font-medium">"{{ app.case_memory?.case_summary || '当前尚未检索到高相关性的历史案例记忆。' }}"</p>
               </div>
             </div>
           </BaseCard>

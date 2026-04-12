@@ -1,4 +1,6 @@
-<script setup lang="ts">
+import sys
+
+content = """<script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import {
@@ -253,3 +255,7 @@ onMounted(() => {
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 </style>
+"""
+
+with open('pet-frontend/src/views/AdoptView.vue', 'wb') as f:
+    f.write(content.encode('utf-8'))

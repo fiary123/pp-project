@@ -421,6 +421,22 @@ def ensure_tables(conn: sqlite3.Connection):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_mutual_aid_reports_status ON mutual_aid_reports(status)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_mutual_aid_reports_task_id ON mutual_aid_reports(task_id)")
 
+    # ── recommendation_logs ────────────────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS recommendation_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scene TEXT NOT NULL, -- 如 pet_recommendation / applicant_ranking
+        target_id INTEGER, -- 目标对象ID (如 pet_id 或 user_id)
+        user_id INTEGER REFERENCES users(id),
+        candidate_id INTEGER, -- 被推荐的候选项ID
+        hard_filter_pass INTEGER DEFAULT 1, -- 是否通过硬约束过滤
+        score_detail_json TEXT, -- 评分明细 (结构化 JSON)
+        final_score REAL, -- 最终得分
+        reason_text TEXT, -- 推荐理由/解释文本
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_recommendation_logs_scene ON recommendation_logs(scene)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_recommendation_logs_user_id ON recommendation_logs(user_id)")
+
     # ── 高频查询索引 ───────────────────────────────────────────────────────
     cur.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id)")
@@ -513,3 +529,15 @@ def ensure_tables(conn: sqlite3.Connection):
     )''')
 
     conn.commit()
+
+def save_recommendation_log(scene: str, target_id: int, user_id: int, candidate_id: int, hard_filter_pass: int, score_detail: dict, final_score: float, reason_text: str):
+    import json
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT INTO recommendation_logs 
+               (scene, target_id, user_id, candidate_id, hard_filter_pass, score_detail_json, final_score, reason_text) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (scene, target_id, user_id, candidate_id, hard_filter_pass, json.dumps(score_detail), final_score, reason_text)
+        )
+        conn.commit()

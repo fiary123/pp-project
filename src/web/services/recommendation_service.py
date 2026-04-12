@@ -12,10 +12,11 @@ from src.web.recommendation.scorers.applicant_match_scorer import ApplicantMatch
 from src.web.recommendation.selectors.topk_selector import TopKSelector
 from src.web.services.pet_service import PetService
 from src.web.services.application_service import ApplicationService
+from src.web.services.db_service import save_recommendation_log
 
 class RecommendationService:
     """
-    推荐系统服务层 - 负责组装和执行特定的推荐流水线
+    推荐系统服务层 - 负责组装和执行特定的推荐流水线，并持久化日志
     """
     def __init__(self, profile_service):
         self.profile_service = profile_service
@@ -44,20 +45,35 @@ class RecommendationService:
             scorers=[
                 MultiFeatureScorer(),
             ],
-            selector=TopKSelector(k=5),
+            selector=TopKSelector(k=10), # 扩大初始候选，以便展示过滤效果
         )
 
-        # 3. 执行流水线并返回结果
-        return await pipeline.execute(query)
+        # 3. 执行流水线
+        results = await pipeline.execute(query)
+
+        # 4. 持久化推荐日志
+        for res in results:
+            save_recommendation_log(
+                scene="pet_recommendation",
+                target_id=0, # 用户发现场景，target是用户自己(query.user_id)
+                user_id=user_id,
+                candidate_id=res.candidate_id,
+                hard_filter_pass=getattr(res, 'hard_filter_pass', 1),
+                score_detail=getattr(res, 'scores', {}),
+                final_score=getattr(res, 'final_score', 0.0),
+                reason_text="; ".join(res.reasons)
+            )
+
+        return results
 
     async def rank_applicants_for_pet(self, pet_id: int):
         """场景2: 给发布者排序申请人 (Applicant Ranking)"""
-        # 1. 创建初始 Query (user_id=0 表示不针对特定用户，而是针对宠物)
+        # 1. 创建初始 Query
         query = RecommendationQuery(user_id=0, scene="applicant_for_pet", pet_id=pet_id)
 
         # 2. 组装流水线
         pipeline = RecommendationPipeline(
-            query_hydrators=[], # 申请场景主要补全候选人
+            query_hydrators=[], 
             sources=[
                 PetApplicationSource(self.application_service),
             ],
@@ -73,8 +89,23 @@ class RecommendationService:
             scorers=[
                 ApplicantMatchScorer(),
             ],
-            selector=TopKSelector(k=10),
+            selector=TopKSelector(k=20),
         )
 
-        # 3. 执行流水线并返回结果
-        return await pipeline.execute(query)
+        # 3. 执行流水线
+        results = await pipeline.execute(query)
+
+        # 4. 持久化日志 (场景：审核排序)
+        for res in results:
+            save_recommendation_log(
+                scene="applicant_ranking",
+                target_id=pet_id,
+                user_id=res.candidate_id, # 申请人ID
+                candidate_id=res.candidate_id,
+                hard_filter_pass=getattr(res, 'hard_filter_pass', 1),
+                score_detail=getattr(res, 'scores', {}),
+                final_score=getattr(res, 'final_score', 0.0),
+                reason_text="; ".join(res.reasons)
+            )
+
+        return results

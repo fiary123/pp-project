@@ -49,13 +49,23 @@ def init_database():
     cursor.execute('''CREATE TABLE user_profiles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        age_range TEXT, -- 年龄段: 18-25, 26-35, 36-50, 50+
         housing_type TEXT, -- 住房类型: 公寓, 别墅, 平房等
+        has_yard INTEGER DEFAULT 0, -- 是否有院子: 1(是), 0(否)
+        family_size INTEGER DEFAULT 1, -- 家庭人口数
+        has_children INTEGER DEFAULT 0, -- 是否有小孩: 1(是), 0(否)
+        has_other_pets INTEGER DEFAULT 0, -- 是否有其他宠物: 1(是), 0(否)
         housing_size REAL, -- 居住面积 (平米)
         rental_status TEXT, -- 租赁状态: 自购, 租房
         pet_experience TEXT, -- 养宠经验: 无, 1-3年, 3年以上
+        experience_level INTEGER DEFAULT 0, -- 经验等级: 0(新手), 1(有经验), 2(专家)
         available_time REAL, -- 每日可投入时间 (小时)
         family_support INTEGER DEFAULT 1, -- 家庭是否支持: 1(是), 0(否)
         budget_level TEXT, -- 预算承受能力: 低, 中, 高
+        allergy_info TEXT, -- 过敏情况说明
+        preferred_pet_type TEXT, -- 偏好品种: 猫, 狗, 异宠
+        preferred_size TEXT, -- 偏好体型: 小型, 中型, 大型
+        preferred_temperament TEXT, -- 偏好性格标签
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
         update_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
@@ -79,6 +89,7 @@ def init_database():
         owner_type TEXT DEFAULT 'personal',
         name TEXT NOT NULL,
         species TEXT,
+        type TEXT, -- 冗余类型字段: 猫咪, 狗狗, 异宠
         age INTEGER DEFAULT 1,
         is_shedding TEXT,
         energy_level TEXT,
@@ -95,10 +106,19 @@ def init_database():
     cursor.execute('''CREATE TABLE pet_features (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         pet_id INTEGER UNIQUE NOT NULL REFERENCES pets(id) ON DELETE CASCADE,
-        energy_level TEXT, -- 能量水平: 低, 中, 高
-        care_level TEXT, -- 照顾难度: 容易, 中等, 困难
-        beginner_friendly INTEGER DEFAULT 1, -- 是否新手友好
-        social_level TEXT, -- 社交能力: 孤僻, 友好, 极其亲人
+        species TEXT,
+        age_stage TEXT, -- 幼年, 成年, 老年
+        size_level TEXT, -- 小型, 中型, 大型
+        health_status TEXT, -- 健康, 患病, 残疾
+        sterilized INTEGER DEFAULT 0, -- 是否绝育
+        activity_level TEXT, -- 低, 中, 高
+        temperament_tags TEXT, -- 性格标签: 活泼, 安静, 胆小等
+        good_with_children INTEGER DEFAULT 1, -- 是否对儿童友好
+        good_with_other_pets INTEGER DEFAULT 1, -- 是否对其他宠物友好
+        care_difficulty TEXT, -- 照顾难度: 容易, 中等, 困难
+        medical_needs TEXT, -- 特殊医疗需求
+        companionship_need TEXT, -- 陪伴需求程度: 低, 中, 高
+        budget_need_level TEXT, -- 开销水平: 低, 中, 高
         special_care_flag INTEGER DEFAULT 0, -- 是否需要特殊照顾
         update_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
@@ -106,11 +126,31 @@ def init_database():
     cursor.execute('''CREATE TABLE pet_requirements (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         pet_id INTEGER UNIQUE NOT NULL REFERENCES pets(id) ON DELETE CASCADE,
+        allow_beginner INTEGER DEFAULT 1, -- 是否允许新手领养
+        min_budget_level TEXT DEFAULT '低', -- 最低预算要求
+        min_companion_hours REAL DEFAULT 0, -- 最低陪伴时长要求
+        required_housing_type TEXT, -- 要求的住房类型
+        forbid_other_pets INTEGER DEFAULT 0, -- 是否禁止有其他宠物
+        forbid_children INTEGER DEFAULT 0, -- 是否禁止有小孩
         require_experience TEXT, -- 经验要求: 无, 1-3年, 3年以上
         require_stable_housing INTEGER DEFAULT 1, -- 是否要求稳定住房
         require_return_visit INTEGER DEFAULT 1, -- 是否接受回访
         region_limit TEXT, -- 地区限制
+        special_notes TEXT, -- 特殊说明
         update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    cursor.execute('''CREATE TABLE recommendation_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scene TEXT NOT NULL, -- 如 pet_recommendation / applicant_ranking
+        target_id INTEGER, -- 目标对象ID (如 pet_id 或 user_id)
+        user_id INTEGER REFERENCES users(id),
+        candidate_id INTEGER, -- 被推荐的候选项ID
+        hard_filter_pass INTEGER DEFAULT 1, -- 是否通过硬约束过滤
+        score_detail_json TEXT, -- 评分明细 (结构化 JSON)
+        final_score REAL, -- 最终得分
+        reason_text TEXT, -- 推荐理由/解释文本
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
 
     cursor.execute('''CREATE TABLE applications (

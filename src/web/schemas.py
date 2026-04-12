@@ -272,17 +272,23 @@ class NotificationReadRequest(BaseModel):
 # --- 推荐系统输入层模型 (New in Phase 1) ---
 
 class UserProfileUpdate(BaseModel):
+    age_range: Optional[str] = Field(None, description="年龄段: 18-25, 26-35, 36-50, 50+")
     housing_type: Optional[str] = Field(None, description="住房类型: 公寓, 别墅, 平房等")
+    has_yard: Optional[bool] = Field(None, description="是否有院子")
+    family_size: Optional[int] = Field(None, description="家庭人口数")
+    has_children: Optional[bool] = Field(None, description="是否有小孩")
+    has_other_pets: Optional[bool] = Field(None, description="是否有其他宠物")
     housing_size: Optional[float] = Field(None, description="居住面积 (平米)")
     rental_status: Optional[str] = Field(None, description="租赁状态: 自购, 租房")
     pet_experience: Optional[str] = Field(None, description="养宠经验: 无, 1-3年, 3年以上")
+    experience_level: Optional[int] = Field(None, description="经验等级: 0(新手), 1(有经验), 2(专家)")
     available_time: Optional[float] = Field(None, description="每日可投入时间 (小时)")
     family_support: Optional[bool] = Field(None, description="家庭是否支持")
     budget_level: Optional[str] = Field(None, description="预算承受能力: 低, 中, 高")
-    # --- 新增科学维度 ---
-    family_structure: Optional[str] = Field(None, description="家庭构成: 包含婴幼儿, 包含老人, 纯成年人")
-    allergy_history: Optional[bool] = Field(None, description="成员过敏史")
-    activity_level: Optional[str] = Field(None, description="活跃度: 宅家型, 户外型, 极高强度")
+    allergy_info: Optional[str] = Field(None, description="过敏情况说明")
+    preferred_pet_type: Optional[str] = Field(None, description="偏好品种")
+    preferred_size: Optional[str] = Field(None, description="偏好体型")
+    preferred_temperament: Optional[str] = Field(None, description="偏好性格")
 
 class UserPreferenceUpdate(BaseModel):
     preferred_pet_type: Optional[str] = Field(None, description="偏好品种: 猫, 狗, 鸟等")
@@ -292,22 +298,32 @@ class UserPreferenceUpdate(BaseModel):
     accept_high_energy: Optional[bool] = Field(None, description="是否接受高能量/活泼宠物")
 
 class PetFeatureUpdate(BaseModel):
+    species: Optional[str] = Field(None, description="物种")
+    age_stage: Optional[str] = Field(None, description="幼年, 成年, 老年")
+    size_level: Optional[str] = Field(None, description="小型, 中型, 大型")
+    health_status: Optional[str] = Field(None, description="健康, 患病, 残疾")
+    sterilized: Optional[bool] = Field(None, description="是否绝育")
     energy_level: Optional[str] = Field(None, description="能量水平: 低, 中, 高")
     care_level: Optional[str] = Field(None, description="照顾难度: 容易, 中等, 困难")
     beginner_friendly: Optional[bool] = Field(None, description="是否新手友好")
     social_level: Optional[str] = Field(None, description="社交能力: 孤僻, 友好, 极其亲人")
+    temperament_tags: Optional[str] = Field(None, description="性格标签: 活泼, 安静, 胆小等")
+    good_with_children: Optional[bool] = Field(None, description="是否对儿童友好")
+    good_with_other_pets: Optional[bool] = Field(None, description="是否对其他宠物友好")
+    medical_needs: Optional[str] = Field(None, description="特殊医疗需求")
+    companionship_need: Optional[str] = Field(None, description="陪伴需求程度: 低, 中, 高")
+    budget_need_level: Optional[str] = Field(None, description="开销水平: 低, 中, 高")
     special_care_flag: Optional[bool] = Field(None, description="是否需要特殊照顾")
-    # --- 新增科学维度 ---
-    vaccine_coverage: Optional[bool] = Field(None, description="疫苗是否全覆盖")
-    housetrained: Optional[bool] = Field(None, description="是否已接受居家排泄训练")
-    child_friendly: Optional[bool] = Field(None, description="对儿童友好度")
-    other_pet_friendly: Optional[bool] = Field(None, description="对其他动物友好度")
-    shedding_level: Optional[str] = Field(None, description="脱落度: 不掉毛, 轻微, 严重")
-    separation_anxiety: Optional[bool] = Field(None, description="是否有分离焦虑倾向")
-    guarding_tendency: Optional[bool] = Field(None, description="是否有资源保护(护食)行为")
 
 class PetRequirementUpdate(BaseModel):
+    allow_beginner: Optional[bool] = Field(None, description="是否允许新手领养")
+    min_budget_level: Optional[str] = Field(None, description="最低预算要求")
+    min_companion_hours: Optional[float] = Field(None, description="最低陪伴时长要求")
+    required_housing_type: Optional[str] = Field(None, description="要求的住房类型")
+    forbid_other_pets: Optional[bool] = Field(None, description="是否禁止有其他宠物")
+    forbid_children: Optional[bool] = Field(None, description="是否禁止有小孩")
     require_experience: Optional[str] = Field(None, description="经验要求: 无, 1-3年, 3年以上")
     require_stable_housing: Optional[bool] = Field(None, description="是否要求稳定住房")
     require_return_visit: Optional[bool] = Field(None, description="是否接受回访")
     region_limit: Optional[str] = Field(None, description="地区限制")
+    special_notes: Optional[str] = Field(None, description="特殊说明")

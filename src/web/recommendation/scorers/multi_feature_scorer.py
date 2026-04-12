@@ -1,7 +1,7 @@
 class MultiFeatureScorer:
     """
     多维精排评分器 - 科学加权版
-    基于 rizhi.md 统计学洞察：疫苗披露(+54%), 排泄训练(+59%), 兼容性(+56%)。
+    基于 rizhi.md 统计学洞察：健康披露、行为习惯、社交兼容性。
     """
     async def score(self, query, candidates):
         profile = query.user_profile
@@ -9,53 +9,65 @@ class MultiFeatureScorer:
 
         for candidate in candidates:
             pet = candidate.features.get("pet", {})
-            req = candidate.features.get("requirement", {})
+            # req = candidate.features.get("requirement", {})
 
             # 基础分
             base_score = 50.0
             
-            # --- 1. 统计学显著性补偿 (核心优化) ---
+            # --- 1. 统计学显著性补偿 ---
             statistical_bonus = 0.0
-            # 疫苗接种补偿 (+54% 概率)
-            if pet.get("vaccine_coverage"):
-                statistical_bonus += 15.0
-                candidate.reasons.append("健康披露详尽 (疫苗全覆盖)")
+            # 健康披露补偿 (如果标记为健康或已绝育)
+            if pet.get("health_status") == "健康":
+                statistical_bonus += 10.0
+            if pet.get("sterilized"):
+                statistical_bonus += 10.0
+                candidate.reasons.append("健康披露详尽 (已完成绝育)")
             
-            # 排泄训练补偿 (+59% 概率 - 针对犬类显著)
-            if pet.get("housetrained"):
-                statistical_bonus += 18.0
-                candidate.reasons.append("行为习惯极佳 (已接受排泄训练)")
-            
-            # 兼容性补偿 (+56% 概率)
-            if pet.get("child_friendly") or pet.get("other_pet_friendly"):
-                statistical_bonus += 16.0
-                candidate.reasons.append("社交兼容性高 (对儿童/宠物友好)")
+            # 性格与社交补偿
+            if pet.get("social_level") == "极其亲人":
+                statistical_bonus += 10.0
+            if pet.get("good_with_children") and profile.get("has_children"):
+                statistical_bonus += 10.0
+                candidate.reasons.append("社交兼容性高 (对儿童友好)")
 
             # --- 2. 行为与性格匹配 ---
             behavior_score = 0.0
-            # 分离焦虑与可用时间匹配
-            if pet.get("separation_anxiety") and profile.get("available_time", 0) < 4.0:
-                behavior_score -= 20.0 # 惩罚项
-            elif not pet.get("separation_anxiety") and profile.get("available_time", 0) >= 2.0:
-                behavior_score += 10.0
+            # 陪伴需求匹配
+            time_map = {"低": 1.0, "中": 3.0, "高": 6.0}
+            pet_need_time = time_map.get(pet.get("companionship_need", "中"), 3.0)
+            user_avail_time = profile.get("available_time", 3.0)
+            
+            if user_avail_time >= pet_need_time:
+                behavior_score += 15.0
+                candidate.reasons.append("陪伴时间高度匹配")
+            else:
+                behavior_score -= 10.0
+
+            # 偏好性格匹配 (简单包含逻辑)
+            if pref.get("preferred_temperament") and pref.get("preferred_temperament") in pet.get("temperament_tags", ""):
+                behavior_score += 15.0
+                candidate.reasons.append(f"性格契合 ({pref.get('preferred_temperament')})")
 
             # --- 3. 环境与活跃度匹配 ---
             environment_score = 0.0
-            # 用户活跃度 vs 宠物能量
-            if profile.get("activity_level") == "户外型" and pet.get("energy_level") == "高":
+            # 空间匹配
+            if profile.get("has_yard") and pet.get("energy_level") == "高":
                 environment_score += 15.0
-                candidate.reasons.append("运动需求契合")
+                candidate.reasons.append("运动空间契合 (有院子)")
             
-            # 居住面积加分
-            if profile.get("housing_size", 0) > 60:
-                environment_score += 10.0
+            # 面积补偿
+            if profile.get("housing_size", 0) > 80:
+                environment_score += 5.0
 
             # --- 4. 经验适配 ---
             experience_score = 0.0
-            if profile.get("pet_experience") != "无":
+            if profile.get("experience_level", 0) >= 1: # 有经验或专家
                 experience_score += 10.0
-            if pet.get("beginner_friendly"):
+            
+            # 难度对齐
+            if pet.get("care_difficulty") == "容易" and profile.get("experience_level", 0) == 0:
                 experience_score += 10.0
+                candidate.reasons.append("难度适配 (新手友好)")
 
             # 最终权重计算
             candidate.final_score = (

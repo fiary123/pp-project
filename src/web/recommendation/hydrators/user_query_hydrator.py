@@ -34,28 +34,49 @@ class UserQueryHydrator:
                 logger.error(f"动态特征提取失败: {str(e)}")
 
         # 3. 组装结构化 Profile (数据库优先，Agent 补充)
+        if not profile:
+            profile = {}
+            
         query.user_profile = {
-            "housing_type": profile.get("housing_type") if profile else self._infer_housing(dynamic_traits),
-            "housing_size": profile.get("housing_size") if profile else self._infer_size(dynamic_traits),
-            "rental_status": profile.get("rental_status") if profile else ("租房" if "租" in str(dynamic_traits) else "未知"),
-            "pet_experience": profile.get("pet_experience") if profile else self._infer_experience(dynamic_traits),
-            "available_time": profile.get("available_time") if profile else self._infer_time(dynamic_traits),
-            "family_support": bool(profile.get("family_support", 0)) if profile else ("支持" in str(dynamic_traits)),
-            "budget_level": profile.get("budget_level") if profile else self._infer_budget(dynamic_traits),
+            "age_range": profile.get("age_range") or self._infer_age(dynamic_traits),
+            "housing_type": profile.get("housing_type") or self._infer_housing(dynamic_traits),
+            "has_yard": bool(profile.get("has_yard", 0)) if "has_yard" in profile else ("院子" in str(dynamic_traits)),
+            "family_size": profile.get("family_size", 1),
+            "has_children": bool(profile.get("has_children", 0)) if "has_children" in profile else ("孩子" in str(dynamic_traits) or "小孩" in str(dynamic_traits)),
+            "has_other_pets": bool(profile.get("has_other_pets", 0)) if "has_other_pets" in profile else ("原住民" in str(dynamic_traits) or "养了" in str(dynamic_traits)),
+            "housing_size": profile.get("housing_size") or self._infer_size(dynamic_traits),
+            "rental_status": profile.get("rental_status") or ("租房" if "租" in str(dynamic_traits) else "未知"),
+            "pet_experience": profile.get("pet_experience") or self._infer_experience(dynamic_traits),
+            "experience_level": profile.get("experience_level", 0),
+            "available_time": profile.get("available_time") or self._infer_time(dynamic_traits),
+            "family_support": bool(profile.get("family_support", 0)) if "family_support" in profile else ("支持" in str(dynamic_traits)),
+            "budget_level": profile.get("budget_level") or self._infer_budget(dynamic_traits),
+            "allergy_info": profile.get("allergy_info") or ("过敏" if "过敏" in str(dynamic_traits) else ""),
             "risk_flags": dynamic_traits.get("risk_flags", []),
             "strengths": dynamic_traits.get("strengths", [])
         }
 
         # 4. 组装偏好 Preference
+        if not preference:
+            preference = {}
+            
         query.user_preferences = {
-            "preferred_pet_type": preference.get("preferred_pet_type") if preference else None,
-            "preferred_age_range": preference.get("preferred_age_range") if preference else None,
-            "preferred_size": preference.get("preferred_size") if preference else None,
-            "accept_special_care": bool(preference.get("accept_special_care", 0)) if preference else False,
-            "accept_high_energy": bool(preference.get("accept_high_energy", 1)) if preference else True,
+            "preferred_pet_type": preference.get("preferred_pet_type"),
+            "preferred_age_range": preference.get("preferred_age_range"),
+            "preferred_size": preference.get("preferred_size"),
+            "accept_special_care": bool(preference.get("accept_special_care", 0)),
+            "accept_high_energy": bool(preference.get("accept_high_energy", 1)),
+            "preferred_temperament": profile.get("preferred_temperament")
         }
 
         return query
+
+    def _infer_age(self, traits):
+        t_str = str(traits).lower()
+        if "学生" in t_str: return "18-25"
+        if "上班族" in t_str: return "26-35"
+        if "退休" in t_str: return "50+"
+        return "未知"
 
     def _infer_housing(self, traits):
         t_str = str(traits).lower()
@@ -64,7 +85,6 @@ class UserQueryHydrator:
         return "未知"
 
     def _infer_size(self, traits):
-        # 简单推断逻辑
         if "大房子" in str(traits): return 100.0
         return 50.0
 
