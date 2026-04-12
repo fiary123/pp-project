@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import {
-  MessageCircle, Heart, Plus, X, Loader2, MessageSquare, Edit3, Trash2,
-  Upload, Briefcase, Home, Star, ChevronLeft, ChevronRight
+  MessageCircle, Heart, Plus, X, Loader2,
+  Upload, ChevronLeft, ChevronRight
 } from 'lucide-vue-next';
 import { useAuthStore } from '../store/authStore';
 import BaseCard from '../components/BaseCard.vue';
@@ -43,12 +43,6 @@ const parseAdoptionPreferences = (raw: unknown) => {
   return { ...defaultAdoptionPreferences };
 };
 
-const riskToleranceOptions = [
-  { value: 'conservative', label: '保守型' },
-  { value: 'medium', label: '中性' },
-  { value: 'relaxed', label: '宽松型' }
-] as const;
-
 const requirementOptions = [
   { key: 'allow_novice', label: '接受新手' },
   { key: 'accept_renting', label: '接受租房' },
@@ -56,14 +50,6 @@ const requirementOptions = [
   { key: 'require_family_agreement', label: '需家人同意' },
   { key: 'require_stable_housing', label: '稳定住房' },
   { key: 'require_financial_capacity', label: '预算能力' }
-] as const;
-
-const focusOptions = [
-  { key: 'focus_stability', label: '长期稳定' },
-  { key: 'focus_companionship', label: '陪伴时间' },
-  { key: 'focus_experience', label: '照护经验' },
-  { key: 'prefer_quiet_household', label: '安静家庭' },
-  { key: 'prefer_multi_pet_experience', label: '多宠经验' }
 ] as const;
 
 // 1. 状态管理
@@ -180,22 +166,6 @@ const toggleAdoptionPreference = (key: keyof typeof defaultAdoptionPreferences) 
   if (typeof current === 'boolean') {
     (publishForm.value.adoption_preferences as Record<string, unknown>)[key] = !current;
   }
-};
-
-const summarizePreferenceTags = (preferences: unknown) => {
-  const pref = parseAdoptionPreferences(preferences);
-  return [
-    pref.require_stable_housing ? '稳定住房' : '',
-    pref.require_financial_capacity ? '预算能力' : '',
-    pref.require_followup_updates ? '接受回访' : '',
-    pref.require_family_agreement ? '家庭同意' : '',
-    pref.prefer_local ? '同城优先' : '',
-    pref.focus_companionship ? '高陪伴' : '',
-    pref.focus_experience ? '经验优先' : '',
-    pref.prefer_quiet_household ? '安静家庭' : '',
-    pref.prefer_multi_pet_experience ? '多宠经验' : '',
-    pref.allow_novice ? '接受新手' : '不倾向新手'
-  ].filter(Boolean).slice(0, 6);
 };
 
 const buildMockAdoptionPreferences = () => ({

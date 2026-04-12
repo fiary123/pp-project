@@ -560,26 +560,6 @@ const reactivateUser = async (userId: number) => {
     userActionLoading.value[userId] = false
   }
 }
-const takedownPost = async () => {
-  const postId = window.prompt('请输入要下架的帖子 ID')
-  if (!postId) return
-  const reason = window.prompt('请输入下架理由', '违反社区规定')
-  if (!reason) return
-  
-  isLoading.value = true
-  try {
-    await axios.post(`/api/admin/posts/${postId}/takedown`, { 
-      reason, 
-      admin_id: authStore.user?.id 
-    })
-    window.alert('帖子已成功下架，反馈理由已同步发送给作者。')
-    if (activeMainTab.value === 'logs') await fetchLogs()
-  } catch (err: any) {
-    window.alert('下架失败：' + (err.response?.data?.detail || 'ID 可能不存在或权限不足'))
-  } finally {
-    isLoading.value = false
-  }
-}
 
 const cancelTask = async (taskId: number) => {
   const reason = window.prompt('请输入下架原因', '违规内容')
@@ -623,21 +603,6 @@ const copyBatchTemplate = async () => {
     window.alert('批量录入模板已复制')
   } catch {
     window.alert('当前环境不支持自动复制，请手动复制模板内容')
-  }
-}
-
-const isExtracting = ref<number | null>(null)
-const handleAutoExtract = async (petId: number) => {
-  isExtracting.value = petId
-  try {
-    const res = await axios.post(`/api/pets/${petId}/auto-extract`)
-    const feats = res.data.extracted_features
-    window.alert(`AI 智能提取成功！\n活力度：${feats.energy_level}\n照顾难度：${feats.care_level}\n社交能力：${feats.social_level}\n新手友好：${feats.beginner_friendly ? '是' : '否'}`)
-    await fetchPets()
-  } catch (err) {
-    window.alert('特征提取失败，请检查 AI 服务状态')
-  } finally {
-    isExtracting.value = null
   }
 }
 
