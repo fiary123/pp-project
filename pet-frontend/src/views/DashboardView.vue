@@ -626,6 +626,21 @@ const copyBatchTemplate = async () => {
   }
 }
 
+const isExtracting = ref<number | null>(null)
+const handleAutoExtract = async (petId: number) => {
+  isExtracting.value = petId
+  try {
+    const res = await axios.post(`/api/pets/${petId}/auto-extract`)
+    const feats = res.data.extracted_features
+    window.alert(`AI 智能提取成功！\n活力度：${feats.energy_level}\n照顾难度：${feats.care_level}\n社交能力：${feats.social_level}\n新手友好：${feats.beginner_friendly ? '是' : '否'}`)
+    await fetchPets()
+  } catch (err) {
+    window.alert('特征提取失败，请检查 AI 服务状态')
+  } finally {
+    isExtracting.value = null
+  }
+}
+
 const handleResize = () => { refreshCharts() }
 const switchMainTab = async (tab: MainTab) => {
   activeMainTab.value = tab

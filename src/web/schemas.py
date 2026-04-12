@@ -279,6 +279,10 @@ class UserProfileUpdate(BaseModel):
     available_time: Optional[float] = Field(None, description="每日可投入时间 (小时)")
     family_support: Optional[bool] = Field(None, description="家庭是否支持")
     budget_level: Optional[str] = Field(None, description="预算承受能力: 低, 中, 高")
+    # --- 新增科学维度 ---
+    family_structure: Optional[str] = Field(None, description="家庭构成: 包含婴幼儿, 包含老人, 纯成年人")
+    allergy_history: Optional[bool] = Field(None, description="成员过敏史")
+    activity_level: Optional[str] = Field(None, description="活跃度: 宅家型, 户外型, 极高强度")
 
 class UserPreferenceUpdate(BaseModel):
     preferred_pet_type: Optional[str] = Field(None, description="偏好品种: 猫, 狗, 鸟等")
@@ -293,6 +297,14 @@ class PetFeatureUpdate(BaseModel):
     beginner_friendly: Optional[bool] = Field(None, description="是否新手友好")
     social_level: Optional[str] = Field(None, description="社交能力: 孤僻, 友好, 极其亲人")
     special_care_flag: Optional[bool] = Field(None, description="是否需要特殊照顾")
+    # --- 新增科学维度 ---
+    vaccine_coverage: Optional[bool] = Field(None, description="疫苗是否全覆盖")
+    housetrained: Optional[bool] = Field(None, description="是否已接受居家排泄训练")
+    child_friendly: Optional[bool] = Field(None, description="对儿童友好度")
+    other_pet_friendly: Optional[bool] = Field(None, description="对其他动物友好度")
+    shedding_level: Optional[str] = Field(None, description="脱落度: 不掉毛, 轻微, 严重")
+    separation_anxiety: Optional[bool] = Field(None, description="是否有分离焦虑倾向")
+    guarding_tendency: Optional[bool] = Field(None, description="是否有资源保护(护食)行为")
 
 class PetRequirementUpdate(BaseModel):
     require_experience: Optional[str] = Field(None, description="经验要求: 无, 1-3年, 3年以上")

@@ -282,6 +282,67 @@ def _run_llm_knowledge_fallback(user_query: str, retrieval_hint: str = "") -> st
 # 3. 核心运行工作流 (语音、访谈与匹配)
 # ==========================================
 
+async def analyze_pet_features(pet_name: str, pet_species: str, description: str) -> Dict[str, Any]:
+    """
+    宠物属性提取专家：从描述文本中自动提取结构化推荐特征。
+    用于 Phase 1：新宠物输入专门提取宠物属性信息。
+    """
+    extractor_agent = Agent(
+        role="资深宠物行为学分析师",
+        goal="从感性描述中识别宠物的基础属性、健康状态及深层行为模式。",
+        backstory="你是一名具备临床兽医背景的行为学专家，擅长从字里行间捕捉宠物的疫苗情况、排泄习惯、社交兼容性及潜在行为风险。",
+        llm=common_llm,
+        verbose=True,
+        allow_delegation=False,
+    )
+    
+    task = Task(
+        description=(
+            f"深度分析以下宠物信息：\n"
+            f"名称：{pet_name}\n"
+            f"物种：{pet_species}\n"
+            f"描述：{description}\n\n"
+            "请输出严格 JSON 对象，包含以下字段：\n"
+            "1. energy_level: '低', '中', '高'\n"
+            "2. care_level: '容易', '中等', '困难'\n"
+            "3. beginner_friendly: true/false\n"
+            "4. social_level: '孤僻', '友好', '极其亲人'\n"
+            "5. special_care_flag: true/false\n"
+            "6. vaccine_coverage: true/false (提到已打疫苗、全齐等)\n"
+            "7. housetrained: true/false (提到会用猫砂、不乱拉、定时定点等)\n"
+            "8. child_friendly: true/false (提到对小朋友温柔、适合有娃家庭等)\n"
+            "9. other_pet_friendly: true/false (提到与其他猫狗相处融洽等)\n"
+            "10. shedding_level: '不掉毛', '轻微', '严重'\n"
+            "11. separation_anxiety: true/false (提到粘人过度、独处会叫、拆家等倾向)\n"
+            "12. guarding_tendency: true/false (提到护食、护玩具、有攻击性倾向等)\n"
+            "13. tags: 关键性格标签数组"
+        ),
+        expected_output="严格的 JSON 对象。",
+        agent=extractor_agent,
+    )
+    
+    try:
+        raw = await asyncio.to_thread(lambda: str(Crew(agents=[extractor_agent], tasks=[task]).kickoff()))
+        parsed = _extract_json_payload(raw)
+        return parsed
+    except Exception as e:
+        logger.error(f"宠物特征提取失败: {str(e)}")
+        return {
+            "energy_level": "中",
+            "care_level": "容易",
+            "beginner_friendly": True,
+            "social_level": "友好",
+            "special_care_flag": False,
+            "vaccine_coverage": False,
+            "housetrained": True,
+            "child_friendly": True,
+            "other_pet_friendly": True,
+            "shedding_level": "轻微",
+            "separation_anxiety": False,
+            "guarding_tendency": False,
+            "tags": []
+        }
+
 async def generate_edge_voice(text: str, pet_species: str):
     """异步生成 Edge-TTS 语音字节流"""
     voice = "zh-CN-XiaoyiNeural"

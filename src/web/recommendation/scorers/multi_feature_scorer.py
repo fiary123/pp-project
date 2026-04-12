@@ -1,6 +1,7 @@
 class MultiFeatureScorer:
     """
-    多维评分器 - 根据用户画像和宠物特征计算匹配得分
+    多维精排评分器 - 科学加权版
+    基于 rizhi.md 统计学洞察：疫苗披露(+54%), 排泄训练(+59%), 兼容性(+56%)。
     """
     async def score(self, query, candidates):
         profile = query.user_profile
@@ -10,65 +11,69 @@ class MultiFeatureScorer:
             pet = candidate.features.get("pet", {})
             req = candidate.features.get("requirement", {})
 
-            condition_score = 0.0
-            preference_score = 0.0
-            experience_score = 0.0
-            stability_score = 0.0
-            risk_penalty = 0.0
-
-            # 1. 领养条件匹配 (35%)
-            # 经验适配
-            if req.get("require_experience") == profile.get("pet_experience"):
-                condition_score += 20
-            # 住房匹配 (自有住房或家庭支持)
-            if not req.get("require_stable_housing") or profile.get("rental_status") == "自购" or profile.get("family_support"):
-                condition_score += 15
-
-            # 2. 用户偏好匹配 (25%)
-            # 种类匹配
-            if pref.get("preferred_pet_type") == pet.get("species"):
-                preference_score += 20
-                candidate.reasons.append("宠物类型与您的偏好一致")
+            # 基础分
+            base_score = 50.0
             
-            # 3. 经验与难度适配 (20%)
-            if profile.get("pet_experience") and profile["pet_experience"] != "无":
-                experience_score += 20
-                candidate.reasons.append("您具备丰富的养宠经验")
-            elif pet.get("beginner_friendly"):
-                experience_score += 10
-                candidate.reasons.append("该宠物非常适合新手饲养")
+            # --- 1. 统计学显著性补偿 (核心优化) ---
+            statistical_bonus = 0.0
+            # 疫苗接种补偿 (+54% 概率)
+            if pet.get("vaccine_coverage"):
+                statistical_bonus += 15.0
+                candidate.reasons.append("健康披露详尽 (疫苗全覆盖)")
+            
+            # 排泄训练补偿 (+59% 概率 - 针对犬类显著)
+            if pet.get("housetrained"):
+                statistical_bonus += 18.0
+                candidate.reasons.append("行为习惯极佳 (已接受排泄训练)")
+            
+            # 兼容性补偿 (+56% 概率)
+            if pet.get("child_friendly") or pet.get("other_pet_friendly"):
+                statistical_bonus += 16.0
+                candidate.reasons.append("社交兼容性高 (对儿童/宠物友好)")
 
-            # 4. 环境与稳定性 (20%)
-            if profile.get("family_support"):
-                stability_score += 10
-                candidate.reasons.append("家庭环境支持养宠")
-            if profile.get("available_time", 0) >= 2.0:
-                stability_score += 10
-                candidate.reasons.append("您有充足的陪伴时间")
+            # --- 2. 行为与性格匹配 ---
+            behavior_score = 0.0
+            # 分离焦虑与可用时间匹配
+            if pet.get("separation_anxiety") and profile.get("available_time", 0) < 4.0:
+                behavior_score -= 20.0 # 惩罚项
+            elif not pet.get("separation_anxiety") and profile.get("available_time", 0) >= 2.0:
+                behavior_score += 10.0
 
-            # 5. 风险扣分
-            if pet.get("special_care_flag") and not profile.get("pet_experience"):
-                risk_penalty += 15
-                candidate.risk_flags.append("特殊护理需求与用户经验不匹配")
+            # --- 3. 环境与活跃度匹配 ---
+            environment_score = 0.0
+            # 用户活跃度 vs 宠物能量
+            if profile.get("activity_level") == "户外型" and pet.get("energy_level") == "高":
+                environment_score += 15.0
+                candidate.reasons.append("运动需求契合")
+            
+            # 居住面积加分
+            if profile.get("housing_size", 0) > 60:
+                environment_score += 10.0
 
-            candidate.scores = {
-                "condition_score": condition_score,
-                "preference_score": preference_score,
-                "experience_score": experience_score,
-                "stability_score": stability_score,
-                "risk_penalty": risk_penalty,
-            }
+            # --- 4. 经验适配 ---
+            experience_score = 0.0
+            if profile.get("pet_experience") != "无":
+                experience_score += 10.0
+            if pet.get("beginner_friendly"):
+                experience_score += 10.0
 
-            # 最终权重得分
+            # 最终权重计算
             candidate.final_score = (
-                0.35 * condition_score +
-                0.25 * preference_score +
-                0.20 * experience_score +
-                0.20 * stability_score -
-                risk_penalty
+                base_score + 
+                statistical_bonus + 
+                behavior_score + 
+                environment_score + 
+                experience_score
             )
             
-            # 基础分偏移，确保分段感
-            candidate.final_score = max(0.0, candidate.final_score * 5) # 放大到 100 分量级
+            # 映射到 0-100
+            candidate.final_score = max(0.0, min(100.0, candidate.final_score))
+            
+            candidate.scores = {
+                "statistical": statistical_bonus,
+                "behavior": behavior_score,
+                "environment": environment_score,
+                "experience": experience_score
+            }
 
         return candidates

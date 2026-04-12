@@ -825,9 +825,34 @@ onMounted(fetchPets);
                     </div>
                     <div class="bg-orange-50 dark:bg-black/30 border border-orange-100 dark:border-white/5 rounded-3xl p-5 space-y-4">
                       <p class="text-sm text-orange-700 dark:text-orange-300 font-bold italic leading-relaxed">"{{ getPetMatchReason(pet) }}"</p>
+                      
+                      <!-- 新增：得分 Breakdown 展示 -->
+                      <div v-if="recommendedMatches[String(pet.id)]?.scores" class="grid grid-cols-2 gap-2 pb-2 border-b border-orange-200/30">
+                        <div class="flex flex-col">
+                          <span class="text-[8px] text-gray-400 font-black uppercase">居住契合</span>
+                          <span class="text-xs font-black text-orange-600">{{ Math.round(recommendedMatches[String(pet.id)].scores.condition || 0) }}</span>
+                        </div>
+                        <div class="flex flex-col">
+                          <span class="text-[8px] text-gray-400 font-black uppercase">偏好对齐</span>
+                          <span class="text-xs font-black text-blue-600">{{ Math.round(recommendedMatches[String(pet.id)].scores.preference || 0) }}</span>
+                        </div>
+                        <div class="flex flex-col">
+                          <span class="text-[8px] text-gray-400 font-black uppercase">经验适配</span>
+                          <span class="text-xs font-black text-green-600">{{ Math.round(recommendedMatches[String(pet.id)].scores.experience || 0) }}</span>
+                        </div>
+                        <div class="flex flex-col">
+                          <span class="text-[8px] text-gray-400 font-black uppercase">风险抵扣</span>
+                          <span class="text-xs font-black text-red-600">-{{ Math.round(recommendedMatches[String(pet.id)].scores.penalty || 0) }}</span>
+                        </div>
+                      </div>
+
                       <div class="space-y-2">
                         <div v-for="adv in getPetMatchAdvantages(pet)" :key="adv" class="text-xs text-green-700 dark:text-green-400 font-black flex items-start gap-2">
                           <CheckCircle2 :size="14" class="shrink-0 mt-0.5" /> {{ adv }}
+                        </div>
+                        <!-- 新增：拦截原因展示 -->
+                        <div v-for="reason in recommendedMatches[String(pet.id)]?.reasons?.filter(r => r.includes('拦截'))" :key="reason" class="text-xs text-red-600 dark:text-red-400 font-black flex items-start gap-2">
+                          <AlertTriangle :size="14" class="shrink-0 mt-0.5" /> {{ reason }}
                         </div>
                       </div>
                     </div>

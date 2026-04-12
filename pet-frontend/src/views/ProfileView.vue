@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useAuthStore } from '../store/authStore'
 import {
-  User, LogOut, Loader2, Heart, Camera, ShieldCheck, Mail, X, CheckCircle2, MessageSquare
+  User, LogOut, Loader2, Heart, Camera, ShieldCheck, Mail, X, CheckCircle2, MessageSquare, Sparkles, Wand2
 } from 'lucide-vue-next'
 import BaseCard from '../components/BaseCard.vue'
 import axios from '../api/index'
@@ -57,7 +57,55 @@ const handleUpdatePassword = async () => {
   } catch (err: any) { passStatus.value = err.response?.data?.detail || '修改失败' }
 }
 
-// 3. 数据加载 (增强版)
+// --- 3. 画像表单逻辑 (科学特征工程升级版) ---
+const userProfile = ref({
+  housing_type: 'apartment',
+  housing_size: 50,
+  rental_status: '租房',
+  pet_experience: '无',
+  available_time: 2,
+  budget_level: '中',
+  family_support: true,
+  family_structure: '纯成年人',
+  allergy_history: false,
+  activity_level: '宅家型'
+})
+const isUpdatingProfile = ref(false)
+
+// AI 智能解析逻辑
+const aiBio = ref('')
+const isAiParsing = ref(false)
+const handleAiAutoProfile = async () => {
+  if (!aiBio.value.trim()) return
+  isAiParsing.value = true
+  try {
+    const res = await axios.post('/api/user/auto-profile', { bio: aiBio.value })
+    if (res.data.extracted_data) {
+      userProfile.value = { ...userProfile.value, ...res.data.extracted_data }
+      alert('AI 已根据您的描述自动填充表单，请核对后保存！')
+    }
+  } catch (err) { alert('AI 解析失败，请尝试手动填写') }
+  finally { isAiParsing.value = false }
+}
+
+const fetchUserProfile = async () => {
+  if (!authStore.user?.id) return
+  try {
+    const res = await axios.get(`/api/user/profile/${authStore.user.id}`)
+    if (res.data) userProfile.value = { ...userProfile.value, ...res.data }
+  } catch (err) { console.error('加载画像失败', err) }
+}
+
+const handleUpdateProfile = async () => {
+  isUpdatingProfile.value = true
+  try {
+    await axios.post('/api/user/update-profile-data', userProfile.value)
+    alert('领养画像更新成功，推荐系统将根据新资料为您匹配！')
+  } catch (err) { alert('更新失败') }
+  finally { isUpdatingProfile.value = false }
+}
+
+// 4. 数据加载 (申请记录)
 const applications = ref<any[]>([])
 const incomingApplications = ref<any[]>([])
 const isLoading = ref(false)
@@ -67,22 +115,15 @@ const showAppDetail = ref(false)
 const fetchData = async () => {
   if (!authStore.isLoggedIn) return;
   isLoading.value = true;
-  
-  // 独立请求，互不影响
   try {
     const res = await axios.get(`/api/user/applications/${authStore.user?.id}`);
     applications.value = Array.isArray(res.data) ? res.data : [];
-  } catch (err) {
-    console.error('加载我的申请失败:', err);
-  }
+  } catch (err) { console.error('加载我的申请失败:', err); }
 
   try {
     const res = await axios.get('/api/user/applications/incoming');
     incomingApplications.value = Array.isArray(res.data) ? res.data : [];
-  } catch (err) {
-    console.error('加载收到的申请失败:', err);
-  }
-  
+  } catch (err) { console.error('加载收到的申请失败:', err); }
   isLoading.value = false;
 }
 
@@ -111,12 +152,13 @@ const handleOwnerDecision = async (appId: number, status: string) => {
   try {
     await axios.post(`/api/user/applications/${appId}/owner-decision`, { status, owner_note: note })
     fetchData()
-  } catch (err) {
-    alert('处理失败');
-  }
+  } catch (err) { alert('处理失败'); }
 }
 
-onMounted(fetchData)
+onMounted(() => {
+  fetchData()
+  fetchUserProfile()
+})
 </script>
 
 <template>
@@ -125,7 +167,7 @@ onMounted(fetchData)
     <!-- 1. 顶部标题 -->
     <div class="text-center md:text-left space-y-2">
       <h1 class="text-5xl md:text-6xl font-black text-gray-900 dark:text-white italic tracking-tighter uppercase">Personal Center</h1>
-      <p class="text-xl text-gray-500 dark:text-gray-400 font-bold">管理您的资料、申请与安全设置</p>
+      <p class="text-xl text-gray-500 dark:text-gray-400 font-bold">管理您的资料、申请与科学画像</p>
     </div>
 
     <!-- 2. 基本资料 -->
@@ -165,7 +207,102 @@ onMounted(fetchData)
       </BaseCard>
     </section>
 
-    <!-- 3. 安全设置 -->
+    <!-- 3. 领养资质画像 (科学升级版) -->
+    <section class="space-y-6">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3 text-2xl font-black text-gray-900 dark:text-white italic">
+          <Sparkles class="text-orange-500" :size="28" /> 领养资质画像
+        </div>
+        <div class="text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-100 dark:bg-white/5 px-3 py-1 rounded-full border border-gray-200 dark:border-white/10">科学特征工程 v2.5</div>
+      </div>
+
+      <!-- AI 智能输入区 (解决麻烦的关键) -->
+      <BaseCard class="p-6 border-2 border-dashed border-orange-500/30 bg-orange-500/5">
+        <div class="space-y-4">
+          <div class="flex items-center gap-2 text-sm font-black text-orange-600 dark:text-orange-400 uppercase tracking-widest">
+            <Wand2 :size="16" /> AI 智能一键生成
+          </div>
+          <div class="flex gap-3">
+            <input v-model="aiBio" type="text" placeholder="用一句话描述您的生活（如：住50平公寓，家里有宝宝，平时工作忙...）" class="flex-1 bg-white dark:bg-[#1a1a1a] border border-orange-200 dark:border-orange-500/20 rounded-2xl py-4 px-6 outline-none focus:ring-4 focus:ring-orange-500/10 font-bold text-gray-900 dark:text-white" />
+            <button @click="handleAiAutoProfile" :disabled="isAiParsing || !aiBio.trim()" class="px-8 bg-orange-500 text-white rounded-2xl font-black shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50">
+              <Loader2 v-if="isAiParsing" class="animate-spin" :size="20" />
+              <Sparkles v-else :size="20" />
+              解析
+            </button>
+          </div>
+          <p class="text-[10px] text-gray-400 italic">提示：AI 会自动提取住房、陪伴时间、家庭结构等维度，省去逐项点击的烦恼。</p>
+        </div>
+      </BaseCard>
+
+      <BaseCard class="p-8 md:p-12">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div class="space-y-6">
+            <div class="space-y-2">
+              <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest">居住详情</label>
+              <div class="grid grid-cols-2 gap-3">
+                <select v-model="userProfile.housing_type" class="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl py-3 px-4 outline-none focus:border-orange-500 text-gray-900 dark:text-white font-bold">
+                  <option value="apartment">公寓</option>
+                  <option value="house">别墅/独立住宅</option>
+                </select>
+                <input v-model.number="userProfile.housing_size" type="number" placeholder="平米" class="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl py-3 px-4 outline-none focus:border-orange-500 font-bold" />
+              </div>
+            </div>
+            
+            <div class="space-y-2">
+              <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest">家庭人口结构</label>
+              <select v-model="userProfile.family_structure" class="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl py-3 px-4 outline-none focus:border-orange-500 text-gray-900 dark:text-white font-bold">
+                <option value="纯成年人">纯成年人 (适合所有宠物)</option>
+                <option value="包含婴幼儿">有婴幼儿 (需过滤护食/焦虑宠物)</option>
+                <option value="包含老人">有老人 (需过滤高冲撞宠物)</option>
+              </select>
+            </div>
+
+            <div class="space-y-2">
+              <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest">生活活跃度</label>
+              <div class="flex gap-2">
+                <button v-for="opt in ['宅家型', '户外型']" :key="opt" @click="userProfile.activity_level = opt" :class="userProfile.activity_level === opt ? 'bg-orange-500 text-white' : 'bg-gray-100 dark:bg-white/5 text-gray-500'" class="flex-1 py-2 rounded-xl text-xs font-black transition-all">{{ opt }}</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-6">
+            <div class="space-y-2">
+              <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest">养宠经验 & 时间</label>
+              <div class="grid grid-cols-2 gap-3">
+                <select v-model="userProfile.pet_experience" class="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl py-3 px-4 outline-none focus:border-orange-500 text-gray-900 dark:text-white font-bold">
+                  <option value="无">无经验</option>
+                  <option value="1-3年">1-3年</option>
+                  <option value="3年以上">资深</option>
+                </select>
+                <input v-model.number="userProfile.available_time" type="number" step="0.5" placeholder="小时/日" class="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl py-3 px-4 outline-none focus:border-orange-500 font-bold" />
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest">其他关键信息</label>
+              <div class="space-y-3">
+                <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-white/5 rounded-xl border border-gray-200 dark:border-white/10">
+                  <span class="text-xs font-bold text-gray-700 dark:text-gray-300">家庭成员是否有过敏史？</span>
+                  <input v-model="userProfile.allergy_history" type="checkbox" class="w-5 h-5 accent-orange-500" />
+                </div>
+                <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-white/5 rounded-xl border border-gray-200 dark:border-white/10">
+                  <span class="text-xs font-bold text-gray-700 dark:text-gray-300">全家是否已达成共识？</span>
+                  <input v-model="userProfile.family_support" type="checkbox" class="w-5 h-5 accent-orange-500" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button @click="handleUpdateProfile" :disabled="isUpdatingProfile" class="mt-10 w-full py-5 bg-gray-900 dark:bg-white text-white dark:text-black rounded-2xl font-black shadow-2xl hover:scale-[1.02] transition-all flex items-center justify-center gap-2">
+          <Loader2 v-if="isUpdatingProfile" class="animate-spin" :size="20" />
+          <CheckCircle2 v-else :size="20" />
+          更新画像并同步推荐引擎
+        </button>
+      </BaseCard>
+    </section>
+
+    <!-- 4. 安全设置 -->
     <section class="space-y-6">
       <div class="flex items-center gap-3 text-2xl font-black text-gray-900 dark:text-white italic">
         <ShieldCheck class="text-blue-500" :size="28" /> 安全校验修改
@@ -202,7 +339,7 @@ onMounted(fetchData)
       </BaseCard>
     </section>
 
-    <!-- 4. 我的领养申请 -->
+    <!-- 5. 我的领养申请 -->
     <section class="space-y-6">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3 text-2xl font-black text-gray-900 dark:text-white italic">
@@ -248,7 +385,7 @@ onMounted(fetchData)
       </div>
     </section>
 
-    <!-- 5. 收到的申请 -->
+    <!-- 6. 收到的申请 -->
     <section class="space-y-6">
       <div class="flex items-center gap-3 text-2xl font-black text-gray-900 dark:text-white italic">
         <Mail class="text-green-500" :size="28" /> 收到的领养请求
@@ -303,6 +440,7 @@ onMounted(fetchData)
             <div class="space-y-8">
               <div class="space-y-2 text-gray-900 dark:text-white">
                 <div class="flex items-center gap-2.5 text-orange-500 font-black text-xs uppercase tracking-widest mb-2"><Heart :size="16"/> 领养申请详情报告</div>
+                <h3 class="text-4xl font-black italic tracking-tighter">領養：{{ selectedApp.pet_name }}</h3>
                 <h3 class="text-4xl font-black italic tracking-tighter">領養：{{ selectedApp.pet_name }}</h3>
                 <p class="text-gray-500 font-bold">提交时间：{{ selectedApp.create_time }}</p>
               </div>

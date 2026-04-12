@@ -113,13 +113,52 @@ async def delete_pet(pet_id: int, current_user: dict = Depends(get_current_user)
         conn.commit()
     return {"status": "success"}
 
-# --- Phase 1: 宠物特征与领养要求管理 ---
+from src.agents.agents import analyze_pet_features
+# ... (保持现有导入)
 
-@router.get("/pets/{pet_id}/feature")
-async def get_pet_feature(pet_id: int):
-    """获取宠物推荐特征"""
-    feature = ProfileService.get_pet_features(pet_id)
-    return feature if feature else {}
+@router.post("/pets/{pet_id}/auto-extract")
+async def auto_extract_pet_features(pet_id: int, current_user: dict = Depends(get_current_user)):
+    """利用 AI 智能提取宠物的结构化特征"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name, species, description, owner_id FROM pets WHERE id=?", (pet_id,))
+        pet = cursor.fetchone()
+        if not pet:
+            raise HTTPException(status_code=404, detail="宠物不存在")
+        if pet["owner_id"] != current_user["id"] and current_user.get("role") not in ["admin", "org_admin"]:
+            raise HTTPException(status_code=403, detail="无权限执行提取操作")
+
+    # 调用 AI Agent 提取特征
+    extracted = await analyze_pet_features(
+        pet_name=pet["name"],
+        pet_species=pet["species"],
+        description=pet["description"] or ""
+    )
+    
+    # 转化为 PetFeatureUpdate 对象并保存
+    from src.web.schemas import PetFeatureUpdate
+    feature_update = PetFeatureUpdate(
+        energy_level=extracted.get("energy_level"),
+        care_level=extracted.get("care_level"),
+        beginner_friendly=extracted.get("beginner_friendly"),
+        social_level=extracted.get("social_level"),
+        special_care_flag=extracted.get("special_care_flag")
+    )
+    
+    ProfileService.update_pet_features(pet_id, feature_update)
+    
+    # 更新宠物表的 tags 字段 (可选)
+    if extracted.get("tags"):
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE pets SET tags = ? WHERE id = ?", (json.dumps(extracted["tags"], ensure_ascii=False), pet_id))
+            conn.commit()
+
+    return {
+        "status": "success",
+        "message": "AI 智能提取成功",
+        "extracted_features": extracted
+    }
 
 @router.put("/pets/{pet_id}/feature")
 async def update_pet_feature(pet_id: int, features: PetFeatureUpdate, current_user: dict = Depends(get_current_user)):

@@ -1,25 +1,52 @@
+from src.agents.agents import analyze_pet_interview
+import logging
+
+logger = logging.getLogger(__name__)
+
 class UserQueryHydrator:
     """
-    请求补全器 - 获取用户的画像和偏好，填充到 Query 对象中
+    请求补全器 - 获取用户的画像和偏好，填充到 Query 对象中。
+    支持冷启动：若数据库画像缺失，则调用 AI Agent 从用户查询文本中动态提取特征。
     """
     def __init__(self, profile_service):
         self.profile_service = profile_service
 
     async def hydrate(self, query):
+        # 1. 尝试从数据库获取持久化画像
         profile = self.profile_service.get_user_profile(query.user_id)
         preference = self.profile_service.get_user_preferences(query.user_id)
 
-        # 转换为统一的字典格式，方便后续 Filter 和 Scorer 使用
+        # 2. 冷启动逻辑：如果画像核心字段缺失且有 user_query，则调用 Agent 动态分析
+        dynamic_traits = {}
+        if (not profile or not profile.get("housing_type")) and query.user_query:
+            try:
+                logger.info(f"触发冷启动特征提取，用户 ID: {query.user_id}")
+                # 调用 agents.py 中的分析函数
+                analysis = await analyze_pet_interview(
+                    user_msg=query.user_query,
+                    pet_name="未知",
+                    pet_species="所有",
+                    pet_desc="推荐请求"
+                )
+                dynamic_traits = analysis
+                logger.info(f"动态特征提取成功: {dynamic_traits.get('user_traits')}")
+            except Exception as e:
+                logger.error(f"动态特征提取失败: {str(e)}")
+
+        # 3. 组装结构化 Profile (数据库优先，Agent 补充)
         query.user_profile = {
-            "housing_type": profile.get("housing_type") if profile else None,
-            "housing_size": profile.get("housing_size") if profile else None,
-            "rental_status": profile.get("rental_status") if profile else None,
-            "pet_experience": profile.get("pet_experience") if profile else None,
-            "available_time": profile.get("available_time") if profile else None,
-            "family_support": bool(profile.get("family_support", 0)) if profile else False,
-            "budget_level": profile.get("budget_level") if profile else None,
+            "housing_type": profile.get("housing_type") if profile else self._infer_housing(dynamic_traits),
+            "housing_size": profile.get("housing_size") if profile else self._infer_size(dynamic_traits),
+            "rental_status": profile.get("rental_status") if profile else ("租房" if "租" in str(dynamic_traits) else "未知"),
+            "pet_experience": profile.get("pet_experience") if profile else self._infer_experience(dynamic_traits),
+            "available_time": profile.get("available_time") if profile else self._infer_time(dynamic_traits),
+            "family_support": bool(profile.get("family_support", 0)) if profile else ("支持" in str(dynamic_traits)),
+            "budget_level": profile.get("budget_level") if profile else self._infer_budget(dynamic_traits),
+            "risk_flags": dynamic_traits.get("risk_flags", []),
+            "strengths": dynamic_traits.get("strengths", [])
         }
 
+        # 4. 组装偏好 Preference
         query.user_preferences = {
             "preferred_pet_type": preference.get("preferred_pet_type") if preference else None,
             "preferred_age_range": preference.get("preferred_age_range") if preference else None,
@@ -27,5 +54,31 @@ class UserQueryHydrator:
             "accept_special_care": bool(preference.get("accept_special_care", 0)) if preference else False,
             "accept_high_energy": bool(preference.get("accept_high_energy", 1)) if preference else True,
         }
-        
+
         return query
+
+    def _infer_housing(self, traits):
+        t_str = str(traits).lower()
+        if "别墅" in t_str: return "别墅"
+        if "公寓" in t_str or "楼房" in t_str: return "公寓"
+        return "未知"
+
+    def _infer_size(self, traits):
+        # 简单推断逻辑
+        if "大房子" in str(traits): return 100.0
+        return 50.0
+
+    def _infer_experience(self, traits):
+        t_str = str(traits).lower()
+        if "有经验" in t_str or "养过" in t_str: return "1-3年"
+        return "无"
+
+    def _infer_time(self, traits):
+        if "全职" in str(traits): return 8.0
+        if "加班" in str(traits): return 1.0
+        return 3.0
+
+    def _infer_budget(self, traits):
+        if "高薪" in str(traits) or "不差钱" in str(traits): return "高"
+        return "中"
+

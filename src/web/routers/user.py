@@ -246,30 +246,60 @@ def get_user_profile(user_id: int):
             raise HTTPException(status_code=404, detail="用户不存在")
         return dict(row)
 
-@router.post("/update-profile")
-async def update_profile(
+from src.agents.agents import analyze_pet_interview # 使用现有的分析函数
+# ... (保持现有导入)
+
+@router.post("/auto-profile")
+async def auto_generate_profile(
+    bio: str = Body(..., embed=True),
+    current_user: dict = Depends(get_current_user)
+):
+    """利用 AI 从用户的一句话 bio 中智能提取结构化画像"""
+    try:
+        # 调用 AI 代理进行语义解析
+        analysis = await analyze_pet_interview(
+            user_msg=bio,
+            pet_name="系统",
+            pet_species="画像生成",
+            pet_desc="推荐画像提取"
+        )
+        
+        # 映射到结构化字段
+        # 注意：这里我们基于分析出的 user_traits 和 risk_flags 进行启发式映射
+        traits = str(analysis.get("user_traits", [])).lower()
+        
+        extracted = {
+            "housing_type": "house" if "别墅" in traits or "院子" in traits else "apartment",
+            "family_structure": "包含婴幼儿" if "宝宝" in traits or "婴儿" in traits else ("包含老人" if "老人" in traits else "纯成年人"),
+            "pet_experience": "3年以上" if "资深" in traits or "多年" in traits else ("1-3年" if "养过" in traits else "无"),
+            "activity_level": "户外型" if "运动" in traits or "跑步" in traits else "宅家型",
+            "available_time": 8.0 if "全职" in traits else (1.0 if "加班" in traits else 3.0),
+            "allergy_history": "过敏" in traits or "鼻炎" in traits,
+            "budget_level": "高" if "不差钱" in traits or "高薪" in traits else "中"
+        }
+        
+        return {
+            "status": "success",
+            "extracted_data": extracted,
+            "summary": analysis.get("summary")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI 解析失败: {str(e)}")
+
+@router.post("/update-profile-data")
+async def update_profile_data(
     payload: dict = Body(...),
     current_user: dict = Depends(get_current_user)
 ):
-    """更新用户基础资料（头像、用户名）"""
-    # 评审说明：
-    # 该接口仅允许当前登录用户修改自己的头像或昵称。
-    new_username = payload.get("username")
-    new_avatar = payload.get("avatar_url")
+    """更新用户的详细结构化画像数据"""
+    from src.web.services.profile_service import ProfileService
+    from src.web.schemas import UserProfileUpdate
     
-    with get_db() as conn:
-        cursor = conn.cursor()
-        if new_username:
-            cursor.execute("UPDATE users SET username=? WHERE id=?", (new_username, current_user["id"]))
-        if new_avatar:
-            cursor.execute("UPDATE users SET avatar_url=? WHERE id=?", (new_avatar, current_user["id"]))
-        conn.commit()
+    # 转化为 Pydantic 模型进行校验
+    profile_update = UserProfileUpdate(**payload)
+    ProfileService.update_user_profile(current_user["id"], profile_update)
     
-    return {"status": "success", "user": {
-        "id": current_user["id"],
-        "username": new_username or current_user["username"],
-        "avatar_url": new_avatar or current_user.get("avatar_url")
-    }}
+    return {"status": "success", "message": "画像数据已持久化"}
 
 @router.post("/change-password")
 async def change_password(req: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
