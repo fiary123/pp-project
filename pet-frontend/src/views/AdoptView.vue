@@ -851,7 +851,7 @@ onMounted(fetchPets);
                           <CheckCircle2 :size="14" class="shrink-0 mt-0.5" /> {{ adv }}
                         </div>
                         <!-- 新增：拦截原因展示 -->
-                        <div v-for="reason in recommendedMatches[String(pet.id)]?.reasons?.filter(r => r.includes('拦截'))" :key="reason" class="text-xs text-red-600 dark:text-red-400 font-black flex items-start gap-2">
+                        <div v-for="reason in recommendedMatches[String(pet.id)]?.reasons?.filter((r: string) => r.includes('拦截'))" :key="reason" class="text-xs text-red-600 dark:text-red-400 font-black flex items-start gap-2">
                           <AlertTriangle :size="14" class="shrink-0 mt-0.5" /> {{ reason }}
                         </div>
                       </div>
