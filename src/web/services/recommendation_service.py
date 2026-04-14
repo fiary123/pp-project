@@ -9,6 +9,7 @@ from src.web.recommendation.filters.hard_constraint_filter import HardConstraint
 from src.web.recommendation.filters.applicant_constraint_filter import ApplicantConstraintFilter
 from src.web.recommendation.scorers.multi_feature_scorer import MultiFeatureScorer
 from src.web.recommendation.scorers.applicant_match_scorer import ApplicantMatchScorer
+from src.web.recommendation.scorers.agent_decision_auditor import AgentDecisionAuditor
 from src.web.recommendation.selectors.topk_selector import TopKSelector
 from src.web.services.pet_service import PetService
 from src.web.services.application_service import ApplicationService
@@ -23,18 +24,18 @@ class RecommendationService:
         self.pet_service = PetService()
         self.application_service = ApplicationService()
 
-    async def recommend_pets_for_user(self, user_id: int):
+    async def recommend_pets_for_user(self, user_id: int, user_query: str = ""):
         """场景1: 给领养用户推荐宠物 (Pet Discovery)"""
         # 1. 检查画像完整度 (冷启动检测)
         profile = self.profile_service.get_user_profile(user_id)
         needs_cold_start = False
-        if not profile or not profile.get("housing_type") or not profile.get("budget_level"):
+        if (not profile or not profile.get("housing_type")) and not user_query:
             needs_cold_start = True
 
         # 2. 创建初始 Query
-        query = RecommendationQuery(user_id=user_id, scene="pet_for_user")
+        query = RecommendationQuery(user_id=user_id, scene="pet_for_user", user_query=user_query)
 
-        # 3. 组装流水线
+        # 3. 组装流水线 (多阶段：生成->过滤->评分->Agent审计->排序)
         pipeline = RecommendationPipeline(
             query_hydrators=[
                 UserQueryHydrator(self.profile_service),
@@ -50,6 +51,7 @@ class RecommendationService:
             ],
             scorers=[
                 MultiFeatureScorer(),
+                AgentDecisionAuditor(), # [重构新增]：多智能体决策审计阶段
             ],
             selector=TopKSelector(k=10),
         )
@@ -70,10 +72,10 @@ class RecommendationService:
                 reason_text="; ".join(res.reasons)
             )
 
-        # 返回结果附带冷启动标志
         return {
             "results": results,
-            "needs_cold_start": needs_cold_start
+            "needs_cold_start": needs_cold_start,
+            "query_obj": query # 导出 query 以便演示接口提取 trace
         }
 
     async def rank_applicants_for_pet(self, pet_id: int):

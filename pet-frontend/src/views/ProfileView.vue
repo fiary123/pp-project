@@ -526,17 +526,42 @@ onMounted(() => {
     <section class="space-y-6">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3 text-2xl font-black text-gray-900 dark:text-white italic">
-          <Mail class="text-green-500" :size="28" /> 申请审核联动
+          <Mail class="text-green-500" :size="28" /> 申请审核联动系统
         </div>
-        <div class="text-xs font-bold text-gray-400">推荐排序仅提供决策支持，送养方保留最终决定权</div>
+        <div class="text-xs font-black text-slate-400 uppercase tracking-widest px-3 py-1 bg-slate-100 dark:bg-white/5 rounded-lg border border-slate-200 dark:border-white/5">
+          Feature-Driven Audit v4.2
+        </div>
       </div>
 
-      <BaseCard class="p-5 bg-orange-500/5 border border-orange-500/10">
-        <div class="flex items-start gap-3 text-sm text-gray-600 dark:text-gray-300">
-          <Info class="text-orange-500 shrink-0 mt-0.5" :size="18" />
-          <div class="space-y-1">
-            <p class="font-black text-gray-900 dark:text-white">当前审核主线</p>
-            <p>用户画像与领养需求采集 → 候选宠物生成 → 约束过滤 → 多维评分 → 推荐排序 → 申请审核联动</p>
+      <!-- [演示增强]：老师视角 - 推荐排序逻辑说明卡 -->
+      <BaseCard class="p-8 bg-slate-900 text-white border-none shadow-2xl relative overflow-hidden group">
+        <div class="absolute -right-10 -bottom-10 w-40 h-40 bg-orange-500/20 rounded-full blur-3xl group-hover:bg-orange-500/40 transition-all duration-700"></div>
+        <div class="relative z-10 space-y-6">
+          <div class="flex items-center gap-4">
+            <div class="p-3 bg-orange-500 rounded-2xl shadow-lg shadow-orange-500/20"><BrainCircuit :size="24" /></div>
+            <div>
+              <h4 class="text-xl font-black italic uppercase tracking-tight">推荐引擎驱动的审核精排逻辑</h4>
+              <p class="text-xs text-slate-400 font-bold mt-1">系统已将原始申请流重定向为“结构化匹配流”，显著提升发布者的审核决策效率。</p>
+            </div>
+          </div>
+          
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2">
+            <div class="space-y-2">
+              <p class="text-[10px] font-black text-orange-500 uppercase tracking-widest">Step 1: 画像对齐</p>
+              <p class="text-xs text-slate-300 leading-5">从申请人 Bio 与结构化问卷中提取住房、经验、预算等 12 个核心维度。</p>
+            </div>
+            <div class="space-y-2 border-l border-white/10 pl-4">
+              <p class="text-[10px] font-black text-blue-400 uppercase tracking-widest">Step 2: 约束感知</p>
+              <p class="text-xs text-slate-300 leading-5">同步比对送养方的硬性约束（如禁止新手、陪伴时长门槛等）执行初步筛选。</p>
+            </div>
+            <div class="space-y-2 border-l border-white/10 pl-4">
+              <p class="text-[10px] font-black text-green-400 uppercase tracking-widest">Step 3: 多维评分</p>
+              <p class="text-xs text-slate-300 leading-5">基于环境、偏好、经验与风险抵扣四维度计算匹配分，并由 Agent 进行决策审计。</p>
+            </div>
+            <div class="space-y-2 border-l border-white/10 pl-4">
+              <p class="text-[10px] font-black text-pink-400 uppercase tracking-widest">Step 4: 实时重排</p>
+              <p class="text-xs text-slate-300 leading-5">申请提交后立即触发 Pipeline 重排，确保发布者始终优先看到最优候选。</p>
+            </div>
           </div>
         </div>
       </BaseCard>

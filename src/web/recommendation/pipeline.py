@@ -1,8 +1,9 @@
-from typing import List
+from typing import List, Dict, Any
 
 class RecommendationPipeline:
     """
-    通用推荐流水线 - 协调各种组件完成推荐流程
+    增强型推荐流水线 - 支持执行追踪 (Execution Trace)
+    记录每阶段的候选数量变化与详细统计，专为演示视角设计。
     """
     def __init__(self, query_hydrators, sources, hydrators, filters, scorers, selector):
         self.query_hydrators = query_hydrators
@@ -11,29 +12,74 @@ class RecommendationPipeline:
         self.filters = filters
         self.scorers = scorers
         self.selector = selector
+        self.trace = {
+            "phases": [],
+            "query_context": {}
+        }
 
-    async def execute(self, query):
-        # 1. 补全请求上下文 (Query Hydration)
+    def _add_trace(self, phase_name: str, before_count: int, after_count: int, details: Any = None):
+        self.trace["phases"].append({
+            "phase": phase_name,
+            "before": before_count,
+            "after": after_count,
+            "details": details
+        })
+
+    async def execute(self, query) -> List[Any]:
+        # 重置追踪信息
+        self.trace = {"phases": [], "query_context": {}}
+        
+        # 1. 查询补全 (Query Hydration Phase)
         for hydrator in self.query_hydrators:
-            query = await hydrator.hydrate(query)
+            await hydrator.hydrate(query)
+        self.trace["query_context"] = {
+            "user_id": query.user_id,
+            "scene": query.scene,
+            "profile": query.user_profile,
+            "preferences": query.user_preferences
+        }
 
-        # 2. 召回候选集 (Recall Phase)
-        candidates: List = []
+        # 2. 候选生成 (Recall Phase)
+        candidates = []
         for source in self.sources:
-            source_candidates = await source.get_candidates(query)
-            candidates.extend(source_candidates)
+            candidates.extend(await source.get_candidates(query))
+        
+        recall_count = len(candidates)
+        self._add_trace("候选生成 (Recall)", 0, recall_count, {"sources": [type(s).__name__ for s in self.sources]})
 
-        # 3. 补全候选特征 (Candidate Hydration)
+        # 3. 特征补全 (Feature Hydration Phase)
         for hydrator in self.hydrators:
             candidates = await hydrator.hydrate(query, candidates)
+        self._add_trace("特征补全 (Hydration)", recall_count, len(candidates))
 
-        # 4. 过滤不合规候选 (Filtering Phase)
-        for flt in self.filters:
-            candidates = await flt.filter(query, candidates)
+        # 4. 约束过滤 (Constraint Filtering Phase)
+        all_intercepted = []
+        before_filter = len(candidates)
+        
+        for filter_obj in self.filters:
+            # 尝试调用增强版过滤接口以获取拦截详情
+            if hasattr(filter_obj, 'filter_with_details'):
+                candidates, intercepted = await filter_obj.filter_with_details(query, candidates)
+                all_intercepted.extend(intercepted)
+            else:
+                candidates = await filter_obj.filter(query, candidates)
+        
+        after_filter = len(candidates)
+        self._add_trace("约束过滤 (Filtering)", before_filter, after_filter, {
+            "intercepted_count": len(all_intercepted),
+            "intercepted_samples": all_intercepted[:10] 
+        })
 
-        # 5. 计算分数 (Scoring Phase)
+        # 5. 多维评分 (精排) (Scoring Phase)
         for scorer in self.scorers:
             candidates = await scorer.score(query, candidates)
+        self._add_trace("多维评分 (Scoring)", after_filter, len(candidates))
 
         # 6. 最终排序与选择 (Selection Phase)
-        return self.selector.select(candidates)
+        selected = self.selector.select(candidates)
+        self._add_trace("排序选择 (Selection)", len(candidates), len(selected))
+        
+        # 将本次执行的完整链路数据挂载到 query 对象，方便上层 Service 提取展示
+        query.last_execution_trace = self.trace
+        
+        return selected

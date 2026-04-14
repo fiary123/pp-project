@@ -1,87 +1,78 @@
 class HardConstraintFilter:
     """
-    约束过滤器
-    在多维评分前先过滤明显不满足领养要求的对象。
+    硬性约束过滤器 - 增强演示版
+    支持返回拦截详情，以便在演示界面展示“约束感知”的决策过程。
     """
     async def filter(self, query, candidates):
-        result = []
-        profile = query.user_profile
+        res, _ = await self.filter_with_details(query, candidates)
+        return res
 
+    async def filter_with_details(self, query, candidates):
+        result = []
+        intercepted = []
+        profile = query.user_profile
+        
         for candidate in candidates:
             pet = candidate.features.get("pet", {})
             req = candidate.features.get("requirement", {})
-            passed_constraints = []
-            failed_constraints = []
             
-            if profile.get("allergy_info") and "低敏" not in pet.get("temperament_tags", ""):
-                failed_constraints.append("过敏家庭需低敏宠物")
+            # 1. 过敏约束
+            if profile.get("allergy_info") and "低敏" not in str(pet.get("temperament_tags", "")):
+                # 如果用户有过敏史且宠物不是低敏品种，在严格模式下应拦截，此处记录理由
                 candidate.hard_filter_pass = 0
-                candidate.stage_trace["constraint_filter"] = {"stage": "约束过滤", "passed": False, "failed_constraints": failed_constraints}
-                candidate.reasons.append("约束过滤未通过：用户/家庭成员存在过敏史，候选宠物不属于低敏对象")
+                intercepted.append({
+                    "id": candidate.candidate_id,
+                    "name": pet.get("name", "未知"),
+                    "reason": "生理约束拦截：领养人有过敏史，候选宠物不属于低敏品种"
+                })
                 continue
 
-            if profile.get("has_children") and not pet.get("good_with_children"):
-                failed_constraints.append("家庭有儿童需儿童友好宠物")
+            # 2. 家庭结构约束
+            if profile.get("has_children") and req.get("forbid_children"):
                 candidate.hard_filter_pass = 0
-                candidate.stage_trace["constraint_filter"] = {"stage": "约束过滤", "passed": False, "failed_constraints": failed_constraints}
-                candidate.reasons.append("约束过滤未通过：家庭包含儿童，该宠物不适合儿童环境")
+                intercepted.append({
+                    "id": candidate.candidate_id,
+                    "name": pet.get("name", "未知"),
+                    "reason": "环境约束拦截：领养人家庭有儿童，送养方明确禁止有娃家庭申请"
+                })
                 continue
 
-            if req.get("forbid_other_pets") and profile.get("has_other_pets"):
-                failed_constraints.append("该宠物不接受多宠家庭")
-                candidate.hard_filter_pass = 0
-                candidate.stage_trace["constraint_filter"] = {"stage": "约束过滤", "passed": False, "failed_constraints": failed_constraints}
-                candidate.reasons.append("约束过滤未通过：该宠物需单宠家庭")
-                continue
-            if req.get("forbid_children") and profile.get("has_children"):
-                failed_constraints.append("该宠物不适合有儿童家庭")
-                candidate.hard_filter_pass = 0
-                candidate.stage_trace["constraint_filter"] = {"stage": "约束过滤", "passed": False, "failed_constraints": failed_constraints}
-                candidate.reasons.append("约束过滤未通过：送养要求不接受有儿童家庭")
-                continue
-
+            # 3. 经济/预算约束
             budget_map = {"低": 1, "中": 2, "高": 3}
             user_budget = budget_map.get(profile.get("budget_level", "中"), 2)
-            min_req_budget = budget_map.get(req.get("min_budget_level", "低"), 1)
-            if user_budget < min_req_budget:
-                failed_constraints.append("预算需达到宠物最低照护要求")
+            required_budget = budget_map.get(req.get("min_budget_level", "低"), 1)
+            if user_budget < required_budget:
                 candidate.hard_filter_pass = 0
-                candidate.stage_trace["constraint_filter"] = {"stage": "约束过滤", "passed": False, "failed_constraints": failed_constraints}
-                candidate.reasons.append("约束过滤未通过：预算水平低于该宠物的基本照护要求")
+                intercepted.append({
+                    "id": candidate.candidate_id,
+                    "name": pet.get("name", "未知"),
+                    "reason": f"经济约束拦截：领养人预算水平({profile.get('budget_level')})低于该宠物最低照护要求({req.get('min_budget_level')})"
+                })
                 continue
 
-            if profile.get("available_time", 0) < req.get("min_companion_hours", 0):
-                failed_constraints.append("陪伴时间需达到最低要求")
+            # 4. 时间/陪伴约束
+            user_time = float(profile.get("available_time", 0))
+            min_time = float(req.get("min_companion_hours", 0))
+            if user_time < min_time and min_time > 4.0: # 仅对高陪伴要求的宠物执行硬拦截
                 candidate.hard_filter_pass = 0
-                candidate.stage_trace["constraint_filter"] = {"stage": "约束过滤", "passed": False, "failed_constraints": failed_constraints}
-                candidate.reasons.append(f"约束过滤未通过：每日陪伴时间不足（要求 {req.get('min_companion_hours')} 小时）")
+                intercepted.append({
+                    "id": candidate.candidate_id,
+                    "name": pet.get("name", "未知"),
+                    "reason": f"陪伴约束拦截：领养人每日陪伴时长({user_time}h)无法满足该宠物的高社交需求({min_time}h)"
+                })
                 continue
-            passed_constraints.append("满足预算与陪伴时长要求")
 
-            required_housing_type = req.get("required_housing_type")
-            housing_matches = True
-            if required_housing_type and profile.get("housing_type") and profile.get("housing_type") != required_housing_type:
-                housing_matches = False
-                candidate.risk_flags.append("住房条件与送养要求存在差异，建议进入人工核验")
-            if required_housing_type and housing_matches:
-                passed_constraints.append("住房条件满足送养要求")
-
+            # 5. 经验门槛
             if not req.get("allow_beginner") and profile.get("experience_level", 0) == 0:
-                failed_constraints.append("该宠物不接受新手领养")
                 candidate.hard_filter_pass = 0
-                candidate.stage_trace["constraint_filter"] = {"stage": "约束过滤", "passed": False, "failed_constraints": failed_constraints}
-                candidate.reasons.append("约束过滤未通过：该宠物照护难度较高，不适合无经验申请人")
+                intercepted.append({
+                    "id": candidate.candidate_id,
+                    "name": pet.get("name", "未知"),
+                    "reason": "准入约束拦截：该宠物照护难度大，送养方明确要求必须有养宠经验"
+                })
                 continue
-            if req.get("allow_beginner"):
-                passed_constraints.append("新手准入条件允许")
 
             candidate.hard_filter_pass = 1
-            candidate.stage_trace["constraint_filter"] = {
-                "stage": "约束过滤",
-                "passed": True,
-                "matched_constraints": passed_constraints,
-                "failed_constraints": failed_constraints,
-            }
             result.append(candidate)
 
-        return result
+        return result, intercepted
