@@ -482,15 +482,44 @@ def ensure_tables(conn: sqlite3.Connection):
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         housing_type TEXT,
+        has_yard INTEGER DEFAULT 0,
+        family_size INTEGER DEFAULT 1,
+        has_children INTEGER DEFAULT 0,
+        has_other_pets INTEGER DEFAULT 0,
         housing_size REAL,
         rental_status TEXT,
         pet_experience TEXT,
+        experience_level INTEGER DEFAULT 0,
         available_time REAL,
         family_support INTEGER DEFAULT 1,
         budget_level TEXT,
+        allergy_info TEXT,
+        family_structure TEXT,
+        activity_level TEXT,
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
         update_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
+    for col, definition in [
+        ('housing_type', 'TEXT'),
+        ('has_yard', 'INTEGER DEFAULT 0'),
+        ('family_size', 'INTEGER DEFAULT 1'),
+        ('has_children', 'INTEGER DEFAULT 0'),
+        ('has_other_pets', 'INTEGER DEFAULT 0'),
+        ('housing_size', 'REAL'),
+        ('rental_status', 'TEXT'),
+        ('pet_experience', 'TEXT'),
+        ('experience_level', 'INTEGER DEFAULT 0'),
+        ('available_time', 'REAL'),
+        ('family_support', 'INTEGER DEFAULT 1'),
+        ('budget_level', 'TEXT'),
+        ('allergy_info', 'TEXT'),
+        ('family_structure', 'TEXT'),
+        ('activity_level', 'TEXT'),
+    ]:
+        try:
+            cur.execute(f'ALTER TABLE user_profiles ADD COLUMN {col} {definition}')
+        except Exception:
+            pass
 
     # ── user_preferences (Phase 1) ────────────────────────────────────────
     cur.execute('''CREATE TABLE IF NOT EXISTS user_preferences (
@@ -499,34 +528,104 @@ def ensure_tables(conn: sqlite3.Connection):
         preferred_pet_type TEXT,
         preferred_age_range TEXT,
         preferred_size TEXT,
+        preferred_temperament TEXT,
         accept_special_care INTEGER DEFAULT 0,
         accept_high_energy INTEGER DEFAULT 1,
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
         update_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
+    for col, definition in [
+        ('preferred_pet_type', 'TEXT'),
+        ('preferred_age_range', 'TEXT'),
+        ('preferred_size', 'TEXT'),
+        ('preferred_temperament', 'TEXT'),
+        ('accept_special_care', 'INTEGER DEFAULT 0'),
+        ('accept_high_energy', 'INTEGER DEFAULT 1'),
+    ]:
+        try:
+            cur.execute(f'ALTER TABLE user_preferences ADD COLUMN {col} {definition}')
+        except Exception:
+            pass
 
     # ── pet_features (Phase 1) ───────────────────────────────────────────
     cur.execute('''CREATE TABLE IF NOT EXISTS pet_features (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         pet_id INTEGER UNIQUE NOT NULL REFERENCES pets(id) ON DELETE CASCADE,
+        species TEXT,
+        age_stage TEXT,
+        size_level TEXT,
+        health_status TEXT,
+        sterilized INTEGER DEFAULT 0,
         energy_level TEXT,
         care_level TEXT,
         beginner_friendly INTEGER DEFAULT 1,
         social_level TEXT,
+        temperament_tags TEXT,
+        good_with_children INTEGER DEFAULT 1,
+        good_with_other_pets INTEGER DEFAULT 1,
+        medical_needs TEXT,
+        companionship_need TEXT,
+        budget_need_level TEXT,
         special_care_flag INTEGER DEFAULT 0,
         update_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
+    for col, definition in [
+        ('species', 'TEXT'),
+        ('age_stage', 'TEXT'),
+        ('size_level', 'TEXT'),
+        ('health_status', 'TEXT'),
+        ('sterilized', 'INTEGER DEFAULT 0'),
+        ('energy_level', 'TEXT'),
+        ('care_level', 'TEXT'),
+        ('beginner_friendly', 'INTEGER DEFAULT 1'),
+        ('social_level', 'TEXT'),
+        ('temperament_tags', 'TEXT'),
+        ('good_with_children', 'INTEGER DEFAULT 1'),
+        ('good_with_other_pets', 'INTEGER DEFAULT 1'),
+        ('medical_needs', 'TEXT'),
+        ('companionship_need', 'TEXT'),
+        ('budget_need_level', 'TEXT'),
+        ('special_care_flag', 'INTEGER DEFAULT 0'),
+    ]:
+        try:
+            cur.execute(f'ALTER TABLE pet_features ADD COLUMN {col} {definition}')
+        except Exception:
+            pass
 
     # ── pet_requirements (Phase 1) ────────────────────────────────────────
     cur.execute('''CREATE TABLE IF NOT EXISTS pet_requirements (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         pet_id INTEGER UNIQUE NOT NULL REFERENCES pets(id) ON DELETE CASCADE,
+        allow_beginner INTEGER DEFAULT 1,
+        min_budget_level TEXT,
+        min_companion_hours REAL DEFAULT 0,
+        required_housing_type TEXT,
+        forbid_other_pets INTEGER DEFAULT 0,
+        forbid_children INTEGER DEFAULT 0,
         require_experience TEXT,
         require_stable_housing INTEGER DEFAULT 1,
         require_return_visit INTEGER DEFAULT 1,
         region_limit TEXT,
+        special_notes TEXT,
         update_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
+    for col, definition in [
+        ('allow_beginner', 'INTEGER DEFAULT 1'),
+        ('min_budget_level', 'TEXT'),
+        ('min_companion_hours', 'REAL DEFAULT 0'),
+        ('required_housing_type', 'TEXT'),
+        ('forbid_other_pets', 'INTEGER DEFAULT 0'),
+        ('forbid_children', 'INTEGER DEFAULT 0'),
+        ('require_experience', 'TEXT'),
+        ('require_stable_housing', 'INTEGER DEFAULT 1'),
+        ('require_return_visit', 'INTEGER DEFAULT 1'),
+        ('region_limit', 'TEXT'),
+        ('special_notes', 'TEXT'),
+    ]:
+        try:
+            cur.execute(f'ALTER TABLE pet_requirements ADD COLUMN {col} {definition}')
+        except Exception:
+            pass
 
     conn.commit()
 

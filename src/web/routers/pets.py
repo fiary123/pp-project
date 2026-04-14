@@ -1,15 +1,17 @@
 from fastapi import APIRouter, HTTPException, Depends
+import json
 from src.web.schemas import PetUpdate, PetBatchCreate, PetFeatureUpdate, PetRequirementUpdate
 from src.web.services.db_service import get_db
 from src.web.services.profile_service import ProfileService
 from src.web.dependencies import get_current_user
+from src.agents.agents import analyze_pet_features
 
 router = APIRouter(prefix="/api", tags=["pets"])
 
 
 @router.post("/pets/batch")
 async def batch_create_pets(req: PetBatchCreate, current_user: dict = Depends(get_current_user)):
-    """机构批量录入流浪动物，同时自动生成对应的送养帖子"""
+    """机构批量录入流浪动物，同时利用 Agent 自动提取推荐特征并生成送养帖子"""
     if current_user.get("role") != "org_admin":
         raise HTTPException(status_code=403, detail="仅救助站管理员可批量录入动物")
     if req.owner_id != current_user["id"]:
@@ -21,6 +23,7 @@ async def batch_create_pets(req: PetBatchCreate, current_user: dict = Depends(ge
     with get_db() as conn:
         cursor = conn.cursor()
         for pet in req.pets:
+            # 1. 插入基础表
             cursor.execute(
                 """INSERT INTO pets (owner_id, owner_type, name, species, age, description, image_url, tags, status)
                    VALUES (?, 'org', ?, ?, ?, ?, ?, ?, '待领养')""",
@@ -29,7 +32,39 @@ async def batch_create_pets(req: PetBatchCreate, current_user: dict = Depends(ge
             )
             pet_id = cursor.lastrowid
 
-            # 自动生成对应的送养帖
+            # 2. [重构重点]：调用 Agent 自动提取结构化推荐特征 (异步执行)
+            try:
+                # 在真实生产环境，这里通常入任务队列。此处同步调用演示联动。
+                extracted = await analyze_pet_features(
+                    pet_name=pet.name,
+                    pet_species=pet.species,
+                    description=pet.description or ""
+                )
+                
+                # 写入 pet_features
+                ProfileService.update_pet_features(pet_id, PetFeatureUpdate(**{
+                    "age_stage": extracted.get("age_stage"),
+                    "size_level": extracted.get("size_level"),
+                    "activity_level": extracted.get("activity_level"),
+                    "care_difficulty": extracted.get("care_difficulty"),
+                    "good_with_children": extracted.get("good_with_children"),
+                    "good_with_other_pets": extracted.get("good_with_other_pets"),
+                    "companionship_need": extracted.get("companionship_need"),
+                    "budget_need_level": extracted.get("budget_need_level"),
+                    "sterilized": extracted.get("sterilized"),
+                    "temperament_tags": extracted.get("temperament_tags")
+                }))
+                
+                # 写入 pet_requirements
+                ProfileService.update_pet_requirements(pet_id, PetRequirementUpdate(**{
+                    "allow_beginner": extracted.get("allow_beginner"),
+                    "min_companion_hours": extracted.get("min_companion_hours"),
+                    "required_housing_type": extracted.get("required_housing_type")
+                }))
+            except Exception as e:
+                print(f"Auto-extraction failed for pet {pet_id}: {e}")
+
+            # 3. 自动生成对应的送养帖
             gender_label = {"male": "雄性", "female": "雌性"}.get(pet.gender, "性别未知")
             auto_title = f"【{pet.species}送养】{pet.name}"
             auto_content = (

@@ -282,10 +282,54 @@ def _run_llm_knowledge_fallback(user_query: str, retrieval_hint: str = "") -> st
 # 3. 核心运行工作流 (语音、访谈与匹配)
 # ==========================================
 
+async def analyze_user_portrait(user_id: int, bio: str, preference_text: str = "") -> Dict[str, Any]:
+    """
+    用户画像提取专家：从用户自我介绍和偏好描述中自动提取结构化推荐特征。
+    用于冷启动：将非结构化文本转换为推荐系统可用的画像。
+    """
+    portrait_agent = Agent(
+        role="资深领养资格分析师",
+        goal="从用户的文字描述中，精准推断其生活方式、住房条件、经济基础和养宠经验。",
+        backstory="你擅长通过语义分析识别隐性特征。例如，提到'带它在院子跑'暗示有院子；提到'加班晚'暗示可用时间少。你的输出将直接驱动宠物匹配算法。",
+        llm=common_llm,
+        verbose=True,
+        allow_delegation=False,
+    )
+    
+    task = Task(
+        description=(
+            f"深度分析以下领养人信息：\n"
+            f"自我介绍：{bio}\n"
+            f"偏好补充：{preference_text}\n\n"
+            "请输出严格 JSON 对象，包含以下字段：\n"
+            "1. housing_type: '公寓', '别墅', '平房'\n"
+            "2. has_yard: 1 (是) / 0 (否)\n"
+            "3. experience_level: 0 (新手), 1 (有经验), 2 (专家)\n"
+            "4. available_time: 每日可投入小时数 (数字)\n"
+            "5. budget_level: '低', '中', '高'\n"
+            "6. rental_status: '自购', '租房'\n"
+            "7. has_children: 1 / 0\n"
+            "8. has_other_pets: 1 / 0\n"
+            "9. preferred_pet_type: '猫', '狗', '异宠'\n"
+            "10. preferred_size: '小型', '中型', '大型'\n"
+            "11. allergy_info: 过敏情况描述"
+        ),
+        expected_output="严格的 JSON 对象。",
+        agent=portrait_agent,
+    )
+    
+    try:
+        raw = await asyncio.to_thread(lambda: str(Crew(agents=[portrait_agent], tasks=[task]).kickoff()))
+        parsed = _extract_json_payload(raw)
+        return parsed
+    except Exception as e:
+        logger.error(f"用户画像提取失败: {str(e)}")
+        return {}
+
 async def analyze_pet_features(pet_name: str, pet_species: str, description: str) -> Dict[str, Any]:
     """
     宠物属性提取专家：从描述文本中自动提取结构化推荐特征。
-    用于 Phase 1：新宠物输入专门提取宠物属性信息。
+    用于对齐数据库字段：pet_features & pet_requirements
     """
     extractor_agent = Agent(
         role="资深宠物行为学分析师",
@@ -303,19 +347,19 @@ async def analyze_pet_features(pet_name: str, pet_species: str, description: str
             f"物种：{pet_species}\n"
             f"描述：{description}\n\n"
             "请输出严格 JSON 对象，包含以下字段：\n"
-            "1. energy_level: '低', '中', '高'\n"
-            "2. care_level: '容易', '中等', '困难'\n"
-            "3. beginner_friendly: true/false\n"
-            "4. social_level: '孤僻', '友好', '极其亲人'\n"
-            "5. special_care_flag: true/false\n"
-            "6. vaccine_coverage: true/false (提到已打疫苗、全齐等)\n"
-            "7. housetrained: true/false (提到会用猫砂、不乱拉、定时定点等)\n"
-            "8. child_friendly: true/false (提到对小朋友温柔、适合有娃家庭等)\n"
-            "9. other_pet_friendly: true/false (提到与其他猫狗相处融洽等)\n"
-            "10. shedding_level: '不掉毛', '轻微', '严重'\n"
-            "11. separation_anxiety: true/false (提到粘人过度、独处会叫、拆家等倾向)\n"
-            "12. guarding_tendency: true/false (提到护食、护玩具、有攻击性倾向等)\n"
-            "13. tags: 关键性格标签数组"
+            "1. age_stage: '幼年', '成年', '老年'\n"
+            "2. size_level: '小型', '中型', '大型'\n"
+            "3. activity_level: '低', '中', '高'\n"
+            "4. care_difficulty: '容易', '中等', '困难'\n"
+            "5. good_with_children: 1 / 0\n"
+            "6. good_with_other_pets: 1 / 0\n"
+            "7. companionship_need: '低', '中', '高'\n"
+            "8. budget_need_level: '低', '中', '高'\n"
+            "9. sterilized: 1 / 0\n"
+            "10. temperament_tags: 性格标签字符串(逗号分隔)\n"
+            "11. allow_beginner: 1 / 0 (是否适合新手)\n"
+            "12. min_companion_hours: 最低陪伴时长要求 (小时)\n"
+            "13. required_housing_type: '公寓', '别墅', '不限'"
         ),
         expected_output="严格的 JSON 对象。",
         agent=extractor_agent,
@@ -328,19 +372,11 @@ async def analyze_pet_features(pet_name: str, pet_species: str, description: str
     except Exception as e:
         logger.error(f"宠物特征提取失败: {str(e)}")
         return {
-            "energy_level": "中",
-            "care_level": "容易",
-            "beginner_friendly": True,
-            "social_level": "友好",
-            "special_care_flag": False,
-            "vaccine_coverage": False,
-            "housetrained": True,
-            "child_friendly": True,
-            "other_pet_friendly": True,
-            "shedding_level": "轻微",
-            "separation_anxiety": False,
-            "guarding_tendency": False,
-            "tags": []
+            "age_stage": "成年", "size_level": "中型", "activity_level": "中",
+            "care_difficulty": "容易", "good_with_children": 1, "good_with_other_pets": 1,
+            "companionship_need": "中", "budget_need_level": "中", "sterilized": 0,
+            "temperament_tags": "温顺", "allow_beginner": 1, "min_companion_hours": 2.0,
+            "required_housing_type": "不限"
         }
 
 async def generate_edge_voice(text: str, pet_species: str):

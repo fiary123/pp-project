@@ -1,4 +1,3 @@
-from src.agents.agents import analyze_pet_interview
 import logging
 
 logger = logging.getLogger(__name__)
@@ -20,6 +19,7 @@ class UserQueryHydrator:
         dynamic_traits = {}
         if (not profile or not profile.get("housing_type")) and query.user_query:
             try:
+                from src.agents.agents import analyze_pet_interview
                 logger.info(f"触发冷启动特征提取，用户 ID: {query.user_id}")
                 # 调用 agents.py 中的分析函数
                 analysis = await analyze_pet_interview(
@@ -37,6 +37,11 @@ class UserQueryHydrator:
         if not profile:
             profile = {}
             
+        inferred_experience = profile.get("experience_level")
+        if inferred_experience is None:
+            pet_experience = profile.get("pet_experience") or self._infer_experience(dynamic_traits)
+            inferred_experience = 2 if pet_experience == "3年以上" else (1 if pet_experience and pet_experience != "无" else 0)
+
         query.user_profile = {
             "age_range": profile.get("age_range") or self._infer_age(dynamic_traits),
             "housing_type": profile.get("housing_type") or self._infer_housing(dynamic_traits),
@@ -47,11 +52,13 @@ class UserQueryHydrator:
             "housing_size": profile.get("housing_size") or self._infer_size(dynamic_traits),
             "rental_status": profile.get("rental_status") or ("租房" if "租" in str(dynamic_traits) else "未知"),
             "pet_experience": profile.get("pet_experience") or self._infer_experience(dynamic_traits),
-            "experience_level": profile.get("experience_level", 0),
+            "experience_level": inferred_experience,
             "available_time": profile.get("available_time") or self._infer_time(dynamic_traits),
             "family_support": bool(profile.get("family_support", 0)) if "family_support" in profile else ("支持" in str(dynamic_traits)),
             "budget_level": profile.get("budget_level") or self._infer_budget(dynamic_traits),
             "allergy_info": profile.get("allergy_info") or ("过敏" if "过敏" in str(dynamic_traits) else ""),
+            "family_structure": profile.get("family_structure", "纯成年人"),
+            "activity_level": profile.get("activity_level", "宅家型"),
             "risk_flags": dynamic_traits.get("risk_flags", []),
             "strengths": dynamic_traits.get("strengths", [])
         }
@@ -66,7 +73,7 @@ class UserQueryHydrator:
             "preferred_size": preference.get("preferred_size"),
             "accept_special_care": bool(preference.get("accept_special_care", 0)),
             "accept_high_energy": bool(preference.get("accept_high_energy", 1)),
-            "preferred_temperament": profile.get("preferred_temperament")
+            "preferred_temperament": preference.get("preferred_temperament") or profile.get("preferred_temperament")
         }
 
         return query

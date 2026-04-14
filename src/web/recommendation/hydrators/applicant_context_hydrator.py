@@ -16,6 +16,11 @@ class ApplicantContextHydrator:
         for candidate in candidates:
             application = candidate.raw_data.get("application", {})
             user_id = candidate.candidate_id
+            candidate.stage_trace["candidate_generation"] = {
+                "stage": "申请候选生成",
+                "source": "宠物申请池",
+                "description": "基于指定宠物的有效申请生成候选申请人"
+            }
 
             # 获取申请人的画像和偏好
             profile = self.profile_service.get_user_profile(user_id)
@@ -30,12 +35,16 @@ class ApplicantContextHydrator:
                 "available_time": profile.get("available_time") if profile else None,
                 "family_support": bool(profile.get("family_support", 0)) if profile else False,
                 "budget_level": profile.get("budget_level") if profile else None,
+                "experience_level": profile.get("experience_level") if profile else None,
+                "has_children": bool(profile.get("has_children", 0)) if profile else False,
+                "has_other_pets": bool(profile.get("has_other_pets", 0)) if profile else False,
             }
 
             candidate.features["applicant_preference"] = {
                 "preferred_pet_type": preference.get("preferred_pet_type") if preference else None,
                 "preferred_age_range": preference.get("preferred_age_range") if preference else None,
                 "preferred_size": preference.get("preferred_size") if preference else None,
+                "preferred_temperament": preference.get("preferred_temperament") if preference else None,
                 "accept_special_care": bool(preference.get("accept_special_care", 0)) if preference else False,
                 "accept_high_energy": bool(preference.get("accept_high_energy", 1)) if preference else True,
             }
@@ -56,14 +65,26 @@ class ApplicantContextHydrator:
                 "beginner_friendly": bool(pet_feature.get("beginner_friendly", 1)) if pet_feature else True,
                 "social_level": pet_feature.get("social_level") if pet_feature else None,
                 "special_care_flag": bool(pet_feature.get("special_care_flag", 0)) if pet_feature else False,
+                "health_status": pet_feature.get("health_status") if pet_feature else None,
+                "companionship_need": pet_feature.get("companionship_need") if pet_feature else None,
             }
 
             # 填充送养人的要求
             candidate.features["requirement"] = {
+                "allow_beginner": bool(pet_requirement.get("allow_beginner", 1)) if pet_requirement else True,
+                "min_budget_level": pet_requirement.get("min_budget_level") if pet_requirement else None,
+                "min_companion_hours": float(pet_requirement.get("min_companion_hours", 0)) if pet_requirement else 0.0,
+                "required_housing_type": pet_requirement.get("required_housing_type") if pet_requirement else None,
+                "forbid_other_pets": bool(pet_requirement.get("forbid_other_pets", 0)) if pet_requirement else False,
+                "forbid_children": bool(pet_requirement.get("forbid_children", 0)) if pet_requirement else False,
                 "require_experience": pet_requirement.get("require_experience") if pet_requirement else None,
                 "require_stable_housing": bool(pet_requirement.get("require_stable_housing", 1)) if pet_requirement else True,
                 "require_return_visit": bool(pet_requirement.get("require_return_visit", 1)) if pet_requirement else True,
                 "region_limit": pet_requirement.get("region_limit") if pet_requirement else None,
+            }
+            candidate.stage_trace["feature_hydration"] = {
+                "stage": "申请审核联动补全",
+                "profile_dimensions": ["申请人画像", "申请人偏好", "宠物特征", "送养约束"]
             }
 
         return candidates

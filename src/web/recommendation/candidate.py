@@ -11,6 +11,7 @@ class RecommendationCandidate:
     final_score: float = 0.0
     reasons: List[str] = field(default_factory=list)
     risk_flags: List[str] = field(default_factory=list)
+    stage_trace: Dict[str, Any] = field(default_factory=dict)
 
     def __repr__(self):
         return f"<RecommendationCandidate(id={self.candidate_id}, type={self.candidate_type}, score={self.final_score})>"

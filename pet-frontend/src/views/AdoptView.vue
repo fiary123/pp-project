@@ -1,255 +1,361 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
-  Search, Heart, Loader2, X, Wand2, ChevronRight,
-  CheckCircle2, BrainCircuit,
-  Send, Sparkles, Star, Info
-} from 'lucide-vue-next';
-import { useAuthStore } from '../store/authStore';
-import axios from '../api/index';
+  Search, Heart, Loader2, ChevronRight, Wand2, Sparkles, ShieldCheck, ListFilter, AlertTriangle
+} from 'lucide-vue-next'
+import { useAuthStore } from '../store/authStore'
+import BaseCard from '../components/BaseCard.vue'
+import axios from '../api/index'
 
-const router = useRouter();
-const authStore = useAuthStore();
+const router = useRouter()
+const authStore = useAuthStore()
 
 const defaultAdoptionPreferences = {
-  hard_preferences: [] as string[],
-  soft_preferences: ['住房稳定性', '陪伴时间', '责任意识'],
   allow_novice: true,
-  accept_renting: true,
-  require_stable_housing: false,
-  require_financial_capacity: false,
-  require_followup_updates: false,
-  prefer_local: false,
-  require_family_agreement: false,
-  prefer_quiet_household: false,
-  prefer_multi_pet_experience: false,
-  focus_experience: false,
-  focus_companionship: true,
-  focus_stability: true,
-  risk_tolerance: 'medium'
-};
+  min_budget_level: '低',
+  min_companion_hours: 0,
+  required_housing_type: '',
+  forbid_other_pets: false,
+  forbid_children: false,
+  require_return_visit: true,
+}
 
 const parseAdoptionPreferences = (raw: unknown) => {
-  if (!raw) return { ...defaultAdoptionPreferences };
+  if (!raw) return { ...defaultAdoptionPreferences }
   try {
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    return { ...defaultAdoptionPreferences, ...(parsed as Record<string, unknown>) };
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+    return { ...defaultAdoptionPreferences, ...(parsed as Record<string, unknown>) }
   } catch {
-    return { ...defaultAdoptionPreferences };
+    return { ...defaultAdoptionPreferences }
   }
-};
-
-const riskToleranceLabel = (value?: string) => {
-  if (value === 'conservative') return '保守型'
-  if (value === 'relaxed') return '宽松型'
-  return '中性'
 }
 
-const dimensionRiskClass = (level?: string) => {
-  if (level === 'Low') return 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300';
-  if (level === 'High') return 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300';
-  return 'bg-amber-100 text-amber-700 dark:bg-yellow-500/20 dark:text-yellow-300';
-};
+const pets = ref<any[]>([])
+const engineRecommendations = ref<any[]>([])
+const isLoading = ref(true)
+const isEngineLoading = ref(false)
+const needsColdStart = ref(false)
+const showIntentionForm = ref(false)
+const intentionForm = ref({
+  housing_type: '公寓',
+  experience_level: 0,
+  available_time: 2,
+  budget_level: '中',
+  has_children: 0,
+})
+const isSubmittingIntention = ref(false)
+const searchQuery = ref('')
+const activeFilter = ref('全部')
+const selectedPet = ref<any>(null)
 
-const housingTypeLabel = (value?: string) => {
-  if (value === 'house') return '独立住宅';
-  if (value === 'other') return '其他';
-  return '公寓';
-};
-
-const summarizePetExpectations = (prefs: any) => {
-  const chips: string[] = [];
-  if (prefs.require_stable_housing) chips.push('稳定居住');
-  if (prefs.require_financial_capacity) chips.push('基础经济能力');
-  if (prefs.require_followup_updates) chips.push('接受送养回访');
-  if (prefs.require_family_agreement) chips.push('家庭同意');
-  if (!prefs.allow_novice) chips.push('有经验优先');
-  if (!prefs.accept_renting) chips.push('谨慎租房');
-  if (prefs.prefer_local) chips.push('本地优先');
-  if (prefs.prefer_quiet_household) chips.push('偏好安静家庭');
-  if (prefs.prefer_multi_pet_experience) chips.push('多宠经验加分');
-  return chips.slice(0, 6);
-}
-
-const buildMockAdoptionPreferences = () => ({
-  ...defaultAdoptionPreferences,
-  require_followup_updates: true,
-  soft_preferences: [...defaultAdoptionPreferences.soft_preferences, '接受送养回访']
-});
-
-// 1. 状态管理
-const pets = ref<any[]>([]);
-const isLoading = ref(true);
-const searchQuery = ref('');
-const activeFilter = ref('全部');
-const sourceFilter = ref('全部'); 
-const selectedPet = ref<any>(null);
-
-// 2. 图片预览与多图状态
-const activeImgIndex = ref(0);
-const showImageViewer = ref(false);
-const previewImages = computed(() => {
-  if (!selectedPet.value) return [];
-  const main = selectedPet.value.img;
-  let others: string[] = [];
+const submitIntention = async () => {
+  isSubmittingIntention.value = true
   try {
-    const raw = selectedPet.value.image_urls;
-    if (raw) {
-      others = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    }
-  } catch (e) { others = []; }
-  
-  const all = [main, ...others].filter(Boolean);
-  const uniqueUrls = [...new Set(all)];
-  return uniqueUrls.length > 0 ? uniqueUrls : ['https://images.unsplash.com/photo-1543466835-00a7907e9de1'];
-});
-
-// AI 匹配状态
-const aiQuery = ref('');
-const isAiMatching = ref(false);
-const isLoadingFollowup = ref(false);
-const recommendedMatches = ref<Record<string, any>>({});
-const showMatchResultModal = ref(false); 
-const soulmateThreshold = 90;
-const recommendationDisplayLimit = 6;
-
-// --- 推荐系统核心 ---
-const engineRecommendations = ref<any[]>([]);
-const isEngineLoading = ref(false);
-
-const fetchEngineRecommendations = async () => {
-  if (!authStore.isLoggedIn || !authStore.user?.id) return;
-  isEngineLoading.value = true;
-  try {
-    const res = await axios.get(`/api/recommendation/pets/${authStore.user.id}`);
-    engineRecommendations.value = Array.isArray(res.data) ? res.data : [];
+    // 复用更新画像接口，补全核心推荐维度
+    await axios.post('/api/user/update-profile', {
+      ...intentionForm.value,
+      pet_experience: intentionForm.value.experience_level > 0 ? '有经验' : '无',
+    })
+    showIntentionForm.value = false
+    await fetchEngineRecommendations() // 重新拉取精准推荐
+    window.alert('画像补全成功！AI 已为您生成精准匹配列表。')
   } catch (err) {
-    console.error('获取引擎推荐失败', err);
+    window.alert('提交失败，请重试')
   } finally {
-    isEngineLoading.value = false;
+    isSubmittingIntention.value = false
   }
-};
-
-const getPetDisplayScore = (pet: any) => {
-  const rawScore = Number(recommendedMatches.value[String(pet.id)]?.fit_score);
-  if (Number.isFinite(rawScore) && rawScore > 0) return Math.round(rawScore);
-  return Math.max(60, Math.round(Number(pet.match) || 0));
-};
-
-const sortPetsByDisplayScore = (list: any[]) => {
-  return [...list].sort((a, b) => getPetDisplayScore(b) - getPetDisplayScore(a));
-};
+}
 
 const fetchPets = async () => {
-  isLoading.value = true;
+  isLoading.value = true
   try {
-    const res = await axios.get('/api/pets');
-    if (res.data) {
-      const realPets = res.data.map((p: any) => ({
-        ...p,
-        id: Number(p.id),
-        img: p.image_url || p.post_image_url || `https://images.unsplash.com/photo-1543466835-00a7907e9de1?sig=${p.id}`,
-        desc: p.description || p.post_content || '暂无详细介绍',
-        type: p.type || '狗狗',
-        owner_type: p.owner_type || 'org',
-        adoption_preferences: parseAdoptionPreferences(p.adoption_preferences),
-        tags: p.tags ? (typeof p.tags === 'string' ? JSON.parse(p.tags) : p.tags) : ['温顺', '粘人'],
-        match: 80 + (p.id % 20)
-      }));
-      pets.value = realPets;
-    }
-  } catch (err) { console.error('获取列表失败'); }
-  finally { isLoading.value = false; }
-};
+    const res = await axios.get('/api/pets')
+    pets.value = Array.isArray(res.data)
+      ? res.data.map((p: any) => ({
+          ...p,
+          id: Number(p.id),
+          img: p.image_url || p.post_image_url || `https://images.unsplash.com/photo-1543466835-00a7907e9de1?sig=${p.id}`,
+          desc: p.description || p.post_content || '暂无详细介绍',
+          adoption_preferences: parseAdoptionPreferences(p.adoption_preferences),
+          tags: p.tags ? (typeof p.tags === 'string' ? JSON.parse(p.tags) : p.tags) : [],
+        }))
+      : []
+  } catch (err) {
+    console.error('获取宠物列表失败', err)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+const fetchEngineRecommendations = async () => {
+  if (!authStore.isLoggedIn || !authStore.user?.id) return
+  isEngineLoading.value = true
+  try {
+    const res = await axios.get(`/api/recommendation/pets/${authStore.user.id}`)
+    // 适配新后端返回结构
+    engineRecommendations.value = Array.isArray(res.data.results) ? res.data.results : []
+    needsColdStart.value = !!res.data.needs_cold_start
+  } catch (err) {
+    console.error('获取推荐结果失败', err)
+  } finally {
+    isEngineLoading.value = false
+  }
+}
 
 const filteredPets = computed(() => {
-  return pets.value.filter(p => {
-    const search = searchQuery.value.toLowerCase();
-    const matchesText = p.name.toLowerCase().includes(search) || p.species.toLowerCase().includes(search);
-    const matchesType = activeFilter.value === '全部' || p.type === activeFilter.value;
-    const matchesSource = sourceFilter.value === '全部'
-      || (sourceFilter.value === '机构' && p.owner_type === 'org')
-      || (sourceFilter.value === '个人' && p.owner_type === 'personal');
-    return matchesText && matchesType && matchesSource;
-  }).sort((a, b) => b.match - a.match);
-});
+  const keyword = searchQuery.value.trim().toLowerCase()
+  return pets.value.filter((pet) => {
+    const matchesKeyword = !keyword || pet.name?.toLowerCase().includes(keyword) || pet.species?.toLowerCase().includes(keyword)
+    const matchesType = activeFilter.value === '全部' || pet.species === activeFilter.value
+    return matchesKeyword && matchesType
+  })
+})
 
-watch(selectedPet, (pet) => {
-  if (pet) { /* load chat history etc */ }
-});
+const getRecommendationForPet = (petId: number) => {
+  return engineRecommendations.value.find((item) => Number(item.pet_id) === Number(petId))
+}
+
+const displayConstraintTags = (pet: any) => {
+  const prefs = pet.adoption_preferences || defaultAdoptionPreferences
+  const tags: string[] = []
+  if (!prefs.allow_novice) tags.push('需一定经验')
+  if (prefs.required_housing_type) tags.push(`住房要求：${prefs.required_housing_type}`)
+  if (prefs.min_companion_hours) tags.push(`陪伴要求 ${prefs.min_companion_hours}h/天`)
+  if (prefs.forbid_other_pets) tags.push('不接受多宠家庭')
+  if (prefs.forbid_children) tags.push('不接受有儿童家庭')
+  return tags.slice(0, 4)
+}
 
 onMounted(() => {
-  fetchPets();
-  fetchEngineRecommendations();
-});
+  fetchPets()
+  fetchEngineRecommendations()
+})
 </script>
 
 <template>
-  <div class="space-y-8 md:space-y-12 pb-16 md:pb-20 px-3 md:px-4 max-w-[1600px] mx-auto text-gray-900 dark:text-white transition-colors duration-300">
-    
-    <!-- 1. Hero AI 匹配区 -->
-    <div class="relative py-10 md:py-16 text-center space-y-6 md:space-y-8 overflow-hidden rounded-[2.2rem] md:rounded-[4rem] bg-gradient-to-b from-orange-500/10 to-transparent border border-gray-200 dark:border-white/5 shadow-2xl transition-all">
-      <div class="relative z-10 space-y-4 px-4 md:px-6 text-gray-900 dark:text-white">
-        <h2 class="text-3xl sm:text-4xl md:text-6xl font-black italic tracking-tighter uppercase text-orange-500 leading-tight">寻找您的 <br/>完美伙伴</h2>
-        <p class="text-xs md:text-sm text-gray-500 dark:text-gray-400 italic font-black">AI 语义识别 · 多轮深度对话 · 精准全库匹配</p>
-
-        <!-- 输入步 -->
-        <div class="max-w-4xl mx-auto mt-6 md:mt-8 transition-all">
-          <div class="bg-white/80 dark:bg-[#1a1a1a]/80 backdrop-blur-3xl p-2 rounded-[2rem] md:rounded-[2.5rem] border border-gray-200 dark:border-white/10 flex flex-col md:flex-row items-stretch md:items-center shadow-xl">
-            <Wand2 class="hidden md:block ml-6 text-orange-500 shrink-0" :size="28" />
-            <input v-model="aiQuery" type="text" placeholder="描述您的理想伙伴（如：想养一只温顺的小猫...）" class="flex-1 bg-transparent py-4 md:py-6 px-5 md:px-6 outline-none text-gray-900 dark:text-white text-base md:text-lg font-bold" />
-            <button class="bg-orange-500 text-white px-6 md:px-10 py-4 md:py-5 rounded-[1.4rem] md:rounded-[2rem] font-black flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg">
-              <Wand2 :size="20" /> 开始匹配
-            </button>
-          </div>
+  <div class="space-y-10 pb-20 px-4 max-w-[1500px] mx-auto text-gray-900 dark:text-white">
+    <section class="relative py-10 md:py-16 text-center space-y-6 overflow-hidden rounded-[2.5rem] bg-gradient-to-b from-orange-500/10 to-transparent border border-gray-200 dark:border-white/5 shadow-2xl">
+      <div class="space-y-4 px-4">
+        <h2 class="text-3xl sm:text-4xl md:text-6xl font-black italic tracking-tighter uppercase text-orange-500 leading-tight">
+          领养推荐主流程
+        </h2>
+        <p class="text-sm md:text-base text-gray-500 dark:text-gray-400 font-black">
+          用户画像与领养需求采集 → 候选宠物生成 → 约束过滤 → 多维评分 → 推荐排序 → 申请审核联动
+        </p>
+        <div class="max-w-3xl mx-auto flex items-center justify-center gap-3 text-xs md:text-sm text-gray-500 dark:text-gray-400">
+          <Wand2 class="text-orange-500" :size="16" />
+          <span>推荐模块已插入领养主流程，后续审核阶段将继续复用排序结果与风险维度。</span>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- 2. 列表区 -->
-    <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between px-1 md:px-4 gap-4 md:gap-6 text-gray-900 dark:text-white">
-      <div class="flex items-center gap-2 bg-gray-100 dark:bg-white/5 p-1.5 rounded-2xl border border-transparent dark:border-white/5 shadow-inner transition-all overflow-x-auto scrollbar-hide">
-        <button v-for="cat in ['全部', '猫咪', '狗狗', '异宠']" :key="cat" @click="activeFilter = cat"
-          :class="activeFilter === cat ? 'bg-orange-500 text-white shadow-lg' : 'text-gray-500 dark:text-gray-400 hover:text-orange-500'" class="px-5 md:px-8 py-3 rounded-xl font-bold transition-all text-sm whitespace-nowrap">
-          {{ cat }}
+    <section v-if="authStore.isLoggedIn" class="space-y-5">
+      <!-- 冷启动引导横幅 -->
+      <div v-if="needsColdStart" class="relative overflow-hidden rounded-[2rem] bg-orange-500 p-6 md:p-10 text-white shadow-xl animate-in fade-in slide-in-from-top-4 duration-700">
+        <Sparkles class="absolute -right-4 -top-4 h-32 w-32 opacity-20" />
+        <div class="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div class="space-y-2 text-center md:text-left">
+            <h3 class="text-2xl md:text-3xl font-black italic">开启您的个性化匹配</h3>
+            <p class="text-sm md:text-base font-bold text-white/90">当前系统缺乏您的结构化画像，补全意向问卷后，AI 专家将为您执行“约束感知”的精准筛选。</p>
+          </div>
+          <button @click="showIntentionForm = true" class="px-8 py-4 rounded-2xl bg-white text-orange-600 font-black shadow-lg hover:scale-105 transition-transform">
+            立即完善领养画像
+          </button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <div class="space-y-1">
+          <h3 class="text-2xl font-black text-gray-900 dark:text-white">多阶段推荐结果</h3>
+          <p class="text-sm text-gray-500 dark:text-gray-400">系统已按结构化特征完成候选生成、约束过滤和多维评分。</p>
+        </div>
+        <button @click="fetchEngineRecommendations" class="px-4 py-2 rounded-xl bg-orange-500 text-white font-black text-sm">
+          刷新推荐
         </button>
       </div>
-      <div class="relative w-full md:w-96 group">
-        <Search class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-orange-500 transition-colors" :size="18" />
-        <input v-model="searchQuery" type="text" placeholder="搜索资源库..." class="w-full bg-gray-100 dark:bg-white/5 border border-transparent dark:border-white/5 rounded-2xl py-4 pl-14 pr-6 outline-none focus:bg-white dark:focus:bg-white/10 font-black transition-all" />
-      </div>
-    </div>
 
-    <div class="px-2">
-      <div v-if="isLoading" class="py-40 flex flex-col items-center"><Loader2 class="animate-spin text-orange-500" :size="48" /><p class="text-gray-500 font-black mt-4 uppercase tracking-widest">检索中...</p></div>
-      <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
-        <div v-for="pet in filteredPets" :key="pet.id" @click="selectedPet = pet" 
-          class="bg-white dark:bg-[#1a1a1a] rounded-[2rem] md:rounded-[2.5rem] overflow-hidden border border-gray-100 dark:border-white/5 transition-all group cursor-pointer shadow-sm hover:shadow-2xl relative flex flex-col hover:-translate-y-2 duration-500 shadow-orange-500/5">
-          <div class="relative aspect-square">
-            <img :src="pet.img" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" />
-            <h4 class="absolute bottom-4 left-6 font-black text-xl text-gray-900 dark:text-white">{{ pet.name }}</h4>
+      <div v-if="isEngineLoading" class="py-16 flex justify-center">
+        <Loader2 class="animate-spin text-orange-500" :size="40" />
+      </div>
+
+      <div v-else-if="engineRecommendations.length" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <BaseCard v-for="rec in engineRecommendations.slice(0, 6)" :key="rec.pet_id" class="p-6 space-y-5 border-orange-500/10">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-xs font-black uppercase tracking-widest text-orange-500">推荐第 {{ rec.rank }} 位</p>
+              <h4 class="text-2xl font-black text-gray-900 dark:text-white mt-2">{{ rec.pet_name }}</h4>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ rec.species }}</p>
+            </div>
+            <div class="text-right">
+              <p class="text-[10px] font-black uppercase tracking-widest text-gray-400">综合推荐分</p>
+              <p class="text-4xl font-black text-orange-500">{{ rec.score }}</p>
+            </div>
           </div>
-          <div class="p-5 md:p-6 flex-1 flex flex-col justify-between text-gray-900 dark:text-white">
-            <div class="space-y-3">
-              <p class="text-xs md:text-sm text-gray-600 dark:text-gray-300 leading-6 line-clamp-2 min-h-[3rem]">
-                {{ pet.desc || '这是一条待领养宠物信息，欢迎点开查看详情。' }}
+
+          <div class="grid grid-cols-2 gap-3">
+            <div v-for="(value, key) in rec.sub_scores" :key="key" class="rounded-2xl border border-gray-100 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-4">
+              <p class="text-[10px] font-black uppercase tracking-widest text-gray-400">
+                {{ key === 'condition' ? '居住契合' : key === 'preference' ? '偏好对齐' : key === 'experience' ? '经验适配' : '风险抵扣' }}
+              </p>
+              <p :class="key === 'penalty' ? 'text-red-500' : 'text-gray-900 dark:text-white'" class="text-2xl font-black mt-2">
+                {{ key === 'penalty' ? '-' : '' }}{{ value }}
               </p>
             </div>
-            <div class="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-white/5 mt-4 text-gray-400 dark:text-gray-500 font-bold uppercase tracking-widest">
-              <p class="text-sm text-gray-700 dark:text-gray-200 tracking-[0.18em]">{{ pet.species }}</p>
-              <ChevronRight class="text-orange-500 group-hover:translate-x-1 transition-transform" :size="16" />
+          </div>
+
+          <div v-if="rec.reasons?.length" class="space-y-2">
+            <p class="text-xs font-black uppercase tracking-widest text-green-500">推荐理由</p>
+            <div class="flex flex-wrap gap-2">
+              <span v-for="reason in rec.reasons" :key="reason" class="px-3 py-2 rounded-full bg-green-500/10 text-green-700 dark:text-green-300 text-xs font-bold">{{ reason }}</span>
+            </div>
+          </div>
+
+          <div v-if="rec.risk_flags?.length" class="space-y-2">
+            <p class="text-xs font-black uppercase tracking-widest text-red-400 flex items-center gap-2"><AlertTriangle :size="14" /> 风险维度</p>
+            <div class="flex flex-wrap gap-2">
+              <span v-for="flag in rec.risk_flags" :key="flag" class="px-3 py-2 rounded-full bg-red-500/10 text-red-600 dark:text-red-300 text-xs font-bold">{{ flag }}</span>
+            </div>
+          </div>
+
+          <button @click="selectedPet = pets.find((pet) => Number(pet.id) === Number(rec.pet_id)) || null" class="w-full py-4 rounded-2xl bg-gray-900 dark:bg-white text-white dark:text-black font-black">
+            查看候选详情
+          </button>
+        </BaseCard>
+      </div>
+
+      <BaseCard v-else class="p-8 text-center text-gray-500 dark:text-gray-400">
+        完成画像填写后，这里会展示“候选生成 → 约束过滤 → 多维评分”后的推荐结果。
+      </BaseCard>
+    </section>
+
+    <!-- 领养意向采集模态框 -->
+    <div v-if="showIntentionForm" class="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+      <BaseCard class="w-full max-w-2xl p-8 space-y-8 animate-in zoom-in-95 duration-300">
+        <div class="flex items-center justify-between">
+          <h3 class="text-2xl font-black italic">领养意向结构化采集</h3>
+          <button @click="showIntentionForm = false" class="text-gray-400 hover:text-gray-600"><Search class="rotate-45" /></button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="space-y-2">
+            <label class="text-sm font-black text-gray-500 uppercase tracking-widest">住房类型</label>
+            <select v-model="intentionForm.housing_type" class="w-full rounded-xl bg-gray-100 dark:bg-white/5 border-none p-4 font-bold outline-none">
+              <option value="公寓">公寓</option>
+              <option value="别墅">别墅</option>
+              <option value="平房">平房</option>
+            </select>
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-black text-gray-500 uppercase tracking-widest">养宠经验</label>
+            <select v-model.number="intentionForm.experience_level" class="w-full rounded-xl bg-gray-100 dark:bg-white/5 border-none p-4 font-bold outline-none">
+              <option :value="0">新手 (首次养宠)</option>
+              <option :value="1">有经验 (1-3年)</option>
+              <option :value="2">专家 (3年以上)</option>
+            </select>
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-black text-gray-500 uppercase tracking-widest">每日陪伴时长 (h)</label>
+            <input v-model.number="intentionForm.available_time" type="number" step="0.5" class="w-full rounded-xl bg-gray-100 dark:bg-white/5 border-none p-4 font-bold outline-none" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-black text-gray-500 uppercase tracking-widest">经济预算水平</label>
+            <select v-model="intentionForm.budget_level" class="w-full rounded-xl bg-gray-100 dark:bg-white/5 border-none p-4 font-bold outline-none">
+              <option value="低">基础保证型 (100-300元/月)</option>
+              <option value="中">标准养护型 (300-800元/月)</option>
+              <option value="高">优越生活型 (800元+/月)</option>
+            </select>
+          </div>
+        </div>
+
+        <button @click="submitIntention" :disabled="isSubmittingIntention" class="w-full py-5 rounded-[2rem] bg-orange-500 text-white font-black text-lg shadow-xl shadow-orange-500/20 flex items-center justify-center gap-3 active:scale-95 transition-all">
+          <Loader2 v-if="isSubmittingIntention" class="animate-spin" />
+          <Wand2 v-else />
+          完成采集并生成 AI 推荐列表
+        </button>
+      </BaseCard>
+    </div>
+
+    <section class="space-y-5">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-center gap-2 bg-gray-100 dark:bg-white/5 p-1.5 rounded-2xl shadow-inner overflow-x-auto">
+          <button v-for="cat in ['全部', '猫', '狗', '兔']" :key="cat" @click="activeFilter = cat" :class="activeFilter === cat ? 'bg-orange-500 text-white shadow-lg' : 'text-gray-500 dark:text-gray-400'" class="px-5 py-3 rounded-xl font-bold transition-all text-sm whitespace-nowrap">
+            {{ cat }}
+          </button>
+        </div>
+        <div class="relative w-full md:w-96">
+          <Search class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" :size="18" />
+          <input v-model="searchQuery" type="text" placeholder="搜索待领养宠物..." class="w-full bg-gray-100 dark:bg-white/5 rounded-2xl py-4 pl-14 pr-6 outline-none font-black" />
+        </div>
+      </div>
+
+      <div v-if="isLoading" class="py-24 flex justify-center">
+        <Loader2 class="animate-spin text-orange-500" :size="48" />
+      </div>
+
+      <div v-else class="grid grid-cols-1 xl:grid-cols-[1.5fr_1fr] gap-8">
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+          <div v-for="pet in filteredPets" :key="pet.id" @click="selectedPet = pet" class="bg-white dark:bg-[#1a1a1a] rounded-[2rem] overflow-hidden border border-gray-100 dark:border-white/5 transition-all group cursor-pointer shadow-sm hover:shadow-2xl relative flex flex-col hover:-translate-y-2 duration-500">
+            <div class="relative aspect-square">
+              <img :src="pet.img" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" />
+              <div class="absolute inset-x-0 bottom-0 p-5 bg-gradient-to-t from-black/70 to-transparent">
+                <h4 class="font-black text-2xl text-white">{{ pet.name }}</h4>
+                <p class="text-white/70 text-sm">{{ pet.species }}</p>
+              </div>
+            </div>
+            <div class="p-5 space-y-4">
+              <p class="text-sm text-gray-600 dark:text-gray-300 leading-6 line-clamp-2 min-h-[3rem]">{{ pet.desc }}</p>
+              <div v-if="getRecommendationForPet(pet.id)" class="flex items-center justify-between rounded-2xl bg-orange-500/10 px-4 py-3">
+                <div>
+                  <p class="text-[10px] uppercase tracking-widest font-black text-orange-500">推荐支持分</p>
+                  <p class="text-lg font-black text-orange-600">{{ getRecommendationForPet(pet.id)?.score }}</p>
+                </div>
+                <ShieldCheck class="text-orange-500" :size="18" />
+              </div>
+              <div class="flex items-center justify-between text-gray-400 font-bold uppercase tracking-widest">
+                <span class="text-sm text-gray-700 dark:text-gray-200">{{ pet.species }}</span>
+                <ChevronRight class="text-orange-500 group-hover:translate-x-1 transition-transform" :size="16" />
+              </div>
             </div>
           </div>
         </div>
+
+        <BaseCard class="p-6 md:p-8 space-y-6 h-fit sticky top-6">
+          <div v-if="selectedPet" class="space-y-6">
+            <div>
+              <p class="text-xs font-black uppercase tracking-widest text-orange-500">候选详情</p>
+              <h3 class="text-3xl font-black text-gray-900 dark:text-white mt-2">{{ selectedPet.name }}</h3>
+              <p class="text-gray-500 dark:text-gray-400 mt-1">{{ selectedPet.species }}</p>
+            </div>
+
+            <img :src="selectedPet.img" class="w-full h-64 object-cover rounded-[2rem]" />
+            <p class="text-base leading-7 text-gray-600 dark:text-gray-300">{{ selectedPet.desc }}</p>
+
+            <div v-if="displayConstraintTags(selectedPet).length" class="space-y-2">
+              <p class="text-xs font-black uppercase tracking-widest text-blue-500 flex items-center gap-2"><ListFilter :size="14" /> 约束过滤重点</p>
+              <div class="flex flex-wrap gap-2">
+                <span v-for="tag in displayConstraintTags(selectedPet)" :key="tag" class="px-3 py-2 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-300 text-xs font-bold">{{ tag }}</span>
+              </div>
+            </div>
+
+            <div v-if="getRecommendationForPet(selectedPet.id)" class="space-y-3">
+              <p class="text-xs font-black uppercase tracking-widest text-green-500">推荐理由</p>
+              <div class="flex flex-wrap gap-2">
+                <span v-for="reason in getRecommendationForPet(selectedPet.id)?.reasons || []" :key="reason" class="px-3 py-2 rounded-full bg-green-500/10 text-green-700 dark:text-green-300 text-xs font-bold">{{ reason }}</span>
+              </div>
+            </div>
+
+            <button @click="router.push('/profile')" class="w-full py-4 rounded-2xl bg-orange-500 text-white font-black flex items-center justify-center gap-2">
+              <Heart :size="18" /> 先完善画像再提交申请
+            </button>
+          </div>
+
+          <div v-else class="py-10 text-center text-gray-500 dark:text-gray-400 space-y-3">
+            <Sparkles class="mx-auto text-orange-500" :size="28" />
+            <p class="font-bold">点击左侧宠物卡片，查看候选详情、约束条件和推荐理由。</p>
+          </div>
+        </BaseCard>
       </div>
-    </div>
+    </section>
   </div>
 </template>
-
-<style scoped>
-.fade-enter-active, .fade-leave-active { transition: opacity 0.4s ease; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
-.scrollbar-hide::-webkit-scrollbar { display: none; }
-.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-</style>

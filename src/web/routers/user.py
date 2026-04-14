@@ -17,6 +17,9 @@ from src.web.services.auth_service import verify_password, get_password_hash
 from src.web.dependencies import get_current_user
 from src.web.services.credit_service import CreditService
 from src.web.services.ai_service import ai_service
+from src.web.services.profile_service import ProfileService
+from src.web.services.recommendation_service import RecommendationService
+from src.web.schemas import UserProfileUpdate, UserPreferenceUpdate
 
 router = APIRouter(prefix="/api/user", tags=["user"])
 credit_service = CreditService(ai_service)
@@ -246,6 +249,41 @@ def get_user_profile(user_id: int):
             raise HTTPException(status_code=404, detail="用户不存在")
         return dict(row)
 
+
+@router.get("/profile-portrait/{user_id}")
+def get_user_profile_portrait(user_id: int, current_user: dict = Depends(get_current_user)):
+    """获取推荐系统使用的结构化用户画像与领养偏好"""
+    if current_user["id"] != user_id and current_user.get("role") not in ["admin", "org_admin"]:
+        raise HTTPException(status_code=403, detail="无权限查看他人画像")
+
+    profile = ProfileService.get_user_profile(user_id) or {}
+    preference = ProfileService.get_user_preferences(user_id) or {}
+
+    merged = {
+        "housing_type": profile.get("housing_type", "apartment"),
+        "has_yard": bool(profile.get("has_yard", 0)),
+        "family_size": profile.get("family_size") or 1,
+        "has_children": bool(profile.get("has_children", 0)),
+        "has_other_pets": bool(profile.get("has_other_pets", 0)),
+        "housing_size": profile.get("housing_size") or 50,
+        "rental_status": profile.get("rental_status", "租房"),
+        "pet_experience": profile.get("pet_experience", "无"),
+        "experience_level": profile.get("experience_level") or 0,
+        "available_time": profile.get("available_time") or 2,
+        "family_support": bool(profile.get("family_support", 1)),
+        "budget_level": profile.get("budget_level", "中"),
+        "allergy_info": profile.get("allergy_info", ""),
+        "family_structure": profile.get("family_structure") or ("包含婴幼儿" if profile.get("has_children") else "纯成年人"),
+        "activity_level": profile.get("activity_level", "宅家型"),
+        "preferred_pet_type": preference.get("preferred_pet_type", "猫"),
+        "preferred_age_range": preference.get("preferred_age_range", "成年"),
+        "preferred_size": preference.get("preferred_size", "中型"),
+        "preferred_temperament": preference.get("preferred_temperament", "温顺"),
+        "accept_special_care": bool(preference.get("accept_special_care", 0)),
+        "accept_high_energy": bool(preference.get("accept_high_energy", 1)),
+    }
+    return merged
+
 from src.agents.agents import analyze_pet_interview # 使用现有的分析函数
 # ... (保持现有导入)
 
@@ -292,14 +330,48 @@ async def update_profile_data(
     current_user: dict = Depends(get_current_user)
 ):
     """更新用户的详细结构化画像数据"""
-    from src.web.services.profile_service import ProfileService
-    from src.web.schemas import UserProfileUpdate
-    
-    # 转化为 Pydantic 模型进行校验
-    profile_update = UserProfileUpdate(**payload)
+    preference_payload = {
+        "preferred_pet_type": payload.get("preferred_pet_type"),
+        "preferred_age_range": payload.get("preferred_age_range"),
+        "preferred_size": payload.get("preferred_size"),
+        "preferred_temperament": payload.get("preferred_temperament"),
+        "accept_special_care": payload.get("accept_special_care"),
+        "accept_high_energy": payload.get("accept_high_energy"),
+    }
+
+    family_structure = payload.get("family_structure")
+    has_children = payload.get("has_children")
+    if has_children is None and family_structure:
+        has_children = family_structure == "包含婴幼儿"
+
+    profile_payload = {
+        "housing_type": payload.get("housing_type"),
+        "has_yard": payload.get("has_yard"),
+        "family_size": payload.get("family_size"),
+        "has_children": has_children,
+        "has_other_pets": payload.get("has_other_pets"),
+        "housing_size": payload.get("housing_size"),
+        "rental_status": payload.get("rental_status"),
+        "pet_experience": payload.get("pet_experience"),
+        "experience_level": payload.get("experience_level"),
+        "available_time": payload.get("available_time"),
+        "family_support": payload.get("family_support"),
+        "budget_level": payload.get("budget_level"),
+        "allergy_info": payload.get("allergy_info") or ("过敏史" if payload.get("allergy_history") else ""),
+        "family_structure": family_structure,
+        "activity_level": payload.get("activity_level"),
+    }
+
+    profile_update = UserProfileUpdate(**profile_payload)
+    preference_update = UserPreferenceUpdate(**preference_payload)
     ProfileService.update_user_profile(current_user["id"], profile_update)
-    
-    return {"status": "success", "message": "画像数据已持久化"}
+    ProfileService.update_user_preferences(current_user["id"], preference_update)
+
+    return {
+        "status": "success",
+        "message": "用户画像与领养偏好已持久化",
+        "main_workflow": "用户画像与领养需求采集 -> 候选宠物生成 -> 约束过滤 -> 多维评分 -> 推荐排序 -> 申请审核联动",
+    }
 
 @router.post("/change-password")
 async def change_password(req: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
@@ -452,14 +524,23 @@ async def submit_adoption_application(
             },
         )
         conn.commit()
+    
+    # [重构核心]：提交申请后，立即触发推荐 Pipeline 对该宠物的申请人池进行重新精排
+    try:
+        profile_service = ProfileService()
+        recommender = RecommendationService(profile_service)
+        await recommender.rank_applicants_for_pet(req.pet_id)
+    except Exception as e:
+        # 评分失败不影响主流程，仅打日志
+        print(f"Post-submission ranking failed: {e}")
+
     sync_publisher_preferences(pet["owner_id"], req.pet_id, pet_preferences)
     return {"status": "success", "application_id": app_id}
 
 
 @router.get("/applications/incoming")
 def get_incoming_applications(current_user: dict = Depends(get_current_user)):
-    # 评审说明：
-    # “收到的申请”除了原始申请内容外，还会附带 AI 评分和偏好命中信息。
+    # 评审说明：联表查询加入推荐日志，实现按匹配分精排的审核列表。
     with get_db() as conn:
         ensure_tables(conn)
         cursor = conn.cursor()
@@ -470,12 +551,17 @@ def get_incoming_applications(current_user: dict = Depends(get_current_user)):
                    p.species AS pet_species,
                    p.adoption_preferences AS pet_preferences,
                    u.username AS applicant_name,
-                   u.email AS applicant_email
+                   u.email AS applicant_email,
+                   rl.final_score AS rec_score,
+                   rl.reason_text AS rec_reasons,
+                   rl.score_detail_json AS rec_sub_scores
             FROM applications a
             LEFT JOIN pets p ON a.pet_id = p.id
             LEFT JOIN users u ON a.user_id = u.id
+            LEFT JOIN recommendation_logs rl ON rl.scene = 'applicant_ranking' 
+                 AND rl.target_id = a.pet_id AND rl.candidate_id = a.user_id
             WHERE a.pet_owner_id = ?
-            ORDER BY a.create_time DESC
+            ORDER BY COALESCE(rl.final_score, 0) DESC, a.create_time DESC
             """,
             (current_user["id"],)
         )

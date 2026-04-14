@@ -25,10 +25,16 @@ class RecommendationService:
 
     async def recommend_pets_for_user(self, user_id: int):
         """场景1: 给领养用户推荐宠物 (Pet Discovery)"""
-        # 1. 创建初始 Query
+        # 1. 检查画像完整度 (冷启动检测)
+        profile = self.profile_service.get_user_profile(user_id)
+        needs_cold_start = False
+        if not profile or not profile.get("housing_type") or not profile.get("budget_level"):
+            needs_cold_start = True
+
+        # 2. 创建初始 Query
         query = RecommendationQuery(user_id=user_id, scene="pet_for_user")
 
-        # 2. 组装流水线
+        # 3. 组装流水线
         pipeline = RecommendationPipeline(
             query_hydrators=[
                 UserQueryHydrator(self.profile_service),
@@ -45,17 +51,17 @@ class RecommendationService:
             scorers=[
                 MultiFeatureScorer(),
             ],
-            selector=TopKSelector(k=10), # 扩大初始候选，以便展示过滤效果
+            selector=TopKSelector(k=10),
         )
 
-        # 3. 执行流水线
+        # 4. 执行流水线
         results = await pipeline.execute(query)
 
-        # 4. 持久化推荐日志
+        # 5. 持久化推荐日志
         for res in results:
             save_recommendation_log(
                 scene="pet_recommendation",
-                target_id=0, # 用户发现场景，target是用户自己(query.user_id)
+                target_id=0,
                 user_id=user_id,
                 candidate_id=res.candidate_id,
                 hard_filter_pass=getattr(res, 'hard_filter_pass', 1),
@@ -64,7 +70,11 @@ class RecommendationService:
                 reason_text="; ".join(res.reasons)
             )
 
-        return results
+        # 返回结果附带冷启动标志
+        return {
+            "results": results,
+            "needs_cold_start": needs_cold_start
+        }
 
     async def rank_applicants_for_pet(self, pet_id: int):
         """场景2: 给发布者排序申请人 (Applicant Ranking)"""

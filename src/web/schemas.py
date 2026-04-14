@@ -286,6 +286,8 @@ class UserProfileUpdate(BaseModel):
     family_support: Optional[bool] = Field(None, description="家庭是否支持")
     budget_level: Optional[str] = Field(None, description="预算承受能力: 低, 中, 高")
     allergy_info: Optional[str] = Field(None, description="过敏情况说明")
+    family_structure: Optional[str] = Field(None, description="家庭结构: 纯成年人 / 包含婴幼儿 / 包含老人")
+    activity_level: Optional[str] = Field(None, description="生活节奏: 宅家型 / 户外型")
     preferred_pet_type: Optional[str] = Field(None, description="偏好品种")
     preferred_size: Optional[str] = Field(None, description="偏好体型")
     preferred_temperament: Optional[str] = Field(None, description="偏好性格")
@@ -294,6 +296,7 @@ class UserPreferenceUpdate(BaseModel):
     preferred_pet_type: Optional[str] = Field(None, description="偏好品种: 猫, 狗, 鸟等")
     preferred_age_range: Optional[str] = Field(None, description="偏好年龄段: 幼年, 成年, 老年")
     preferred_size: Optional[str] = Field(None, description="偏好体型: 小型, 中型, 大型")
+    preferred_temperament: Optional[str] = Field(None, description="偏好性格: 温顺, 活泼, 安静等")
     accept_special_care: Optional[bool] = Field(None, description="是否接受特殊照顾宠物")
     accept_high_energy: Optional[bool] = Field(None, description="是否接受高能量/活泼宠物")
 

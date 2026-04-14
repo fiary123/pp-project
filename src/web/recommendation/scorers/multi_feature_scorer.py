@@ -1,91 +1,111 @@
 class MultiFeatureScorer:
     """
-    多维精排评分器 - 科学加权版
-    基于 rizhi.md 统计学洞察：健康披露、行为习惯、社交兼容性。
+    多维精排评分器 - 结构化匹配与可解释性增强版
+    对齐前端维度：condition (居住契合), preference (偏好对齐), experience (经验适配), penalty (风险抵扣)
     """
+
     async def score(self, query, candidates):
         profile = query.user_profile
         pref = query.user_preferences
+        budget_map = {"低": 1, "中": 2, "高": 3}
+        size_order = {"小型": 1, "中型": 2, "大型": 3}
 
         for candidate in candidates:
             pet = candidate.features.get("pet", {})
-            # req = candidate.features.get("requirement", {})
+            req = candidate.features.get("requirement", {})
 
-            # 基础分
-            base_score = 50.0
+            # 初始化四个对齐前端的维度分
+            preference_score = 50.0
+            condition_score = 50.0
+            experience_score = 50.0
+            penalty = 0.0
+
+            # 1. 偏好对齐 (Preference)
+            if pref.get("preferred_pet_type") == pet.get("species"):
+                preference_score += 20.0
+                candidate.reasons.append(f"品种契合：符合您对 {pet.get('species')} 的偏好")
+
+            if pref.get("preferred_age_range") == pet.get("age_stage"):
+                preference_score += 10.0
+                candidate.reasons.append("年龄匹配：正处于您期待的成长阶段")
+
+            user_size = size_order.get(pref.get("preferred_size"))
+            pet_size = size_order.get(pet.get("size_level"))
+            if user_size and pet_size and abs(user_size - pet_size) <= 1:
+                preference_score += 10.0
             
-            # --- 1. 统计学显著性补偿 ---
-            statistical_bonus = 0.0
-            # 健康披露补偿 (如果标记为健康或已绝育)
-            if pet.get("health_status") == "健康":
-                statistical_bonus += 10.0
-            if pet.get("sterilized"):
-                statistical_bonus += 10.0
-                candidate.reasons.append("健康披露详尽 (已完成绝育)")
-            
-            # 性格与社交补偿
-            if pet.get("social_level") == "极其亲人":
-                statistical_bonus += 10.0
-            if pet.get("good_with_children") and profile.get("has_children"):
-                statistical_bonus += 10.0
-                candidate.reasons.append("社交兼容性高 (对儿童友好)")
+            if pref.get("preferred_temperament") and pref.get("preferred_temperament") in str(pet.get("temperament_tags", "")):
+                preference_score += 10.0
+                candidate.reasons.append(f"性格契合：宠物特质命中您的理想标签")
 
-            # --- 2. 行为与性格匹配 ---
-            behavior_score = 0.0
-            # 陪伴需求匹配
-            time_map = {"低": 1.0, "中": 3.0, "高": 6.0}
-            pet_need_time = time_map.get(pet.get("companionship_need", "中"), 3.0)
-            user_avail_time = profile.get("available_time", 3.0)
-            
-            if user_avail_time >= pet_need_time:
-                behavior_score += 15.0
-                candidate.reasons.append("陪伴时间高度匹配")
-            else:
-                behavior_score -= 10.0
-
-            # 偏好性格匹配 (简单包含逻辑)
-            if pref.get("preferred_temperament") and pref.get("preferred_temperament") in pet.get("temperament_tags", ""):
-                behavior_score += 15.0
-                candidate.reasons.append(f"性格契合 ({pref.get('preferred_temperament')})")
-
-            # --- 3. 环境与活跃度匹配 ---
-            environment_score = 0.0
+            # 2. 居住契合 (Condition)
             # 空间匹配
             if profile.get("has_yard") and pet.get("energy_level") == "高":
-                environment_score += 15.0
-                candidate.reasons.append("运动空间契合 (有院子)")
+                condition_score += 20.0
+                candidate.reasons.append("环境契合：高能量宠物适配院子环境")
+            elif profile.get("housing_size", 0) > 80:
+                condition_score += 10.0
             
-            # 面积补偿
-            if profile.get("housing_size", 0) > 80:
-                environment_score += 5.0
+            if profile.get("housing_type") == req.get("required_housing_type"):
+                condition_score += 10.0
+                candidate.reasons.append("住房匹配：满足该宠物对居住环境的要求")
 
-            # --- 4. 经验适配 ---
-            experience_score = 0.0
-            if profile.get("experience_level", 0) >= 1: # 有经验或专家
-                experience_score += 10.0
+            # 陪伴时间
+            available_time = profile.get("available_time") or 0
+            min_time = req.get("min_companion_hours") or 2.0
+            if available_time >= min_time:
+                condition_score += 10.0
+            else:
+                condition_score -= 20.0
+                penalty += 10.0
+
+            # 3. 经验适配 (Experience)
+            exp_level = profile.get("experience_level", 0)
+            if pet.get("care_level") == "容易" and exp_level == 0:
+                experience_score += 30.0
+                candidate.reasons.append("经验适配：该宠物非常适合新手起步")
+            elif exp_level >= 1:
+                experience_score += 20.0
+                candidate.reasons.append("经验适配：您丰富的经验能应对此类宠物")
             
-            # 难度对齐
-            if pet.get("care_difficulty") == "容易" and profile.get("experience_level", 0) == 0:
-                experience_score += 10.0
-                candidate.reasons.append("难度适配 (新手友好)")
+            if not req.get("allow_beginner") and exp_level == 0:
+                experience_score -= 30.0
+                penalty += 15.0
 
-            # 最终权重计算
+            # 4. 风险抵扣 (Penalty)
+            if profile.get("allergy_info") and "低敏" not in str(pet.get("temperament_tags", "")):
+                penalty += 20.0
+                candidate.risk_flags.append("潜在过敏风险")
+            
+            if profile.get("has_children") and not pet.get("good_with_children"):
+                penalty += 15.0
+                candidate.risk_flags.append("儿童相处风险")
+
+            if profile.get("has_other_pets") and not pet.get("good_with_other_pets"):
+                penalty += 10.0
+                candidate.risk_flags.append("多宠兼容风险")
+
+            # 最终分数计算 (加权融合)
             candidate.final_score = (
-                base_score + 
-                statistical_bonus + 
-                behavior_score + 
-                environment_score + 
-                experience_score
+                preference_score * 0.4 +
+                condition_score * 0.3 +
+                experience_score * 0.3 -
+                penalty
             )
-            
-            # 映射到 0-100
-            candidate.final_score = max(0.0, min(100.0, candidate.final_score))
-            
+            candidate.final_score = round(max(0.0, min(100.0, candidate.final_score)), 2)
+
+            # 导出结构化分数供前端展示
             candidate.scores = {
-                "statistical": statistical_bonus,
-                "behavior": behavior_score,
-                "environment": environment_score,
-                "experience": experience_score
+                "condition": round(max(0.0, min(100.0, condition_score)), 2),
+                "preference": round(max(0.0, min(100.0, preference_score)), 2),
+                "experience": round(max(0.0, min(100.0, experience_score)), 2),
+                "penalty": round(penalty, 2)
+            }
+
+            candidate.stage_trace["multi_dimensional_scoring"] = {
+                "stage": "多维精排评分",
+                "dimensions": candidate.scores,
+                "summary": "基于居住、偏好、经验和风险四维度综合建模"
             }
 
         return candidates

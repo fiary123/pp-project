@@ -27,7 +27,8 @@ def init_database():
         "nutrition_feedbacks", "nutrition_plans", "agent_trace_logs",
         "user_sanctions", "moderation_logs", "pet_chat_profiles", "pet_chat_history",
         "messages", "comments", "posts", "applications", "announcements", "pets", "users",
-        "user_profiles", "user_preferences", "pet_features", "pet_requirements"
+        "user_profiles", "user_preferences", "pet_features", "pet_requirements",
+        "recommendation_logs"
     ]
     for t in tables_to_drop:
         cursor.execute(f"DROP TABLE IF EXISTS {t}")
@@ -298,6 +299,63 @@ def init_database():
     
     cursor.execute("INSERT INTO posts (user_id, title, content, type) VALUES (?,?,?,?)",
                    (1, '晒晒我的猫', '布丁今天特别乖。', 'daily'))
+
+    # ── 插入结构化画像与特征 (推荐系统核心数据) ──────────────────────────────
+    # 1. 用户画像 (user_profiles)
+    profiles = [
+        (1, '26-35', '公寓', 0, 2, 0, 0, 60.0, '租房', '1-3年', 1, 4.0, 1, '中', '无', '猫', '中型', '安静'),
+        (3, '18-25', '宿舍', 0, 1, 0, 0, 15.0, '租房', '无', 0, 1.0, 0, '低', '无', '鸟', '小型', '活泼'),
+        (4, '36-50', '别墅', 1, 4, 1, 1, 200.0, '自购', '3年以上', 2, 8.0, 1, '高', '无', '狗', '大型', '粘人'),
+        (5, '26-35', '平房', 0, 1, 0, 1, 45.0, '租房', '1-3年', 1, 2.0, 1, '中', '无', '猫', '中型', '独立'),
+        (6, '26-35', '公寓', 0, 2, 0, 0, 85.0, '自购', '3年以上', 2, 3.0, 1, '中', '无', '狗', '小型', '聪明'),
+    ]
+    cursor.executemany(
+        """INSERT INTO user_profiles (user_id, age_range, housing_type, has_yard, family_size, has_children, has_other_pets, 
+           housing_size, rental_status, pet_experience, experience_level, available_time, family_support, budget_level, 
+           allergy_info, preferred_pet_type, preferred_size, preferred_temperament) 
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        profiles
+    )
+
+    # 2. 用户偏好 (user_preferences)
+    preferences = [
+        (1, '猫', '成年', '中型', 0, 0),
+        (3, '鸟', '幼年', '小型', 0, 1),
+        (4, '狗', '成年', '大型', 1, 1),
+        (5, '猫', '老年', '中型', 1, 0),
+        (6, '狗', '幼年', '小型', 0, 1),
+    ]
+    cursor.executemany(
+        "INSERT INTO user_preferences (user_id, preferred_pet_type, preferred_age_range, preferred_size, accept_special_care, accept_high_energy) VALUES (?,?,?,?,?,?)",
+        preferences
+    )
+
+    # 3. 宠物特征 (pet_features)
+    # pet_id 1: 布丁(猫), 2: 豆包(狗), 3: 辛巴(狗)
+    features = [
+        (1, '猫', '成年', '中型', '健康', 1, '中', '安静, 粘人', 1, 1, '容易', '', '中', '中', 0),
+        (2, '狗', '幼年', '小型', '健康', 0, '高', '活泼, 粘人', 1, 1, '中等', '', '高', '中', 0),
+        (3, '狗', '成年', '大型', '健康', 1, '高', '聪明, 护卫', 0, 0, '困难', '需要大空间', '高', '高', 0),
+    ]
+    cursor.executemany(
+        """INSERT INTO pet_features (pet_id, species, age_stage, size_level, health_status, sterilized, activity_level, 
+           temperament_tags, good_with_children, good_with_other_pets, care_difficulty, medical_needs, companionship_need, 
+           budget_need_level, special_care_flag) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        features
+    )
+
+    # 4. 宠物领养要求 (pet_requirements)
+    requirements = [
+        (1, 1, '中', 2.0, '公寓', 0, 0, '无', 1, 1, '不限'),
+        (2, 1, '中', 4.0, '不限', 0, 0, '1-3年', 1, 1, '不限'),
+        (3, 0, '高', 6.0, '别墅', 1, 1, '3年以上', 1, 1, '本省'),
+    ]
+    cursor.executemany(
+        """INSERT INTO pet_requirements (pet_id, allow_beginner, min_budget_level, min_companion_hours, required_housing_type, 
+           forbid_other_pets, forbid_children, require_experience, require_stable_housing, require_return_visit, region_limit) 
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        requirements
+    )
 
     conn.commit()
     conn.close()
