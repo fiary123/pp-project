@@ -1,476 +1,133 @@
 import json
-import re
-
 from fastapi import APIRouter, HTTPException, Depends
 from src.web.schemas import PostCreate, PostUpdate, CommentCreate
-from src.web.services.db_service import get_db, ensure_tables
+from src.web.services.db_service import get_db
 from src.web.dependencies import get_current_user
 
-router = APIRouter(prefix="/api", tags=["posts"])
-
-DEMO_COMMENT_TEXTS = {
-    "这张抓拍太有氛围了，狗狗状态也很好。",
-    "它们玩了好久，回家都累坏啦。",
-    "收藏了，正准备接第一只猫回家。",
-    "真的好可爱，希望它能尽快遇到合适的家。",
-    "目前状态稳定，已完成基础驱虫。",
-}
+router = APIRouter(prefix='/api/posts', tags=['posts'])
 
 
-def _ensure_demo_posts(cursor):
-    cursor.execute("SELECT id, role, username FROM users WHERE role IN ('individual', 'org_admin') ORDER BY id ASC")
-    users = [dict(row) for row in cursor.fetchall()]
-    if not users:
-        return
-
-    individual = next((u for u in users if u["role"] == "individual"), users[0])
-    demo_posts = [
-        {
-            "title": "今天在公园遇到了超可爱的柴犬！",
-            "content": "今天带我家主子去公园散步，结果遇到了一只超热情的柴犬，两只小可爱玩得不亦乐乎。",
-            "image_url": "https://images.unsplash.com/photo-1583337130417-3346a1be7dee?auto=format&fit=crop&w=1200&q=80",
-            "type": "daily",
-            "likes": 12,
-            "user_id": individual["id"],
-        },
-        {
-            "title": "新手养猫避坑指南",
-            "content": "作为一名有着5年养猫经验的博主，今天要给各位新手家长排排雷。建议收藏！",
-            "image_url": "https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=1200&q=80",
-            "type": "experience",
-            "likes": 18,
-            "user_id": individual["id"],
-        },
-        {
-            "title": "【急寻领养】温顺橘猫寻找温暖的家",
-            "content": "在小区楼下发现的小橘，大概3个月大，已做完基础驱虫。性格超级粘人。",
-            "image_url": "https://images.unsplash.com/photo-1548247416-ec66f4900b2e?auto=format&fit=crop&w=1200&q=80",
-            "type": "adopt_help",
-            "likes": 26,
-            "user_id": individual["id"],
-            "pet_name": "小橘",
-            "pet_gender": "unknown",
-            "pet_age": "3个月",
-            "pet_breed": "橘猫",
-            "adopt_reason": "小区救助后暂时安置，现希望找到长期稳定的家庭。",
-            "location": "成都市高新区",
-        },
-        # 新增咨询类型帖子
-        {
-            "title": "咨询：兔子可以吃胡萝卜叶子吗？",
-            "content": "各位兔子家长好！我家兔子很喜欢吃胡萝卜，但是我听说叶子部分可能有问题。胡萝卜叶子可以喂兔子吗？需要注意什么？有没有推荐的兔子蔬菜清单？谢谢大家分享经验！",
-            "image_url": "https://images.unsplash.com/photo-1583337130417-3346a1be7dee?auto=format&fit=crop&w=1200&q=80",
-            "type": "consultation",
-            "likes": 8,
-            "user_id": individual["id"],
-        },
-        {
-            "title": "鸟类饲养咨询：鹦鹉需要什么营养？",
-            "content": "最近想养一只鹦鹉，但对鸟类营养不太了解。鹦鹉每天需要吃什么？有没有推荐的鸟粮品牌？除了鸟粮还需要补充什么维生素或矿物质吗？新手养鸟要注意哪些坑？",
-            "image_url": "https://images.unsplash.com/photo-1444464666168-49d633b86797?auto=format&fit=crop&w=1200&q=80",
-            "type": "consultation",
-            "likes": 15,
-            "user_id": individual["id"],
-        },
-        # 新增求助类型帖子
-        {
-            "title": "【紧急求助】我家猫咪跑出去找不到啦！",
-            "content": "求助！今天下午我家猫咪从阳台跑出去了，到现在已经6个小时了还没找到。猫咪是黑白花的，脖子上有铃铛。已经找遍了小区和周围的巷子，但还是没消息。各位有经验的家长，猫咪跑出去一般会去哪里？有什么找猫的方法吗？现在天黑了真的好担心...",
-            "image_url": "https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=1200&q=80",
-            "type": "help",
-            "likes": 22,
-            "user_id": individual["id"],
-        },
-        {
-            "title": "求助：仓鼠突然不爱动了，是生病了吗？",
-            "content": "我家仓鼠今天早上开始就不太对劲，一直蜷缩在角落不爱动，也不吃东西。平时很活泼的，现在看起来很虚弱。各位仓鼠家长遇到过这种情况吗？需要带去看兽医吗？还是在家观察一下？好担心它...",
-            "image_url": "https://images.unsplash.com/photo-1425082661705-1834bfd09dca?auto=format&fit=crop&w=1200&q=80",
-            "type": "help",
-            "likes": 9,
-            "user_id": individual["id"],
-        },
-        # 新增晒宠物类型帖子（不局限于猫狗）
-        {
-            "title": "晒晒我家的金鱼宝宝们！",
-            "content": "今天给鱼缸换水的时候拍了几张照片，我家的金鱼们超级可爱！有红色的锦鲤和黑色的草金鱼，每天看它们游来游去心情都变好了。养鱼真的是一种很治愈的爱好，大家有养鱼的经验吗？",
-            "image_url": "https://images.unsplash.com/photo-1520637836862-4d197d17c1a8?auto=format&fit=crop&w=1200&q=80",
-            "type": "show_pet",
-            "likes": 31,
-            "user_id": individual["id"],
-        },
-        {
-            "title": "我的小乌龟今天学会了爬坡！",
-            "content": "哈哈哈，今天发现我家的小乌龟居然能爬上那个小斜坡了！虽然动作很慢，但每次成功后它都会停下来休息一下，看起来超级有成就感。小乌龟真的太可爱了，每天观察它们的成长都让我觉得生活充满了惊喜。",
-            "image_url": "https://images.unsplash.com/photo-1578662996442-48f60103fc96?auto=format&fit=crop&w=1200&q=80",
-            "type": "show_pet",
-            "likes": 17,
-            "user_id": individual["id"],
-        },
-        {
-            "title": "分享我家的蜥蜴爬宠日常",
-            "content": "我家养了一只豹纹守宫，每天早上它都会趴在加热垫上晒太阳，超级治愈。晚上它会出来活动，爬来爬去的样子太可爱了。养爬宠的朋友们，你们家的爬宠有什么有趣的日常吗？",
-            "image_url": "https://images.unsplash.com/photo-1544568100-847a948585b9?auto=format&fit=crop&w=1200&q=80",
-            "type": "show_pet",
-            "likes": 14,
-            "user_id": individual["id"],
-        },
-        # 新增分享养宠经验（不局限于猫狗）
-        {
-            "title": "养兔子一年经验分享：从新手到老司机",
-            "content": "养兔子一年了，分享一些经验：1. 兔粮一定要选好的，不要贪便宜；2. 兔笼要定期清理，但不要太频繁洗澡；3. 兔子很胆小，要慢慢建立信任；4. 定期剪指甲和体检很重要；5. 兔子喜欢啃东西，要准备足够的磨牙玩具。希望对新手家长有帮助！",
-            "image_url": "https://images.unsplash.com/photo-1583337130417-3346a1be7dee?auto=format&fit=crop&w=1200&q=80",
-            "type": "experience",
-            "likes": 28,
-            "user_id": individual["id"],
-        },
-        {
-            "title": "鸟类饲养经验：鹦鹉训练小技巧",
-            "content": "养鹦鹉三年了，分享一些训练经验：1. 从建立信任开始，每天固定时间互动；2. 教说话要用简单词语重复；3. 不要强迫，要用奖励的方式；4. 注意鹦鹉的情绪，压力大会生病；5. 定期更换玩具保持新鲜感。养鸟真的很有趣，但需要耐心！",
-            "image_url": "https://images.unsplash.com/photo-1444464666168-49d633b86797?auto=format&fit=crop&w=1200&q=80",
-            "type": "experience",
-            "likes": 35,
-            "user_id": individual["id"],
-        },
-        {
-            "title": "水族箱养鱼经验分享：水质管理很重要",
-            "content": "养鱼两年了，最重要的就是水质管理：1. 定期换水，但不要换太多；2. 过滤系统要保持清洁；3. 定期测试水质参数；4. 不要过度喂食；5. 新鱼要隔离观察。养鱼让我学会了耐心和细心，希望大家都能养出健康漂亮的鱼！",
-            "image_url": "https://images.unsplash.com/photo-1520637836862-4d197d17c1a8?auto=format&fit=crop&w=1200&q=80",
-            "type": "experience",
-            "likes": 19,
-            "user_id": individual["id"],
-        },
-        {
-            "title": "爬宠养护经验：守宫的日常护理",
-            "content": "养豹纹守宫一年多了，分享护理经验：1. 温度和湿度要控制好；2. UVB灯很重要；3. 饮食要多样化；4. 定期清理粪便；5. 注意观察健康状况。爬宠虽然安静，但照顾起来很有成就感！",
-            "image_url": "https://images.unsplash.com/photo-1544568100-847a948585b9?auto=format&fit=crop&w=1200&q=80",
-            "type": "experience",
-            "likes": 16,
-            "user_id": individual["id"],
-        },
-    ]
-
-    for post in demo_posts:
-        cursor.execute("SELECT id FROM posts WHERE title=? AND type=?", (post["title"], post["type"]))
-        existing = cursor.fetchone()
-        if existing:
-            post_id = existing["id"]
-        else:
-            cursor.execute(
-                """
-                INSERT INTO posts
-                (user_id, title, content, image_url, image_urls, type, pet_name, pet_gender, pet_age, pet_breed, adopt_reason, location, likes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    post["user_id"],
-                    post["title"],
-                    post["content"],
-                    post["image_url"],
-                    json.dumps([post["image_url"]], ensure_ascii=False),
-                    post["type"],
-                    post.get("pet_name"),
-                    post.get("pet_gender"),
-                    post.get("pet_age"),
-                    post.get("pet_breed"),
-                    post.get("adopt_reason"),
-                    post.get("location"),
-                    post["likes"],
-                ),
-            )
-            post_id = cursor.lastrowid
-
-        cursor.execute(
-            "DELETE FROM comments WHERE post_id=? AND content IN ({})".format(",".join(["?"] * len(DEMO_COMMENT_TEXTS))),
-            (post_id, *DEMO_COMMENT_TEXTS),
-        )
-
-
-def _default_adoption_preferences():
-    return {
-        "hard_preferences": [],
-        "soft_preferences": ["住房稳定性", "陪伴时间", "责任意识"],
-        "allow_novice": True,
-        "accept_renting": True,
-        "require_stable_housing": False,
-        "require_financial_capacity": False,
-        "require_followup_updates": False,
-        "prefer_local": False,
-        "require_family_agreement": False,
-        "prefer_quiet_household": False,
-        "prefer_multi_pet_experience": False,
-        "focus_experience": False,
-        "focus_companionship": True,
-        "focus_stability": True,
-        "risk_tolerance": "medium",
-    }
-
-
-def _normalize_adoption_preferences(raw_value):
-    pref = _default_adoption_preferences()
-    if isinstance(raw_value, str):
-        try:
-            raw_value = json.loads(raw_value)
-        except Exception:
-            raw_value = None
-    if isinstance(raw_value, dict):
-        pref.update(raw_value)
-    pref["hard_preferences"] = list(dict.fromkeys(pref.get("hard_preferences") or []))
-    pref["soft_preferences"] = list(dict.fromkeys(pref.get("soft_preferences") or []))
-    return pref
-
-
-def _sync_preference_labels(pref: dict):
-    hard_preferences = list(dict.fromkeys(pref.get("hard_preferences") or []))
-    soft_preferences = list(dict.fromkeys(pref.get("soft_preferences") or []))
-
-    def set_hard(label: str, enabled: bool):
-        if enabled and label not in hard_preferences:
-            hard_preferences.append(label)
-        if not enabled and label in hard_preferences:
-            hard_preferences.remove(label)
-
-    def set_soft(label: str, enabled: bool):
-        if enabled and label not in soft_preferences:
-            soft_preferences.append(label)
-        if not enabled and label in soft_preferences:
-            soft_preferences.remove(label)
-
-    set_hard("有养宠经验", not pref.get("allow_novice", True) or pref.get("focus_experience", False))
-    set_hard("优先同城或本地领养", pref.get("prefer_local", False))
-    set_hard("需稳定住房或自有住房", not pref.get("accept_renting", True))
-    set_hard("稳定居住环境", pref.get("require_stable_housing", False) or pref.get("focus_stability", False))
-    set_hard("基础经济能力", pref.get("require_financial_capacity", False))
-    set_hard("家庭成员同意", pref.get("require_family_agreement", False))
-
-    set_soft("陪伴时间", pref.get("focus_companionship", False))
-    set_soft("住房稳定性", pref.get("focus_stability", False))
-    set_soft("责任意识", True)
-    set_soft("接受送养回访", pref.get("require_followup_updates", False))
-    set_soft("安静家庭", pref.get("prefer_quiet_household", False))
-    set_soft("多宠相处经验", pref.get("prefer_multi_pet_experience", False))
-
-    pref["hard_preferences"] = hard_preferences
-    pref["soft_preferences"] = soft_preferences
-    return pref
-
-
-def _extract_pet_profile(req: PostCreate | PostUpdate):
-    text = " ".join(
-        [
-            req.title or "",
-            req.content or "",
-            getattr(req, "pet_breed", "") or "",
-            getattr(req, "adopt_reason", "") or "",
-            getattr(req, "location", "") or "",
-        ]
-    )
-
-    tag_rules = [
-        ("粘人", ["粘人", "亲人", "爱撒娇", "喜欢陪", "跟人"]),
-        ("温顺", ["温顺", "乖巧", "懂事", "脾气好"]),
-        ("活泼", ["活泼", "好动", "精力旺盛"]),
-        ("聪明", ["聪明", "机灵", "听得懂", "边牧", "智商高"]),
-        ("独立", ["独立", "不太粘人", "能自己待着"]),
-        ("安静", ["安静", "安稳", "不吵", "安静陪伴"]),
-        ("胆小", ["胆小", "慢热", "怕生", "敏感"]),
-        ("会抓老鼠", ["抓老鼠", "逮老鼠"]),
-        ("已绝育", ["绝育", "已绝育"]),
-    ]
-    tags = [label for label, keywords in tag_rules if any(word in text for word in keywords)]
-    if not tags:
-        tags = ["亲人", "待了解"]
-
-    pref = _normalize_adoption_preferences(getattr(req, "adoption_preferences", None))
-    if any(word in text for word in ["有经验优先", "养宠经验", "不适合新手", "谢绝新手"]):
-        pref["allow_novice"] = False
-        pref["focus_experience"] = True
-    if any(word in text for word in ["仅限同城", "限同城", "本地优先", "仅限本地", "限自提"]):
-        pref["prefer_local"] = True
-    if any(word in text for word in ["不接受租房", "谢绝租房", "仅限自有住房"]):
-        pref["accept_renting"] = False
-        pref["require_stable_housing"] = True
-    if any(word in text for word in ["稳定住房", "稳定居住", "不要频繁搬家", "长期稳定"]):
-        pref["require_stable_housing"] = True
-    if any(word in text for word in ["经济能力", "基础预算", "看病预算", "能承担医疗", "有稳定收入"]):
-        pref["require_financial_capacity"] = True
-    if any(word in text for word in ["家人同意", "全家同意", "室友同意"]):
-        pref["require_family_agreement"] = True
-    if any(word in text for word in ["粘人", "分离焦虑", "需要陪伴", "陪陪它", "不适合长期独处"]):
-        pref["focus_companionship"] = True
-    if any(word in text for word in ["稳定工作", "稳定住所", "不要搬家", "长期负责"]):
-        pref["focus_stability"] = True
-    if any(word in text for word in ["安静家庭", "环境安静", "不要太吵", "怕吵"]):
-        pref["prefer_quiet_household"] = True
-    if any(word in text for word in ["有猫相处经验", "有狗相处经验", "多宠家庭经验", "原住民相处经验"]):
-        pref["prefer_multi_pet_experience"] = True
-    if any(word in text for word in ["要求高", "慎重领养", "宁缺毋滥", "严格筛选"]):
-        pref["risk_tolerance"] = "conservative"
-    elif any(word in text for word in ["条件合适即可", "真心对它好即可", "要求不高", "有爱心即可"]):
-        pref["risk_tolerance"] = "relaxed"
-    pref = _sync_preference_labels(pref)
-
-    age_text = getattr(req, "pet_age", "") or ""
-    age_match = re.search(r"(\d+)", age_text)
-    age_value = int(age_match.group(1)) if age_match else 1
-
-    pet_breed = getattr(req, "pet_breed", None) or ""
-    species = pet_breed.strip() or ("猫咪" if "猫" in text else "狗狗" if "狗" in text or "犬" in text else "异宠")
-
-    pet_name = getattr(req, "pet_name", None) or "待命名宠物"
-    description_parts = []
-    if req.content:
-        description_parts.append(req.content.strip())
-    adopt_reason = getattr(req, "adopt_reason", "") or ""
-    if adopt_reason:
-        description_parts.append(f"送养原因：{adopt_reason.strip()}")
-    description = " ".join(part for part in description_parts if part).strip() or "等待补充详细描述"
-
-    return {
-        "name": pet_name,
-        "species": species,
-        "age": age_value,
-        "description": description[:500],
-        "tags": ",".join(tags[:6]),
-        "adoption_preferences": json.dumps(pref, ensure_ascii=False),
-    }
-
-
-def _sync_adoption_post_pet(cursor, post_id: int, req: PostCreate | PostUpdate, user_id: int):
-    profile = _extract_pet_profile(req)
-    image_url = getattr(req, "image_url", None) or ""
-    image_urls = getattr(req, "image_urls", None) or "[]"
-    cursor.execute("SELECT id FROM pets WHERE source_post_id=?", (post_id,))
-    pet = cursor.fetchone()
-    if pet:
-        cursor.execute(
-            """
-            UPDATE pets SET
-                owner_id=?,
-                owner_type='personal',
-                name=?,
-                species=?,
-                age=?,
-                description=?,
-                image_url=CASE WHEN ? != '' THEN ? ELSE image_url END,
-                image_urls=CASE WHEN ? != '[]' THEN ? ELSE image_urls END,
-                adoption_preferences=?,
-                tags=?,
-                updated_at=CURRENT_TIMESTAMP
-            WHERE source_post_id=?
-            """,
-            (
-                user_id,
-                profile["name"],
-                profile["species"],
-                profile["age"],
-                profile["description"],
-                image_url,
-                image_url,
-                image_urls,
-                image_urls,
-                profile["adoption_preferences"],
-                profile["tags"],
-                post_id,
-            ),
-        )
-    else:
-        cursor.execute(
-            """
-            INSERT INTO pets
-            (owner_id, source_post_id, owner_type, name, species, age, description, image_url, image_urls, adoption_preferences, tags, status)
-            VALUES (?, ?, 'personal', ?, ?, ?, ?, ?, ?, ?, ?, '待领养')
-            """,
-            (
-                user_id,
-                post_id,
-                profile["name"],
-                profile["species"],
-                profile["age"],
-                profile["description"],
-                image_url,
-                image_urls,
-                profile["adoption_preferences"],
-                profile["tags"],
-            ),
-        )
-    return profile
-
-
-@router.get("/posts")
-def get_posts(skip: int = 0, limit: int = 20):
-    # 社区首页联表返回作者信息和评论数，减少前端重复请求。
-    if limit > 100:
-        limit = 100
+@router.get('')
+def get_posts():
     with get_db() as conn:
-        ensure_tables(conn)
         cursor = conn.cursor()
-        _ensure_demo_posts(cursor)
-        conn.commit()
         cursor.execute(
-            """
-            SELECT p.id, p.user_id, p.title, p.content, p.image_url,
-                   p.image_urls, p.type, p.likes, p.create_time,
-                   p.pet_name, p.pet_gender, p.pet_age, p.pet_breed, p.adopt_reason, p.location,
-                   pet.adoption_preferences,
-                   u.username, u.role,
-                   COALESCE(cc.comment_count, 0) AS comment_count
-            FROM posts p
-            JOIN users u ON p.user_id = u.id
-            LEFT JOIN pets pet ON pet.source_post_id = p.id
-            LEFT JOIN (
-                SELECT post_id, COUNT(*) AS comment_count
-                FROM comments
-                GROUP BY post_id
-            ) cc ON cc.post_id = p.id
-            ORDER BY p.create_time DESC
-            LIMIT ? OFFSET ?
-            """,
-            (limit, skip),
+            'SELECT p.*, u.username, u.role FROM posts p '
+            'JOIN users u ON p.user_id = u.id ORDER BY p.create_time DESC'
         )
-        items = [dict(row) for row in cursor.fetchall()]
-        cursor.execute("SELECT COUNT(*) FROM posts")
-        total = cursor.fetchone()[0]
-    return {"total": total, "items": items, "skip": skip, "limit": limit}
+        return [dict(row) for row in cursor.fetchall()]
 
 
-@router.post("/posts")
-async def publish_post(req: PostCreate, current_user: dict = Depends(get_current_user)):
-    if current_user["id"] != req.user_id:
-        raise HTTPException(status_code=403, detail="无权限以他人身份发帖")
-    # 普通动态与送养帖共用发布接口；送养帖会额外同步生成 pets 记录。
+@router.post('')
+async def create_post(req: PostCreate, current_user: dict = Depends(get_current_user)):
+    """
+    创建帖子。
+    当 type == 'adopt_help' (送养帖) 时，自动同步创建 pets + pet_features + pet_requirements 记录。
+    """
     with get_db() as conn:
-        ensure_tables(conn)
         cursor = conn.cursor()
-        cursor.execute(  
-    #参数化查询rameterized Query），通过 ? 占位符将业务逻辑与用户数据解耦，避免 SQL 注入风险。
+
+        # 1. 存帖子（全部字段）
+        prefs_json = json.dumps(req.adoption_preferences, ensure_ascii=False) if req.adoption_preferences else None
+        cursor.execute(
             """INSERT INTO posts
                (user_id, title, content, image_url, image_urls, type,
                 pet_name, pet_gender, pet_age, pet_breed, adopt_reason, location)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (req.user_id, req.title, req.content, req.image_url, req.image_urls,
-             req.type, req.pet_name, req.pet_gender, req.pet_age,
-             req.pet_breed, req.adopt_reason, req.location),
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                current_user['id'], req.title, req.content,
+                req.image_url, req.image_urls, req.type,
+                req.pet_name, req.pet_gender, req.pet_age,
+                req.pet_breed, req.adopt_reason, req.location,
+            ),
         )
         post_id = cursor.lastrowid
-        extracted_profile = None
-        if req.type == "adopt_help":
-            extracted_profile = _sync_adoption_post_pet(cursor, post_id, req, current_user["id"])
+
+        # 2. 送养帖 → 同步创建宠物记录 + 特征 + 约束
+        pet_id = None
+        if req.type == 'adopt_help' and req.pet_name:
+            species = _infer_species(req.pet_breed)
+            cursor.execute(
+                """INSERT INTO pets
+                   (owner_id, source_post_id, owner_type, name, species,
+                    description, image_url, image_urls, status)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    current_user['id'], post_id, 'personal',
+                    req.pet_name, species,
+                    req.content[:200] if req.content else '',
+                    req.image_url,
+                    req.image_urls,
+                    '待领养',
+                ),
+            )
+            pet_id = cursor.lastrowid
+
+            # pet_features
+            gender_map = {'male': '公', 'female': '母'}
+            cursor.execute(
+                """INSERT INTO pet_features
+                   (pet_id, species, gender, age_stage, health_status, sterilized,
+                    energy_level, temperament_tags, beginner_friendly,
+                    good_with_children, good_with_other_pets)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    pet_id, species,
+                    gender_map.get(req.pet_gender, '未知'),
+                    _infer_age_stage(req.pet_age),
+                    '健康', 0, '中', '亲人, 温顺', 1, 1, 1,
+                ),
+            )
+
+            # pet_requirements (从 adoption_preferences 解析)
+            prefs = req.adoption_preferences or {}
+            cursor.execute(
+                """INSERT INTO pet_requirements
+                   (pet_id, allow_beginner, min_budget_level, min_companion_hours,
+                    required_housing_type, forbid_other_pets, forbid_children,
+                    require_stable_housing, require_return_visit, special_notes)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    pet_id,
+                    1 if prefs.get('allow_novice', True) else 0,
+                    '中' if prefs.get('require_financial_capacity') else None,
+                    2.0 if prefs.get('focus_companionship') else 0,
+                    None,
+                    0,
+                    0,
+                    1 if prefs.get('require_stable_housing') else 0,
+                    1 if prefs.get('require_followup_updates', True) else 0,
+                    None,
+                ),
+            )
+
+            # publisher_preferences
+            cursor.execute(
+                """INSERT OR REPLACE INTO publisher_preferences
+                   (publisher_id, pet_id, risk_tolerance, raw_preferences_json)
+                   VALUES (?,?,?,?)""",
+                (
+                    current_user['id'], pet_id,
+                    prefs.get('risk_tolerance', 'medium'),
+                    json.dumps(prefs, ensure_ascii=False),
+                ),
+            )
+
         conn.commit()
-    return {"status": "success", "post_id": post_id, "extracted_profile": extracted_profile}
+        return {'status': 'success', 'post_id': post_id, 'pet_id': pet_id}
 
 
-@router.put("/posts/{post_id}")
+@router.put('/{post_id}')
 async def update_post(post_id: int, req: PostUpdate, current_user: dict = Depends(get_current_user)):
-    # 编辑送养帖时，需要同步更新 pets 表，保持帖子展示与领养数据一致。
     with get_db() as conn:
-        ensure_tables(conn)
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM posts WHERE id=?", (post_id,))
-        post = cursor.fetchone()
-        if not post:
-            raise HTTPException(status_code=404, detail="帖子不存在")
-        if post["user_id"] != current_user["id"] and current_user.get("role") not in ["org_admin"]:
-            raise HTTPException(status_code=403, detail="无权限修改他人帖子")
+        cursor.execute('SELECT user_id FROM posts WHERE id = ?', (post_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail='帖子不存在')
+        if row['user_id'] != current_user['id'] and current_user.get('role') != 'admin':
+            raise HTTPException(status_code=403, detail='无权编辑')
+
         cursor.execute(
             """UPDATE posts SET
                title=COALESCE(?,title), content=COALESCE(?,content),
@@ -479,92 +136,83 @@ async def update_post(post_id: int, req: PostUpdate, current_user: dict = Depend
                pet_age=COALESCE(?,pet_age), pet_breed=COALESCE(?,pet_breed),
                adopt_reason=COALESCE(?,adopt_reason), location=COALESCE(?,location)
                WHERE id=?""",
-            (req.title, req.content, req.image_url, req.image_urls,
-             req.pet_name, req.pet_gender, req.pet_age, req.pet_breed,
-             req.adopt_reason, req.location, post_id),
+            (
+                req.title, req.content, req.image_url, req.image_urls,
+                req.pet_name, req.pet_gender, req.pet_age, req.pet_breed,
+                req.adopt_reason, req.location, post_id,
+            ),
         )
-        merged = dict(post)
-        for key in ["title", "content", "image_url", "image_urls", "pet_name", "pet_gender", "pet_age", "pet_breed", "adopt_reason", "location", "adoption_preferences"]:
-            new_val = getattr(req, key, None)
-            if new_val is not None:
-                merged[key] = new_val
-        extracted_profile = None
-        if merged.get("type") == "adopt_help":
-            merged_req = PostCreate(
-                user_id=merged["user_id"],
-                title=merged.get("title"),
-                content=merged.get("content") or "",
-                type=merged.get("type") or "adopt_help",
-                image_url=merged.get("image_url"),
-                image_urls=merged.get("image_urls"),
-                pet_name=merged.get("pet_name"),
-                pet_gender=merged.get("pet_gender"),
-                pet_age=merged.get("pet_age"),
-                pet_breed=merged.get("pet_breed"),
-                adopt_reason=merged.get("adopt_reason"),
-                location=merged.get("location"),
-                adoption_preferences=merged.get("adoption_preferences"),
-            )
-            extracted_profile = _sync_adoption_post_pet(cursor, post_id, merged_req, current_user["id"])
         conn.commit()
-    return {"status": "success", "extracted_profile": extracted_profile}
+    return {'status': 'success'}
 
 
-@router.delete("/posts/{post_id}")
+@router.delete('/{post_id}')
 async def delete_post(post_id: int, current_user: dict = Depends(get_current_user)):
-    # 删除帖子时会一并删除关联宠物映射，并写入治理日志保留操作痕迹。
-    with get_db() as conn:
-        ensure_tables(conn)
-        cursor = conn.cursor()
-        cursor.execute("SELECT user_id FROM posts WHERE id=?", (post_id,))
-        post = cursor.fetchone()
-        if not post:
-            raise HTTPException(status_code=404, detail="帖子不存在")
-        if post["user_id"] != current_user["id"] and current_user.get("role") not in ["org_admin"]:
-            raise HTTPException(status_code=403, detail="无权限删除他人帖子")
-        cursor.execute("DELETE FROM pets WHERE source_post_id = ?", (post_id,))
-        cursor.execute("DELETE FROM posts WHERE id = ?", (post_id,))
-        cursor.execute(
-            "INSERT INTO moderation_logs (target_id, admin_id, reason, evidence_url) VALUES (?, ?, ?, ?)",
-            (post_id, current_user["id"], "用户删除帖子", ""),
-        )
-        conn.commit()
-    return {"status": "success"}
-
-
-@router.post("/posts/{post_id}/like")
-async def like_post(post_id: int, current_user: dict = Depends(get_current_user)):
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("UPDATE posts SET likes = COALESCE(likes,0) + 1 WHERE id = ?", (post_id,))
+        cursor.execute('SELECT user_id FROM posts WHERE id = ?', (post_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail='帖子不存在')
+        if row['user_id'] != current_user['id'] and current_user.get('role') != 'admin':
+            raise HTTPException(status_code=403, detail='无权删除')
+
+        cursor.execute('DELETE FROM posts WHERE id = ?', (post_id,))
         conn.commit()
-    return {"status": "success"}
+    return {'status': 'success'}
 
 
-@router.post("/posts/comment")
-async def create_comment(req: CommentCreate, current_user: dict = Depends(get_current_user)):
-    if current_user["id"] != req.user_id:
-        raise HTTPException(status_code=403, detail="无权限以他人身份评论")
-    # 评论单独落表，便于后续扩展审核、通知和互动统计。
+@router.post('/{post_id}/like')
+async def like_post(post_id: int):
     with get_db() as conn:
-        ensure_tables(conn)
         cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)",
-            (req.post_id, req.user_id, req.content),
-        )
+        cursor.execute('UPDATE posts SET likes = COALESCE(likes,0) + 1 WHERE id = ?', (post_id,))
         conn.commit()
-    return {"status": "success"}
+    return {'status': 'success'}
 
 
-@router.get("/posts/{post_id}/comments")
+@router.get('/{post_id}/comments')
 def get_comments(post_id: int):
     with get_db() as conn:
-        ensure_tables(conn)
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT c.*, u.username FROM comments c JOIN users u ON c.user_id = u.id WHERE post_id = ? ORDER BY c.create_time ASC",
+            'SELECT c.*, u.username FROM comments c '
+            'JOIN users u ON c.user_id = u.id '
+            'WHERE c.post_id = ? ORDER BY c.create_time ASC',
             (post_id,),
         )
-        res = [dict(row) for row in cursor.fetchall()]
-    return res
+        return [dict(row) for row in cursor.fetchall()]
+
+
+@router.post('/comment')
+async def create_comment(req: CommentCreate, current_user: dict = Depends(get_current_user)):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            'INSERT INTO comments (post_id, user_id, content) VALUES (?,?,?)',
+            (req.post_id, current_user['id'], req.content),
+        )
+        conn.commit()
+    return {'status': 'success'}
+
+
+# --- 辅助函数 ---
+
+def _infer_species(breed: str | None) -> str:
+    if not breed:
+        return '猫'
+    breed_lower = breed.lower()
+    dog_keywords = ['犬', '狗', '柴', '金毛', '拉布拉多', '哈士奇', '泰迪', '柯基', '边牧', '萨摩']
+    if any(k in breed_lower for k in dog_keywords):
+        return '狗'
+    return '猫'
+
+
+def _infer_age_stage(age_str: str | None) -> str:
+    if not age_str:
+        return '成年'
+    if any(k in age_str for k in ['月', '幼', '奶']):
+        return '幼年'
+    if any(k in age_str for k in ['老', '10', '11', '12', '13', '14', '15']):
+        return '老年'
+    return '成年'

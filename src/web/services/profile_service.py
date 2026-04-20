@@ -18,10 +18,28 @@ class ProfileService:
             if not profile or not profile.get("housing_type"):
                 cursor.execute("SELECT living_env, preference FROM users WHERE id = ?", (user_id,))
                 user_row = cursor.fetchone()
-                if user_row and (user_row["living_env"] or user_row["preference"]):
-                    # 这里在实际生产中通常是异步的，此处为了演示重构效果，我们模拟触发补全的逻辑
-                    # 在推荐场景下，这确保了冷启动用户也能有初始画像
-                    pass
+                if user_row:
+                    user_data = dict(user_row)
+                    bio_text = f"{user_data.get('living_env', '')} {user_data.get('preference', '')}"
+                    if bio_text.strip():
+                        # 启发式规则：简单映射常见关键词
+                        inferred = {}
+                        if "别墅" in bio_text: inferred["housing_type"] = "别墅"
+                        elif "公寓" in bio_text: inferred["housing_type"] = "公寓"
+                        elif "平房" in bio_text: inferred["housing_type"] = "平房"
+                        
+                        if "院子" in bio_text: inferred["has_yard"] = 1
+                        if "经验" in bio_text or "养过" in bio_text: inferred["pet_experience"] = "有经验"
+                        
+                        if inferred:
+                            # 自动更新画像表
+                            cursor.execute("INSERT OR IGNORE INTO user_profiles (user_id) VALUES (?)", (user_id,))
+                            set_clause = ", ".join([f"{k} = ?" for k in inferred.keys()])
+                            cursor.execute(f"UPDATE user_profiles SET {set_clause} WHERE user_id = ?", list(inferred.values()) + [user_id])
+                            conn.commit()
+                            # 重新读取
+                            cursor.execute("SELECT * FROM user_profiles WHERE user_id = ?", (user_id,))
+                            profile = dict(cursor.fetchone())
             
             return profile
 

@@ -51,7 +51,7 @@ class RecommendationService:
             ],
             scorers=[
                 MultiFeatureScorer(),
-                AgentDecisionAuditor(), # [重构新增]：多智能体决策审计阶段
+                AgentDecisionAuditor(), # [核心]：恢复专家审计阶段，通过按钮触发
             ],
             selector=TopKSelector(k=10),
         )
@@ -75,25 +75,19 @@ class RecommendationService:
         return {
             "results": results,
             "needs_cold_start": needs_cold_start,
-            "query_obj": query # 导出 query 以便演示接口提取 trace
+            "query_obj": query 
         }
 
     async def rank_applicants_for_pet(self, pet_id: int):
         """场景2: 给发布者排序申请人 (Applicant Ranking)"""
-        # 1. 创建初始 Query
         query = RecommendationQuery(user_id=0, scene="applicant_for_pet", pet_id=pet_id)
-
-        # 2. 组装流水线
         pipeline = RecommendationPipeline(
             query_hydrators=[], 
             sources=[
                 PetApplicationSource(self.application_service),
             ],
             hydrators=[
-                ApplicantContextHydrator(
-                    self.profile_service,
-                    self.pet_service
-                ),
+                ApplicantContextHydrator(self.profile_service, self.pet_service),
             ],
             filters=[
                 ApplicantConstraintFilter(),
@@ -103,21 +97,16 @@ class RecommendationService:
             ],
             selector=TopKSelector(k=20),
         )
-
-        # 3. 执行流水线
         results = await pipeline.execute(query)
-
-        # 4. 持久化日志 (场景：审核排序)
         for res in results:
             save_recommendation_log(
                 scene="applicant_ranking",
                 target_id=pet_id,
-                user_id=res.candidate_id, # 申请人ID
+                user_id=res.candidate_id, 
                 candidate_id=res.candidate_id,
                 hard_filter_pass=getattr(res, 'hard_filter_pass', 1),
                 score_detail=getattr(res, 'scores', {}),
                 final_score=getattr(res, 'final_score', 0.0),
                 reason_text="; ".join(res.reasons)
             )
-
         return results

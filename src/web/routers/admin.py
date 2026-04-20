@@ -133,9 +133,12 @@ def get_admin_applications():
         LEFT JOIN users u ON a.user_id = u.id 
         LEFT JOIN users o ON a.pet_owner_id = o.id 
         LEFT JOIN pets p ON a.pet_id = p.id 
-        LEFT JOIN recommendation_logs rl ON rl.scene = 'applicant_ranking' 
-             AND rl.target_id = a.pet_id AND rl.candidate_id = a.user_id
-        GROUP BY a.id -- 确保每个申请只出现一次 (取最新推荐日志)
+        LEFT JOIN recommendation_logs rl ON rl.id = (
+            SELECT MAX(id) FROM recommendation_logs 
+            WHERE scene = 'applicant_ranking' 
+            AND target_id = a.pet_id 
+            AND candidate_id = a.user_id
+        )
         ORDER BY a.create_time DESC
     """)
     

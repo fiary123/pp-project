@@ -197,6 +197,7 @@ class AdoptionEvaluationFeedbackRequest(BaseModel):
 
 class AdoptionAssessmentRequest(BaseModel):
     """领养资质评估请求 - 输入层"""
+    pet_id: int = Field(description="目标宠物 ID")
     # 申请人画像信息
     applicant_info: str = Field(min_length=10, description="申请人的个人情况描述（居住环境、职业、作息等）")
     application_reason: str = Field(default="", description="领养申请理由（自由文本，用于语义动机分析）")

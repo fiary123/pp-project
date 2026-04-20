@@ -5,6 +5,7 @@ import uuid
 from typing import Any, Dict, List
 
 from src.agents.agents import run_adoption_assessment
+from src.agents.committee_review import run_committee_assessment
 from src.web.services.db_service import get_db
 from src.web.services.adoption_consensus import fuse_consensus
 from src.web.services.adoption_contract import CONTRACT_VERSION, validate_contract_list
@@ -41,6 +42,129 @@ class AdoptionAssessmentService:
             "compatibility": "与当前宠物的适配度",
         }
 
+    async def start_application_evaluation(self, application_id: int) -> Dict[str, Any]:
+        """
+        [闭环核心逻辑] 启动针对特定申请的异步评估流程
+        1. 加载申请与评估 Payload
+        2. 运行完整的多智能体评估
+        3. 结果落库 (Applications + AI Reviews)
+        4. 状态流转与事件记录
+        """
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT user_id, assessment_payload, flow_status FROM applications WHERE id = ?",
+                (application_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError(f"申请 ID {application_id} 不存在")
+            
+            user_id, assessment_payload_json, current_flow_status = row
+            applicant_data = json.loads(assessment_payload_json or "{}")
+        
+        # 运行评估 (异步)
+        result = await self.run_full_assessment(user_id, applicant_data)
+        
+        # 结果落库
+        self._persist_assessment_result(application_id, result)
+        
+        return result
+
+    def _persist_assessment_result(self, application_id: int, result: Dict[str, Any]):
+        """将 AI 评估结果持久化到数据库"""
+        trace_id = result.get("trace_id", "")
+        ai_decision = result.get("decision", "")
+        ai_readiness_score = result.get("readiness_score", 0)
+        ai_summary = result.get("final_summary", "") or result.get("summary", "")
+        risk_level = result.get("risk_level", "Medium")
+        consensus_score = result.get("confidence_level", 0)
+        missing_fields = json.dumps(result.get("missing_fields", []), ensure_ascii=False)
+        conflict_notes = json.dumps(result.get("conflict_notes", []), ensure_ascii=False)
+        followup_questions = json.dumps(result.get("followup_questions", []), ensure_ascii=False)
+
+        # 解析下一个流程状态
+        from src.web.services.adoption_flow_engine import flow_engine
+        next_flow_status = flow_engine.resolve_result_flow_status(result)
+
+        # 构造完整的 AI 审核快照（包含委员会架构数据）
+        full_agent_outputs = {
+            "agent_outputs": result.get("agent_outputs", []),
+            "dimension_scores": result.get("dimension_scores", []),
+            "recommendations": result.get("recommendations", []),
+            "risk_factors": result.get("risk_factors", []),
+            # 委员会架构专属字段
+            "architecture": result.get("architecture", ""),
+            "phase1_contracts": result.get("phase1_contracts", {}),
+            "phase2_vote": result.get("phase2_vote", {}),
+            "phase3_mediation": result.get("phase3_mediation"),
+        }
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+
+            # 1. 更新 applications 表核心评估字段
+            cursor.execute(
+                """
+                UPDATE applications SET
+                ai_decision = ?,
+                ai_readiness_score = ?,
+                ai_summary = ?,
+                risk_level = ?,
+                consensus_score = ?,
+                missing_fields = ?,
+                conflict_notes = ?,
+                followup_questions = ?,
+                evaluation_trace_id = ?,
+                flow_status = ?,
+                evaluation_finished_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    ai_decision, ai_readiness_score, ai_summary, risk_level,
+                    consensus_score, missing_fields, conflict_notes, followup_questions,
+                    trace_id, next_flow_status, application_id
+                )
+            )
+
+            # 2. 写入 adoption_ai_reviews 快照（含完整委员会数据）
+            cursor.execute(
+                """
+                INSERT INTO adoption_ai_reviews
+                (application_id, trace_id, agent_outputs_json, consensus_result_json,
+                 route_decision, overall_score, consensus_score, risk_level)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    application_id,
+                    trace_id,
+                    json.dumps(full_agent_outputs, ensure_ascii=False, default=str),
+                    json.dumps(result.get("consensus_result", {}), ensure_ascii=False, default=str),
+                    json.dumps(result.get("route_decision", {}), ensure_ascii=False, default=str),
+                    ai_readiness_score,
+                    consensus_score,
+                    risk_level
+                )
+            )
+            
+            # 3. 记录流程事件
+            flow_engine.append_event(
+                conn,
+                application_id=application_id,
+                event_type="FINISH_EVALUATION",
+                from_status="evaluating",
+                to_status=next_flow_status,
+                actor_role="system",
+                payload={
+                    "trace_id": trace_id,
+                    "decision": ai_decision,
+                    "risk_level": risk_level,
+                    "next_action": result.get("route_decision", {}).get("next_action")
+                }
+            )
+            
+            conn.commit()
+
     async def run_full_assessment(self, user_id: int, applicant_data: Dict[str, Any]) -> Dict[str, Any]:
         trace_id = str(uuid.uuid4())
         started_at = time.time()
@@ -69,24 +193,26 @@ class AdoptionAssessmentService:
             )
             lifecycle.append("knowledge_memory_prepare")
 
-            await self._before_stage(trace_id, "hierarchical_crew_reasoning", applicant_data)
+            await self._before_stage(trace_id, "committee_independent_review", applicant_data)
+            from src.agents.agents import adoption_llm
             ai_result = await asyncio.to_thread(
-                run_adoption_assessment,
-                applicant_data.get("applicant_info", ""),
-                applicant_data.get("target_species", "cat"),
-                applicant_data.get("target_pet_name", "未指定"),
-                float(applicant_data.get("monthly_budget", 0) or 0),
-                float(applicant_data.get("daily_companion_hours", 0) or 0),
-                bool(applicant_data.get("has_pet_experience", False)),
-                applicant_data.get("housing_type", "apartment"),
-                applicant_data.get("application_reason", ""),
-                applicant_data.get("existing_pets", ""),
-                applicant_data.get("publisher_preferences"),
-                knowledge_context,
-                memory_context,
+                run_committee_assessment,
+                adoption_llm,
+                applicant_info=applicant_data.get("applicant_info", ""),
+                target_species=applicant_data.get("target_species", "cat"),
+                target_pet_name=applicant_data.get("target_pet_name", "未指定"),
+                monthly_budget=float(applicant_data.get("monthly_budget", 0) or 0),
+                daily_companion_hours=float(applicant_data.get("daily_companion_hours", 0) or 0),
+                has_pet_experience=bool(applicant_data.get("has_pet_experience", False)),
+                housing_type=applicant_data.get("housing_type", "apartment"),
+                application_reason=applicant_data.get("application_reason", ""),
+                existing_pets=applicant_data.get("existing_pets", ""),
+                publisher_preferences=applicant_data.get("publisher_preferences"),
+                knowledge_context=knowledge_context,
+                memory_context=memory_context,
             )
-            await self._after_stage(trace_id, "hierarchical_crew_reasoning", ai_result)
-            lifecycle.append("hierarchical_crew_reasoning")
+            await self._after_stage(trace_id, "committee_independent_review", ai_result)
+            lifecycle.append("committee_independent_review")
 
             await self._before_stage(trace_id, "conflict_review", ai_result)
             final_result = self._merge_results(rule_result, ai_result, applicant_data)

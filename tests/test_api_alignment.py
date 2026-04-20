@@ -16,7 +16,7 @@ def test_register_and_login_flow():
         'username': '测试用户',
         'email': email,
         'password': '123456',
-        'role': 'individual'
+        'role': 'user'
     })
     assert register.status_code in (200, 400)
 
@@ -28,7 +28,7 @@ def test_register_and_login_flow():
 
 
 def test_frontend_missing_endpoints_now_available():
-    chat = client.post('/api/chat', json={'message': '猫咪不吃饭怎么办'})
+    chat = client.post('/api/chat', json={'message': '猫咪不吃饭怎么办？'})
     assert chat.status_code == 200
     assert 'reply' in chat.json()
 

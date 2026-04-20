@@ -25,6 +25,7 @@ async def get_pet_recommendations(
     service_res = await recommender.recommend_pets_for_user(user_id, user_query=user_query)
     results = service_res["results"]
     needs_cold_start = service_res["needs_cold_start"]
+    debug_trace = getattr(service_res.get("query_obj"), "last_execution_trace", None)
 
     # 格式化输出
     return {
@@ -45,7 +46,8 @@ async def get_pet_recommendations(
             }
             for index, item in enumerate(results)
         ],
-        "needs_cold_start": needs_cold_start
+        "needs_cold_start": needs_cold_start,
+        "debug_trace": debug_trace
     }
 
 @router.get("/demo/pipeline/{user_id}")

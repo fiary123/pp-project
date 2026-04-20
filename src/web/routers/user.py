@@ -1,840 +1,394 @@
-from fastapi import APIRouter, HTTPException, Depends, Body
+from fastapi import APIRouter, HTTPException, Depends, Body, BackgroundTasks
 import json
-from datetime import datetime
 from src.web.schemas import (
-    ChangePasswordRequest, MessageCreate,
-    AdoptionApplicationCreateRequest, OwnerApplicationDecisionRequest,
-    NotificationReadRequest
+    ChangePasswordRequest, OwnerApplicationDecisionRequest, AdoptionAssessmentRequest,
+    AdoptionEvaluationFeedbackRequest
 )
-from src.web.services.db_service import get_db, ensure_tables
-from src.web.services.adoption_flow_engine import flow_engine
-from src.web.services.adoption_memory import (
-    build_case_summary,
-    sync_publisher_preferences,
-    upsert_case_memory,
-)
+from src.web.services.db_service import get_db
 from src.web.services.auth_service import verify_password, get_password_hash
 from src.web.dependencies import get_current_user
-from src.web.services.credit_service import CreditService
-from src.web.services.ai_service import ai_service
 from src.web.services.profile_service import ProfileService
-from src.web.services.recommendation_service import RecommendationService
-from src.web.schemas import UserProfileUpdate, UserPreferenceUpdate
+from src.web.services.application_service import ApplicationService
+from src.web.services.assessment_service import AdoptionAssessmentService
 
-router = APIRouter(prefix="/api/user", tags=["user"])
-credit_service = CreditService(ai_service)
+router = APIRouter(prefix='/api/user', tags=['user'])
 
+@router.get('/profile-portrait/{user_id}')
+def get_user_profile_portrait(user_id: int, current_user: dict = Depends(get_current_user)):
+    if current_user['id'] != user_id and current_user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail='无权访问')
+    ps = ProfileService()
+    return {'profile': ps.get_user_profile(user_id), 'preference': ps.get_user_preferences(user_id)}
 
-def _parse_json(raw_value, fallback):
-    if raw_value in (None, "", b""):
-        return fallback
-    if isinstance(raw_value, (dict, list)):
-        return raw_value
-    try:
-        loaded = json.loads(raw_value)
-        return loaded if isinstance(loaded, type(fallback)) else fallback
-    except Exception:
-        return fallback
+@router.post('/update-profile-data')
+async def update_user_profile_data(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    ps = ProfileService()
+    from src.web.schemas import UserProfileUpdate, UserPreferenceUpdate
+    # Pydantic V2 使用 model_fields
+    ps.update_user_profile(current_user['id'], UserProfileUpdate(**{k:v for k,v in data.items() if k in UserProfileUpdate.model_fields}))
+    ps.update_user_preferences(current_user['id'], UserPreferenceUpdate(**{k:v for k,v in data.items() if k in UserPreferenceUpdate.model_fields}))
+    return {'status': 'success'}
 
-
-def _load_pet_preferences(raw_value):
-    default_pref = {
-        "hard_preferences": [],
-        "soft_preferences": ["住房稳定性", "陪伴时间", "责任意识"],
-        "allow_novice": True,
-        "accept_renting": True,
-        "require_stable_housing": False,
-        "require_financial_capacity": False,
-        "prefer_local": False,
-        "require_family_agreement": False,
-        "prefer_quiet_household": False,
-        "prefer_multi_pet_experience": False,
-        "focus_experience": False,
-        "focus_companionship": True,
-        "focus_stability": True,
-        "risk_tolerance": "medium",
-    }
-    if not raw_value:
-        return default_pref
-    try:
-        loaded = json.loads(raw_value)
-        if isinstance(loaded, dict):
-            default_pref.update(loaded)
-    except Exception:
-        pass
-    return default_pref
-
-
-def _build_owner_ai_report(app_row: dict, pref: dict) -> dict:
-    score = int(app_row.get("ai_readiness_score") or 0)
-    ai_decision = (app_row.get("ai_decision") or "").lower()
-    assessment_payload = app_row.get("assessment_payload")
-    latest_assessment = {}
-    if isinstance(assessment_payload, dict):
-        latest_assessment = assessment_payload.get("latest_assessment") or {}
-    strengths = []
-    risks = []
-    confirm_questions = []
-    preference_hits = []
-    dimension_summary = []
-
-    if score >= 75:
-        strengths.append("申请人基础准备度较高，适合继续推进沟通")
-    elif score >= 60:
-        strengths.append("申请人整体条件尚可，具备进一步沟通价值")
-    else:
-        risks.append("AI 准备度评分偏低，建议谨慎核验关键条件")
-
-    if pref.get("focus_stability"):
-        confirm_questions.append("请进一步确认申请人的居住稳定性与未来 1 年安置计划")
-        preference_hits.append("送养方重点关注长期稳定居住")
-    if pref.get("focus_companionship"):
-        confirm_questions.append("建议确认日常陪伴时长是否能长期兑现")
-        preference_hits.append("送养方重点关注真实陪伴能力")
-    if pref.get("focus_experience"):
-        confirm_questions.append("建议确认其过往养宠经验与突发情况处理能力")
-        preference_hits.append("送养方重点关注养宠经验")
-    if pref.get("require_family_agreement"):
-        confirm_questions.append("建议确认家庭成员是否全部知情并同意领养")
-        risks.append("送养方要求家庭成员明确同意，需核验家庭共识")
-    if not pref.get("accept_renting", True):
-        risks.append("发布者对租房申请较谨慎，需补充稳定居住证明")
-    if not pref.get("allow_novice", True):
-        risks.append("发布者不倾向新手申请，需重点核验照护经验")
-    if pref.get("prefer_local"):
-        strengths.append("若申请人为本地领养，可降低交接与回访成本")
-        confirm_questions.append("建议确认申请人是否便于线下沟通、回访或探视")
-    if pref.get("require_stable_housing"):
-        risks.append("送养方将稳定居住环境视为硬性条件之一")
-    if pref.get("require_financial_capacity"):
-        risks.append("送养方希望申请人能承担基础医疗与长期开销")
-        confirm_questions.append("建议确认申请人是否有稳定收入与应急医疗预算")
-    if pref.get("prefer_quiet_household"):
-        preference_hits.append("送养方偏好安静、节奏平稳的家庭环境")
-    if pref.get("prefer_multi_pet_experience"):
-        preference_hits.append("送养方偏好有多宠相处经验的申请人")
-
-    suggested_action = "继续沟通"
-    if score < 50 or ai_decision == "reject":
-        suggested_action = "谨慎拒绝或要求补充材料"
-    elif score < 70 or ai_decision in ("review_required", "conditional_pass"):
-        suggested_action = "补充关键信息后再决定"
-    if pref.get("risk_tolerance") == "conservative":
-        suggested_action = "若任何关键条件存疑，建议先追问或要求补充证明"
-    elif pref.get("risk_tolerance") == "relaxed" and suggested_action == "继续沟通":
-        suggested_action = "整体可积极推进沟通，但仍建议确认基础责任感"
-
-    if not strengths:
-        strengths.append("已形成基础申请材料，可结合实际沟通继续判断")
-    if not risks:
-        risks.append("暂未发现明显硬性风险，但仍建议核验关键细节")
-    if not confirm_questions:
-        confirm_questions.append("建议确认其长期责任感与应急处理意识")
-
-    for item in (latest_assessment.get("dimension_scores") or []):
-        if not isinstance(item, dict):
-            continue
-        dimension_summary.append({
-            "label": item.get("label", "未命名维度"),
-            "score": item.get("score", 0),
-            "risk_level": item.get("risk_level", "Medium"),
-        })
-
-    dimension_summary.sort(key=lambda item: item["score"])
-
-    return {
-        "applicant_summary": f"AI 评分 {score}/100，系统倾向：{app_row.get('ai_decision') or '待评估'}",
-        "compatibility_score": score,
-        "strengths": strengths[:3],
-        "risks": risks[:3],
-        "confirm_questions": confirm_questions[:4],
-        "preference_hits": preference_hits[:4],
-        "risk_tolerance": pref.get("risk_tolerance", "medium"),
-        "suggested_action": suggested_action,
-        "dimension_summary": dimension_summary[:4],
-    }
-
-
-def _attach_framework_details(conn, item: dict) -> dict:
-    cursor = conn.cursor()
-    assessment_payload = item.get("assessment_payload") if isinstance(item.get("assessment_payload"), dict) else _parse_json(item.get("assessment_payload"), {})
-    latest_assessment = assessment_payload.get("latest_assessment") or {}
-
-    cursor.execute(
-        """
-        SELECT trace_id, consensus_result_json, route_decision, overall_score, consensus_score, disagreement_score, risk_level, created_at
-        FROM adoption_ai_reviews
-        WHERE application_id=?
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
-        """,
-        (item["id"],),
-    )
-    review_row = cursor.fetchone()
-    latest_review = dict(review_row) if review_row else {}
-    if latest_review:
-        latest_review["consensus_result"] = _parse_json(latest_review.get("consensus_result_json"), {})
-    else:
-        latest_review = {
-            "trace_id": item.get("evaluation_trace_id", ""),
-            "route_decision": (latest_assessment.get("route_decision") or {}).get("next_action", ""),
-            "consensus_result": latest_assessment.get("consensus_result") or {},
-            "overall_score": latest_assessment.get("readiness_score") or item.get("ai_readiness_score"),
-            "consensus_score": (latest_assessment.get("consensus_result") or {}).get("consensus_score"),
-            "disagreement_score": (latest_assessment.get("consensus_result") or {}).get("disagreement_score"),
-            "risk_level": latest_assessment.get("risk_level") or item.get("risk_level"),
-        }
-
-    cursor.execute(
-        """
-        SELECT case_summary, decision_result, owner_followed_ai, followup_outcome, risk_tags_json, feedback_id, updated_at
-        FROM adoption_case_memory
-        WHERE application_id=?
-        """,
-        (item["id"],),
-    )
-    case_row = cursor.fetchone()
-    case_memory = dict(case_row) if case_row else {}
-    if case_memory:
-        case_memory["risk_tags"] = _parse_json(case_memory.get("risk_tags_json"), [])
-
-    cursor.execute(
-        """
-        SELECT question, answer, source, impact_score, created_at
-        FROM adoption_followups
-        WHERE application_id=?
-        ORDER BY created_at DESC, id DESC
-        LIMIT 3
-        """,
-        (item["id"],),
-    )
-    followups = [dict(row) for row in cursor.fetchall()]
-    timeline = flow_engine.get_timeline(conn, item["id"], limit=6)
-
-    item["assessment_payload"] = assessment_payload
-    item["latest_assessment"] = latest_assessment
-    item["latest_ai_review"] = latest_review
-    item["case_memory"] = case_memory
-    item["recent_followups"] = followups
-    item["flow_timeline"] = timeline
-    item["route_decision"] = latest_review.get("route_decision") or (latest_assessment.get("route_decision") or {}).get("next_action", "")
-    item["consensus_result"] = latest_review.get("consensus_result") or latest_assessment.get("consensus_result") or {}
-    return item
-
-
-def _owner_followed_ai(final_status: str, ai_decision: str) -> int | None:
-    ai = (ai_decision or "").lower()
-    if not ai:
-        return None
-    ai_positive = ai in ("pass", "conditional_pass", "approved", "通过", "建议通过")
-    final_positive = final_status == "approved"
-    return 1 if ai_positive == final_positive else 0
-
-
-def _detect_flow_status(ai_decision: str, missing_fields: list | None, followup_questions: list | None) -> str:
-    if followup_questions or missing_fields:
-        return "need_more_info"
-    if (ai_decision or "").lower() in ("review_required", "reject"):
-        return "manual_review"
-    return "waiting_publisher"
-
-@router.get("/profile/{user_id}")
-def get_user_profile(user_id: int):
-    """获取用户公开资料"""
+@router.get('/applications/incoming')
+def get_incoming_applications(current_user: dict = Depends(get_current_user)):
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, username, email, role, occupation, contact, living_env, preference, avatar_url FROM users WHERE id=?", (user_id,))
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="用户不存在")
-        return dict(row)
+        if current_user.get('role') == 'admin':
+            cursor.execute('SELECT a.*, p.name as pet_name, u.username as applicant_name FROM applications a LEFT JOIN pets p ON a.pet_id = p.id LEFT JOIN users u ON a.user_id = u.id ORDER BY a.create_time DESC')
+        else:
+            cursor.execute('SELECT a.*, p.name as pet_name, u.username as applicant_name FROM applications a LEFT JOIN pets p ON a.pet_id = p.id LEFT JOIN users u ON a.user_id = u.id WHERE a.pet_owner_id = ? ORDER BY a.create_time DESC', (current_user['id'],))
+        return [dict(row) for row in cursor.fetchall()]
 
+@router.get('/applications/{user_id}')
+def get_user_applications(user_id: int, current_user: dict = Depends(get_current_user)):
+    """获取我发出的领养申请"""
+    if current_user['id'] != user_id and current_user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail='无权查看他人申请')
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT a.*, p.name as pet_name, u_owner.username as owner_name '
+            'FROM applications a '
+            'LEFT JOIN pets p ON a.pet_id = p.id '
+            'LEFT JOIN users u_owner ON a.pet_owner_id = u_owner.id '
+            'WHERE a.user_id = ? ORDER BY a.create_time DESC', 
+            (user_id,)
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
-@router.get("/profile-portrait/{user_id}")
-def get_user_profile_portrait(user_id: int, current_user: dict = Depends(get_current_user)):
-    """获取推荐系统使用的结构化用户画像与领养偏好"""
-    if current_user["id"] != user_id and current_user.get("role") not in ["admin", "org_admin"]:
-        raise HTTPException(status_code=403, detail="无权限查看他人画像")
+@router.get('/applications/{application_id}/detail')
+def get_application_detail(application_id: int, current_user: dict = Depends(get_current_user)):
+    """获取申请的闭环详情，包括 AI 快照、流程事件及领养人详细画像"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        # 1. 获取主记录并权限校验
+        cursor.execute('SELECT * FROM applications WHERE id = ?', (application_id,))
+        app = cursor.fetchone()
+        if not app:
+            raise HTTPException(status_code=404, detail='申请不存在')
+        
+        app_dict = dict(app)
+        if app_dict['user_id'] != current_user['id'] and app_dict['pet_owner_id'] != current_user['id'] and current_user.get('role') != 'admin':
+            raise HTTPException(status_code=403, detail='无权访问该详情')
 
-    profile = ProfileService.get_user_profile(user_id) or {}
-    preference = ProfileService.get_user_preferences(user_id) or {}
+        # 2. 获取 AI 评估快照 (最新的)
+        cursor.execute(
+            'SELECT * FROM adoption_ai_reviews WHERE application_id = ? ORDER BY created_at DESC LIMIT 1',
+            (application_id,)
+        )
+        review = cursor.fetchone()
+        if review:
+            review_dict = dict(review)
+            for json_key in ('agent_outputs_json', 'consensus_result_json', 'route_decision'):
+                val = review_dict.get(json_key)
+                if val and isinstance(val, str):
+                    try:
+                        review_dict[json_key] = json.loads(val)
+                    except Exception:
+                        pass
+            app_dict['ai_review'] = review_dict
+        else:
+            app_dict['ai_review'] = None
 
-    merged = {
-        "housing_type": profile.get("housing_type", "apartment"),
-        "has_yard": bool(profile.get("has_yard", 0)),
-        "family_size": profile.get("family_size") or 1,
-        "has_children": bool(profile.get("has_children", 0)),
-        "has_other_pets": bool(profile.get("has_other_pets", 0)),
-        "housing_size": profile.get("housing_size") or 50,
-        "rental_status": profile.get("rental_status", "租房"),
-        "pet_experience": profile.get("pet_experience", "无"),
-        "experience_level": profile.get("experience_level") or 0,
-        "available_time": profile.get("available_time") or 2,
-        "family_support": bool(profile.get("family_support", 1)),
-        "budget_level": profile.get("budget_level", "中"),
-        "allergy_info": profile.get("allergy_info", ""),
-        "family_structure": profile.get("family_structure") or ("包含婴幼儿" if profile.get("has_children") else "纯成年人"),
-        "activity_level": profile.get("activity_level", "宅家型"),
-        "preferred_pet_type": preference.get("preferred_pet_type", "猫"),
-        "preferred_age_range": preference.get("preferred_age_range", "成年"),
-        "preferred_size": preference.get("preferred_size", "中型"),
-        "preferred_temperament": preference.get("preferred_temperament", "温顺"),
-        "accept_special_care": bool(preference.get("accept_special_care", 0)),
-        "accept_high_energy": bool(preference.get("accept_high_energy", 1)),
-    }
-    return merged
+        # 3. [新增] 获取申请人的详细画像
+        cursor.execute('SELECT * FROM user_profiles WHERE user_id = ?', (app_dict['user_id'],))
+        profile_row = cursor.fetchone()
+        app_dict['applicant_profile'] = dict(profile_row) if profile_row else None
+        
+        # 4. 获取申请人的基本账号信息 (名字等)
+        cursor.execute('SELECT username, email, avatar_url FROM users WHERE id = ?', (app_dict['user_id'],))
+        user_row = cursor.fetchone()
+        app_dict['applicant_user'] = dict(user_row) if user_row else None
 
-from src.agents.agents import analyze_pet_interview # 使用现有的分析函数
-# ... (保持现有导入)
+        # 5. 获取流程事件时间轴
+        cursor.execute(
+            'SELECT * FROM adoption_flow_events WHERE application_id = ? ORDER BY created_at ASC',
+            (application_id,)
+        )
+        app_dict['flow_events'] = [dict(row) for row in cursor.fetchall()]
 
-@router.post("/auto-profile")
-async def auto_generate_profile(
-    bio: str = Body(..., embed=True),
+        return app_dict
+
+@router.post('/applications/{application_id}/owner-decision')
+async def update_owner_decision(
+    application_id: int,
+    request: OwnerApplicationDecisionRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """利用 AI 从用户的一句话 bio 中智能提取结构化画像"""
-    try:
-        # 调用 AI 代理进行语义解析
-        analysis = await analyze_pet_interview(
-            user_msg=bio,
-            pet_name="系统",
-            pet_species="画像生成",
-            pet_desc="推荐画像提取"
+    """
+    送养人提交审核决策
+    status: approved / rejected / probing / human_review
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        # 1. 权限校验
+        cursor.execute('SELECT pet_owner_id, flow_status, user_id FROM applications WHERE id = ?', (application_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail='申请记录不存在')
+        
+        pet_owner_id, current_flow_status, applicant_id = row
+        if pet_owner_id != current_user['id'] and current_user.get('role') != 'admin':
+            raise HTTPException(status_code=403, detail='只有送养人或管理员可执行此操作')
+
+        # 2. 映射状态
+        status_map = {
+            "approved": "approved",
+            "rejected": "rejected",
+            "probing": "need_more_info",
+            "human_review": "manual_review"
+        }
+        next_flow_status = status_map.get(request.status, current_flow_status)
+        
+        # 3. 更新主表
+        cursor.execute(
+            """
+            UPDATE applications SET 
+            status = ?, 
+            flow_status = ?, 
+            owner_note = ?, 
+            decision_by = ?, 
+            decision_time = CURRENT_TIMESTAMP 
+            WHERE id = ?
+            """,
+            (request.status, next_flow_status, request.owner_note, current_user['id'], application_id)
         )
         
-        # 映射到结构化字段
-        # 注意：这里我们基于分析出的 user_traits 和 risk_flags 进行启发式映射
-        traits = str(analysis.get("user_traits", [])).lower()
+        # 4. 记录流程事件
+        from src.web.services.adoption_flow_engine import flow_engine
+        flow_engine.append_event(
+            conn,
+            application_id=application_id,
+            event_type="OWNER_DECISION",
+            from_status=current_flow_status,
+            to_status=next_flow_status,
+            actor_role="owner",
+            actor_id=current_user['id'],
+            payload={"note": request.owner_note, "decision": request.status}
+        )
         
-        extracted = {
-            "housing_type": "house" if "别墅" in traits or "院子" in traits else "apartment",
-            "family_structure": "包含婴幼儿" if "宝宝" in traits or "婴儿" in traits else ("包含老人" if "老人" in traits else "纯成年人"),
-            "pet_experience": "3年以上" if "资深" in traits or "多年" in traits else ("1-3年" if "养过" in traits else "无"),
-            "activity_level": "户外型" if "运动" in traits or "跑步" in traits else "宅家型",
-            "available_time": 8.0 if "全职" in traits else (1.0 if "加班" in traits else 3.0),
-            "allergy_history": "过敏" in traits or "鼻炎" in traits,
-            "budget_level": "高" if "不差钱" in traits or "高薪" in traits else "中"
-        }
+        # --- [新增] 发送结果通知通知逻辑 ---
+        try:
+            # 查询申请人信息、宠物名称、送养人联系信息及最新的AI审计摘要
+            cursor.execute('''
+                SELECT 
+                    u_app.email as applicant_email, u_app.username as applicant_name,
+                    p.name as pet_name,
+                    u_owner.username as owner_name, u_owner.email as owner_contact,
+                    ar.ai_summary as risk_summary
+                FROM applications a
+                JOIN users u_app ON a.user_id = u_app.id
+                JOIN pets p ON a.pet_id = p.id
+                JOIN users u_owner ON a.pet_owner_id = u_owner.id
+                LEFT JOIN adoption_ai_reviews ar ON a.id = ar.application_id
+                WHERE a.id = ?
+                ORDER BY ar.created_at DESC LIMIT 1
+            ''', (application_id,))
+            
+            info = cursor.fetchone()
+            if info and request.status in ['approved', 'rejected']:
+                from src.web.services.notification_service import NotificationService
+                background_tasks.add_task(
+                    NotificationService.send_adoption_result,
+                    applicant_email=info['applicant_email'],
+                    applicant_name=info['applicant_name'],
+                    pet_name=info['pet_name'],
+                    status=request.status,
+                    owner_name=info['owner_name'],
+                    owner_contact=info['owner_contact'],
+                    owner_note=request.owner_note,
+                    ai_risk_summary=info['risk_summary']
+                )
+        except Exception as e:
+            print(f"Failed to send notification: {e}")
+
+        conn.commit()
+        return {"status": "success", "next_flow_status": next_flow_status}
+
+@router.post('/applications/{application_id}/confirm-adoption')
+async def confirm_adoption(
+    application_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """领养人确认已接宠物回家，状态流转至 adopted"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id, flow_status FROM applications WHERE id = ?', (application_id,))
+        row = cursor.fetchone()
+        if not row: raise HTTPException(status_code=404, detail='申请不存在')
+        
+        user_id, flow_status = row
+        if user_id != current_user['id']: raise HTTPException(status_code=403, detail='只有申请人可执行此操作')
+        
+        cursor.execute(
+            "UPDATE applications SET flow_status = 'adopted', status = 'adopted' WHERE id = ?",
+            (application_id,)
+        )
+        
+        from src.web.services.adoption_flow_engine import flow_engine
+        flow_engine.append_event(
+            conn,
+            application_id=application_id,
+            event_type="CONFIRM_ADOPTION",
+            from_status=flow_status,
+            to_status="adopted",
+            actor_role="applicant",
+            actor_id=current_user['id']
+        )
+        conn.commit()
+        return {"status": "success"}
+
+@router.post('/applications/{application_id}/feedback')
+async def submit_application_feedback(
+    application_id: int,
+    request: AdoptionEvaluationFeedbackRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """提交领养后回访反馈，触发后验学习逻辑"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id, flow_status, pet_id FROM applications WHERE id = ?', (application_id,))
+        row = cursor.fetchone()
+        if not row: raise HTTPException(status_code=404, detail='申请不存在')
+        
+        user_id, flow_status, pet_id = row
+        if user_id != current_user['id']: raise HTTPException(status_code=403, detail='只有领养人可提交回访')
+
+        # 1. 写入 feedback 表
+        cursor.execute(
+            """
+            INSERT INTO adoption_feedbacks 
+            (user_id, pet_id, application_id, overall_satisfaction, bond_level, unexpected_challenges, would_recommend, free_feedback)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, pet_id, application_id, request.overall_satisfaction, request.bond_level, 
+             request.unexpected_challenges, 1 if request.would_recommend else 0, request.free_feedback)
+        )
+        
+        # 2. 触发后验学习逻辑 (更新风险标签权重)
+        from src.web.services.adoption_memory import update_signal_weights_from_feedback
+        update_signal_weights_from_feedback(
+            application_id=application_id,
+            overall_satisfaction=request.overall_satisfaction
+        )
+
+        # 3. 更新流程状态
+        cursor.execute(
+            "UPDATE applications SET flow_status = 'followup_completed' WHERE id = ?",
+            (application_id,)
+        )
+        
+        from src.web.services.adoption_flow_engine import flow_engine
+        flow_engine.append_event(
+            conn,
+            application_id=application_id,
+            event_type="SUBMIT_FEEDBACK",
+            from_status="adopted",
+            to_status="followup_completed",
+            actor_role="applicant",
+            actor_id=current_user['id'],
+            payload=request.dict()
+        )
+        
+        conn.commit()
+        return {"status": "success"}
+
+@router.post('/applications')
+async def create_adoption_application(
+    request: AdoptionAssessmentRequest,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    创建正式领养申请并启动异步 AI 评估
+    """
+    try:
+        # 1. 创建申请记录
+        app_id = ApplicationService.create_application(
+            user_id=current_user['id'],
+            pet_id=request.pet_id,
+            applicant_data=request.dict()
+        )
+        
+        # 2. 后台启动多智能体评估
+        assessment_service = AdoptionAssessmentService()
+        background_tasks.add_task(assessment_service.start_application_evaluation, app_id)
         
         return {
             "status": "success",
-            "extracted_data": extracted,
-            "summary": analysis.get("summary")
+            "application_id": app_id,
+            "message": "申请已提交，系统正在进行智能评估，请稍后查看结果"
         }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI 解析失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"创建申请失败: {str(e)}")
 
-@router.post("/update-profile-data")
-async def update_profile_data(
-    payload: dict = Body(...),
-    current_user: dict = Depends(get_current_user)
-):
-    """更新用户的详细结构化画像数据"""
-    preference_payload = {
-        "preferred_pet_type": payload.get("preferred_pet_type"),
-        "preferred_age_range": payload.get("preferred_age_range"),
-        "preferred_size": payload.get("preferred_size"),
-        "preferred_temperament": payload.get("preferred_temperament"),
-        "accept_special_care": payload.get("accept_special_care"),
-        "accept_high_energy": payload.get("accept_high_energy"),
-    }
+# --- 私信功能 (Private Messaging) ---
 
-    family_structure = payload.get("family_structure")
-    has_children = payload.get("has_children")
-    if has_children is None and family_structure:
-        has_children = family_structure == "包含婴幼儿"
-
-    profile_payload = {
-        "housing_type": payload.get("housing_type"),
-        "has_yard": payload.get("has_yard"),
-        "family_size": payload.get("family_size"),
-        "has_children": has_children,
-        "has_other_pets": payload.get("has_other_pets"),
-        "housing_size": payload.get("housing_size"),
-        "rental_status": payload.get("rental_status"),
-        "pet_experience": payload.get("pet_experience"),
-        "experience_level": payload.get("experience_level"),
-        "available_time": payload.get("available_time"),
-        "family_support": payload.get("family_support"),
-        "budget_level": payload.get("budget_level"),
-        "allergy_info": payload.get("allergy_info") or ("过敏史" if payload.get("allergy_history") else ""),
-        "family_structure": family_structure,
-        "activity_level": payload.get("activity_level"),
-    }
-
-    profile_update = UserProfileUpdate(**profile_payload)
-    preference_update = UserPreferenceUpdate(**preference_payload)
-    ProfileService.update_user_profile(current_user["id"], profile_update)
-    ProfileService.update_user_preferences(current_user["id"], preference_update)
-
-    return {
-        "status": "success",
-        "message": "用户画像与领养偏好已持久化",
-        "main_workflow": "用户画像与领养需求采集 -> 候选宠物生成 -> 约束过滤 -> 多维评分 -> 推荐排序 -> 申请审核联动",
-    }
-
-@router.post("/change-password")
-async def change_password(req: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
-    # 修改密码必须同时通过邮箱验证码和旧密码校验，降低恶意改密风险。
-    # 1. 校验验证码
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT code, expire_at FROM email_codes WHERE email = ?", (current_user["email"],))
-        record = cursor.fetchone()
-        if not record:
-            raise HTTPException(status_code=400, detail="请先获取验证码")
-        saved_code, expire_at = record
-        if saved_code != req.code:
-            raise HTTPException(status_code=400, detail="验证码错误")
-        if datetime.now() > datetime.strptime(expire_at, "%Y-%m-%d %H:%M:%S"):
-            raise HTTPException(status_code=400, detail="验证码已过期")
-        # 2. 校验旧密码
-        cursor.execute("SELECT password FROM users WHERE id=?", (current_user["id"],))
-        row = cursor.fetchone()
-        if not row or not verify_password(req.old_password, row["password"]):
-            raise HTTPException(status_code=400, detail="旧密码错误")
-        # 3. 执行修改
-        # 新密码仍按 bcrypt 哈希方式入库，保持与注册阶段一致的安全策略。
-        hashed_new = get_password_hash(req.new_password)
-        cursor.execute("UPDATE users SET password=? WHERE id=?", (hashed_new, current_user["id"]))
-        # 修改成功后清除验证码
-        cursor.execute("DELETE FROM email_codes WHERE email = ?", (current_user["email"],))
-        conn.commit()
-    return {"status": "success"}
-
-@router.get("/applications/{user_id}")
-def get_user_applications(user_id: int, current_user: dict = Depends(get_current_user)):
-    # 只允许查询自己的申请（管理员除外）
-    if current_user["id"] != user_id and current_user.get("role") not in ["org_admin"]:
-        raise HTTPException(status_code=403, detail="无权限查询他人申请")
-    with get_db() as conn:
-        ensure_tables(conn)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(applications)")
-        cols = {r[1] for r in cursor.fetchall()}
-        if "user_id" in cols:
-            # 联表补充宠物名、送养方昵称等展示字段，方便前端直接渲染记录列表。
-            order_col = "create_time" if "create_time" in cols else "id"
-            select_sql = f"""
-            SELECT a.*,
-                   p.name AS pet_name,
-                   p.species AS pet_species,
-                   u.username AS owner_name
-                FROM applications a
-                LEFT JOIN pets p ON a.pet_id = p.id
-                LEFT JOIN users u ON a.pet_owner_id = u.id
-                WHERE a.user_id=?
-                ORDER BY a.{order_col} DESC
-            """
-            cursor.execute(select_sql, (user_id,))
-        else:
-            cursor.execute("SELECT * FROM applications ORDER BY id DESC")
-        rows = []
-        for row in cursor.fetchall():
-            item = dict(row)
-            raw_payload = item.get("assessment_payload")
-            if raw_payload:
-                try:
-                    item["assessment_payload"] = json.loads(raw_payload)
-                except Exception:
-                    item["assessment_payload"] = {}
-            else:
-                item["assessment_payload"] = {}
-            for key in ("missing_fields", "conflict_notes", "followup_questions"):
-                raw = item.get(key)
-                if raw:
-                    try:
-                        item[key] = json.loads(raw)
-                    except Exception:
-                        item[key] = []
-                else:
-                    item[key] = []
-            item = _attach_framework_details(conn, item)
-            rows.append(item)
-    return rows
-
-
-@router.post("/applications/submit")
-async def submit_adoption_application(
-    req: AdoptionApplicationCreateRequest,
-    current_user: dict = Depends(get_current_user)
-):   # 该接口把申请表单和 AI 评估摘要一起持久化为正式领养申请。
-    with get_db() as conn:
-        ensure_tables(conn)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, owner_id, status FROM pets WHERE id=?", (req.pet_id,))
-        pet = cursor.fetchone()
-        if not pet:
-            raise HTTPException(status_code=404, detail="宠物不存在")
-        if pet["owner_id"] == current_user["id"]:
-            raise HTTPException(status_code=400, detail="不能申请自己发布的宠物")
-        if pet["status"] not in ("待领养", "pending", "available", None):
-            raise HTTPException(status_code=400, detail="该宠物当前不可申请")
-        # 重复申请校验：同一用户对同一宠物存在待处理申请时禁止再次提交。
-        cursor.execute(
-            """SELECT id FROM applications
-               WHERE user_id=? AND pet_id=? AND status IN ('pending', 'pending_owner_review')""",
-            (current_user["id"], req.pet_id)
-        )
-        if cursor.fetchone():
-            raise HTTPException(status_code=400, detail="您已提交过该宠物的待处理申请")
-
-        cursor.execute("SELECT adoption_preferences FROM pets WHERE id=?", (req.pet_id,))
-        pref_row = cursor.fetchone()
-        pet_preferences = {}
-        if pref_row and pref_row["adoption_preferences"]:
-            try:
-                pet_preferences = json.loads(pref_row["adoption_preferences"])
-            except Exception:
-                pet_preferences = {}
-        # 这里会同时写入风险等级、缺失字段、追问问题等结构化审核信息。
-        cursor.execute(
-            """INSERT INTO applications
-               (user_id, pet_id, pet_owner_id, apply_reason, ai_decision, ai_readiness_score, ai_summary,
-                assessment_payload, flow_status, risk_level, consensus_score, missing_fields, conflict_notes, followup_questions, memory_scope, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_owner_review')""",
-            (
-                current_user["id"], req.pet_id, pet["owner_id"], req.apply_reason,
-                req.ai_decision, req.ai_readiness_score, req.ai_summary or "",
-                json.dumps(req.assessment_payload or {}, ensure_ascii=False),
-                _detect_flow_status(req.ai_decision or "", req.missing_fields, req.followup_questions),
-                req.risk_level or "Medium",
-                req.consensus_score if req.consensus_score is not None else req.ai_readiness_score,
-                json.dumps(req.missing_fields or [], ensure_ascii=False),
-                json.dumps(req.conflict_notes or [], ensure_ascii=False),
-                json.dumps(req.followup_questions or [], ensure_ascii=False),
-                req.memory_scope or f"/adoption/pet_{req.pet_id}/applicant_{current_user['id']}"
-            )
-        )
-        app_id = cursor.lastrowid
-        initial_flow_status = _detect_flow_status(req.ai_decision or "", req.missing_fields, req.followup_questions)
-        # 同步记录流程事件，为后续审核时间线和后台追踪提供依据。
-        flow_engine.append_event(
-            conn,
-            application_id=app_id,
-            event_type="application_submitted",
-            from_status="submitted",
-            to_status=initial_flow_status,
-            actor_role="applicant",
-            actor_id=current_user["id"],
-            payload={
-                "pet_id": req.pet_id,
-                "ai_decision": req.ai_decision,
-                "risk_level": req.risk_level or "Medium",
-            },
-        )
-        conn.commit()
+@router.get('/messages/{user_id}/contacts')
+def get_message_contacts(user_id: int, current_user: dict = Depends(get_current_user)):
+    """获取与当前用户有过消息往来的联系人列表"""
+    if current_user['id'] != user_id:
+        raise HTTPException(status_code=403, detail="无权查看他人联系人")
     
-    # [重构核心]：提交申请后，立即触发推荐 Pipeline 对该宠物的申请人池进行重新精排
-    try:
-        profile_service = ProfileService()
-        recommender = RecommendationService(profile_service)
-        await recommender.rank_applicants_for_pet(req.pet_id)
-    except Exception as e:
-        # 评分失败不影响主流程，仅打日志
-        print(f"Post-submission ranking failed: {e}")
-
-    sync_publisher_preferences(pet["owner_id"], req.pet_id, pet_preferences)
-    return {"status": "success", "application_id": app_id}
-
-
-@router.get("/applications/incoming")
-def get_incoming_applications(current_user: dict = Depends(get_current_user)):
-    # 评审说明：联表查询加入推荐日志，实现按匹配分精排的审核列表。
     with get_db() as conn:
-        ensure_tables(conn)
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT a.*,
-                   p.name AS pet_name,
-                   p.species AS pet_species,
-                   p.adoption_preferences AS pet_preferences,
-                   u.username AS applicant_name,
-                   u.email AS applicant_email,
-                   rl.final_score AS rec_score,
-                   rl.reason_text AS rec_reasons,
-                   rl.score_detail_json AS rec_sub_scores
-            FROM applications a
-            LEFT JOIN pets p ON a.pet_id = p.id
-            LEFT JOIN users u ON a.user_id = u.id
-            LEFT JOIN recommendation_logs rl ON rl.scene = 'applicant_ranking' 
-                 AND rl.target_id = a.pet_id AND rl.candidate_id = a.user_id
-            WHERE a.pet_owner_id = ?
-            ORDER BY COALESCE(rl.final_score, 0) DESC, a.create_time DESC
-            """,
-            (current_user["id"],)
-        )
-        rows = []
-        for row in cursor.fetchall():
-            item = dict(row)
-            raw_payload = item.get("assessment_payload")
-            if raw_payload:
-                try:
-                    item["assessment_payload"] = json.loads(raw_payload)
-                except Exception:
-                    item["assessment_payload"] = {}
-            else:
-                item["assessment_payload"] = {}
-            prefs = _load_pet_preferences(item.get("pet_preferences"))
-            for key in ("missing_fields", "conflict_notes", "followup_questions"):
-                raw = item.get(key)
-                if raw:
-                    try:
-                        item[key] = json.loads(raw)
-                    except Exception:
-                        item[key] = []
-                else:
-                    item[key] = []
-            item["pet_preferences"] = prefs
-            item = _attach_framework_details(conn, item)
-            item["owner_ai_report"] = _build_owner_ai_report(item, prefs)
-            rows.append(item)
-    return rows
-
-
-@router.post("/applications/{app_id}/owner-decision")
-async def owner_decide_application(
-    app_id: int,
-    req: OwnerApplicationDecisionRequest,
-    current_user: dict = Depends(get_current_user)
-):
-    # 该接口对应送养方的最终处理动作，如通过、拒绝或转人工复核。
-    with get_db() as conn:
-        ensure_tables(conn)
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM applications WHERE id=?", (app_id,))
-        app = cursor.fetchone()
-        if not app:
-            raise HTTPException(status_code=404, detail="申请记录不存在")
-        if app["pet_owner_id"] != current_user["id"]:
-            raise HTTPException(status_code=403, detail="只有送养方可以处理该申请")
-        # 允许从 pending, probing, human_review 状态流向最终决策
-        if app["status"] in ("approved", "rejected"):
-            raise HTTPException(status_code=400, detail="该申请已是最终状态，无法修改")
-        # 计算送养人是否采纳了 AI 建议。
-        # 该指标会进入后台统计，用于评估 AI 建议的参考价值。
-        owner_followed_ai = 0
-        ai_suggestion = app.get("ai_decision", "").lower()
-        if req.status == "approved" and ai_suggestion in ("pass", "conditional_pass"):
-            owner_followed_ai = 1
-        elif req.status == "rejected" and ai_suggestion == "reject":
-            owner_followed_ai = 1
-        previous_flow_status = app.get("flow_status") or "waiting_publisher"
-        flow_status = flow_engine.resolve_terminal_flow_status(req.status)
-
-        cursor.execute(
-            """UPDATE applications
-               SET status=?, flow_status=?, owner_note=?, publisher_feedback=?, manual_review_reason=?,
-                   owner_followed_ai=?, decision_by=?, decision_time=CURRENT_TIMESTAMP
-               WHERE id=?""",
-            (
-                req.status,
-                flow_status,
-                req.owner_note,
-                req.owner_note if req.status in ("approved", "rejected", "probing", "human_review") else "",
-                req.owner_note if req.status == "human_review" else "",
-                owner_followed_ai,
-                current_user["id"],
-                app_id,
-            )
-        )
-        flow_engine.append_event(
-            conn,
-            application_id=app_id,
-            event_type="owner_decision_submitted",
-            from_status=previous_flow_status,
-            to_status=flow_status,
-            actor_role="publisher",
-            actor_id=current_user["id"],
-            payload={
-                "requested_status": req.status,
-                "owner_note": req.owner_note[:240],
-                "owner_followed_ai": owner_followed_ai,
-            },
-        )
-        # 特殊逻辑处理：
-        # 若审核通过，还要同步写入领养记录并把宠物状态改为“已领养”。
-        if req.status == "approved":
-            # 记录领养成功
-            cursor.execute(
-                "SELECT COUNT(1) AS cnt FROM adopt_records WHERE user_id=? AND pet_id=?",
-                (app["user_id"], app["pet_id"])
-            )
-            if cursor.fetchone()["cnt"] == 0:
-                cursor.execute(
-                    "INSERT INTO adopt_records (user_id, pet_id) VALUES (?, ?)",
-                    (app["user_id"], app["pet_id"])
-                )
-            # 更新宠物状态
-            cursor.execute("UPDATE pets SET status='已领养' WHERE id=?", (app["pet_id"],))
+        # 查询所有发送或接收过消息的用户 ID
+        cursor.execute('''
+            SELECT DISTINCT u.id, u.username, u.avatar_url
+            FROM users u
+            JOIN messages m ON (u.id = m.sender_id OR u.id = m.receiver_id)
+            WHERE (m.sender_id = ? OR m.receiver_id = ?) AND u.id != ?
+        ''', (user_id, user_id, user_id))
         
-        elif req.status == "probing":
-            # 如果是追问，可以触发某种系统通知或消息，这里暂时只更新状态
-            pass
-            
-        elif req.status == "human_review":
-            # 标记需要平台管理员介入
-            pass
+        contacts = [dict(row) for row in cursor.fetchall()]
+        return contacts
 
-        conn.commit()
-    upsert_case_memory(
-        application_id=app_id,
-        case_summary=build_case_summary(dict(app), {"decision": req.status, "readiness_score": app.get("ai_readiness_score"), "risk_level": app.get("risk_level")}),
-        decision_result=req.status,
-        owner_followed_ai=owner_followed_ai,
-        risk_tags=((_parse_json(dict(app).get("assessment_payload"), {}) or {}).get("latest_assessment", {}).get("consensus_result", {}) or {}).get("risk_tags", []),
-    )
-    return {"status": "success", "new_status": req.status}
-
-@router.get("/messages/{user_id}")
-def get_messages(user_id: int, current_user: dict = Depends(get_current_user)):
-    # 只允许查询自己的消息
-    if current_user["id"] != user_id:
-        raise HTTPException(status_code=403, detail="无权限查询他人消息")
+@router.get('/messages/{user_id}/with/{target_id}')
+def get_chat_history(user_id: int, target_id: int, current_user: dict = Depends(get_current_user)):
+    """获取与特定用户的聊天记录"""
+    if current_user['id'] != user_id:
+        raise HTTPException(status_code=403, detail="无权查看他人私信")
+    
     with get_db() as conn:
-        ensure_tables(conn)
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT m.*, su.username AS sender_name, ru.username AS receiver_name
+        # 获取对话记录
+        cursor.execute('''
+            SELECT m.*, 
+                   u_sender.username as sender_name,
+                   u_receiver.username as receiver_name
             FROM messages m
-            LEFT JOIN users su ON su.id = m.sender_id
-            LEFT JOIN users ru ON ru.id = m.receiver_id
-            WHERE m.sender_id = ? OR m.receiver_id = ?
-            ORDER BY m.create_time ASC
-            """,
-            (user_id, user_id),
-        )
-        rows = [dict(r) for r in cursor.fetchall()]
-    return rows
+            JOIN users u_sender ON m.sender_id = u_sender.id
+            JOIN users u_receiver ON m.receiver_id = u_receiver.id
+            WHERE (sender_id = ? AND receiver_id = ?) 
+               OR (sender_id = ? AND receiver_id = ?)
+            ORDER BY create_time ASC
+        ''', (user_id, target_id, target_id, user_id))
+        
+        history = [dict(row) for row in cursor.fetchall()]
+        
+        # 标记为已读
+        cursor.execute('UPDATE messages SET is_read = 1 WHERE sender_id = ? AND receiver_id = ?', (target_id, user_id))
+        conn.commit()
+        
+        return history
 
-@router.get("/messages/{user_id}/contacts")
-def get_contacts(user_id: int, current_user: dict = Depends(get_current_user)):
-    """获取当前用户的联系人列表（按最新消息时间排序，附带最后一条消息预览）"""
-    # 评审说明：
-    # 联系人页按“每个会话最后一条消息”聚合，减少前端自行整理数据的复杂度。
-    if current_user["id"] != user_id:
-        raise HTTPException(status_code=403, detail="无权限查询他人联系人")
+@router.post('/messages/send')
+async def send_private_message(data: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    """发送私信"""
+    sender_id = current_user['id']
+    receiver_id = data.get('receiver_id')
+    content = data.get('content')
+    
+    if not receiver_id or not content:
+        raise HTTPException(status_code=400, detail="参数缺失")
+        
     with get_db() as conn:
-        ensure_tables(conn)
         cursor = conn.cursor()
         cursor.execute(
-            """
-            SELECT
-                other_id,
-                u.username AS other_name,
-                last_msg,
-                last_time
-            FROM (
-                SELECT
-                    CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END AS other_id,
-                    content AS last_msg,
-                    create_time AS last_time,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END
-                        ORDER BY create_time DESC
-                    ) AS rn
-                FROM messages
-                WHERE sender_id = ? OR receiver_id = ?
-            ) t
-            LEFT JOIN users u ON u.id = t.other_id
-            WHERE t.rn = 1
-            ORDER BY last_time DESC
-            """,
-            (user_id, user_id, user_id, user_id),
-        )
-        rows = [dict(r) for r in cursor.fetchall()]
-    return rows
-
-
-@router.get("/messages/{user_id}/with/{other_id}")
-def get_conversation(user_id: int, other_id: int, current_user: dict = Depends(get_current_user)):
-    """获取与指定用户的对话记录"""
-    if current_user["id"] != user_id:
-        raise HTTPException(status_code=403, detail="无权限查询他人消息")
-    with get_db() as conn:
-        ensure_tables(conn)
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT m.*, su.username AS sender_name, ru.username AS receiver_name
-            FROM messages m
-            LEFT JOIN users su ON su.id = m.sender_id
-            LEFT JOIN users ru ON ru.id = m.receiver_id
-            WHERE (m.sender_id = ? AND m.receiver_id = ?)
-               OR (m.sender_id = ? AND m.receiver_id = ?)
-            ORDER BY m.create_time ASC
-            """,
-            (user_id, other_id, other_id, user_id),
-        )
-        rows = [dict(r) for r in cursor.fetchall()]
-    return rows
-
-
-@router.post("/messages/send")
-async def send_message(req: MessageCreate, current_user: dict = Depends(get_current_user)):
-    # 只允许以自己身份发送消息
-    if current_user["id"] != req.sender_id:
-        raise HTTPException(status_code=403, detail="无权限以他人身份发送消息")
-    # 站内消息统一写入 messages 表，供领养沟通和互助沟通共用。
-    with get_db() as conn:
-        ensure_tables(conn)
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)",
-            (req.sender_id, req.receiver_id, req.content),
+            'INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)',
+            (sender_id, receiver_id, content)
         )
         conn.commit()
-    return {"status": "success"}
-
-@router.get("/credit")
-async def get_my_credit(current_user: dict = Depends(get_current_user)):
-    """获取我的信用档案"""
-    profile = credit_service.get_user_credit(current_user["id"])
-    if not profile:
-        # 如果没记录，尝试初始化一个
-        await credit_service.add_credit_event(current_user["id"], "initial", "")
-        profile = credit_service.get_user_credit(current_user["id"])
-    return profile
-
-@router.post("/credit/task/visit_report")
-async def submit_visit_report(
-    content: str = Body(..., embed=True),
-    current_user: dict = Depends(get_current_user)
-):
-    """提交宠物回访任务，触发 AI 评分"""
-    result = await credit_service.add_credit_event(
-        current_user["id"], 
-        "visit_report", 
-        content
-    )
-    return {
-        "message": "回访提交成功，AI 已完成评估",
-        "points_earned": result["points"],
-        "quality_multiplier": result["multiplier"]
-    }
-
-@router.get("/notifications")
-def get_notifications(current_user: dict = Depends(get_current_user)):
-    """获取我的系统通知"""
-    with get_db() as conn:
-        ensure_tables(conn)
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM notifications WHERE user_id=? ORDER BY create_time DESC LIMIT 50",
-            (current_user["id"],)
-        )
-        return [dict(r) for r in cursor.fetchall()]
-
-@router.post("/notifications/read")
-def read_notification(req: NotificationReadRequest, current_user: dict = Depends(get_current_user)):
-    """标记通知为已读"""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE notifications SET is_read=1 WHERE id=? AND user_id=?",
-            (req.notification_id, current_user["id"])
-        )
-        conn.commit()
-    return {"status": "success"}
+        return {"status": "success", "message_id": cursor.lastrowid}

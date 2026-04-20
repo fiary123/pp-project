@@ -33,15 +33,28 @@ class AgentDecisionAuditor:
                     pet_desc="内部推荐审计"
                 )
                 
+                if not isinstance(review, dict):
+                    continue
+
                 # 将 Agent 评价注入推荐理由
-                if review.get("summary") and "画像" not in review["summary"]:
-                    # 替换掉一部分生硬的理由，加入 Agent 的温情总结
-                    candidate.reasons.insert(0, f"专家点评：{review['summary']}")
+                summary = review.get("summary")
+                if summary and "画像" not in summary:
+                    # 确保 summary 是字符串
+                    summary_str = str(summary)
+                    candidate.reasons.insert(0, f"专家点评：{summary_str}")
                 
                 # 如果 Agent 发现重大风险，扣除部分信用分（体现多智能体纠偏）
-                if review.get("risk_flags"):
+                risk_flags = review.get("risk_flags")
+                if risk_flags:
                     candidate.final_score -= 5.0
-                    candidate.risk_flags.extend(review["risk_flags"])
+                    # 健壮性修复：确保只有 list 才能 extend
+                    if isinstance(risk_flags, list):
+                        candidate.risk_flags.extend([str(flag) for flag in risk_flags])
+                    elif isinstance(risk_flags, dict):
+                        # 如果是 dict，尝试提取其中的值或作为单个条目
+                        candidate.risk_flags.append(str(risk_flags))
+                    else:
+                        candidate.risk_flags.append(str(risk_flags))
 
             except Exception as e:
                 print(f"DecisionAuditor: Agent review failed: {e}")

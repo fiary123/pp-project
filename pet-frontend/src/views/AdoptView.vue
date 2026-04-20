@@ -2,7 +2,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  Search, Heart, Loader2, ChevronRight, Wand2, Sparkles, ShieldCheck, ListFilter, AlertTriangle
+  Search, Heart, Loader2, ChevronRight, Wand2, Sparkles, ShieldCheck, ListFilter, AlertTriangle, Check, X,
+  User, Activity, Baby, Stethoscope, Scissors, Smile, FileText, Info, DollarSign, Clock, Home, Users,
+  Zap, PawPrint, HeartHandshake, Shield, MapPin, Mail, Lock
 } from 'lucide-vue-next'
 import { useAuthStore } from '../store/authStore'
 import BaseCard from '../components/BaseCard.vue'
@@ -11,59 +13,71 @@ import axios from '../api/index'
 const router = useRouter()
 const authStore = useAuthStore()
 
-const defaultAdoptionPreferences = {
-  allow_novice: true,
-  min_budget_level: '低',
-  min_companion_hours: 0,
-  required_housing_type: '',
-  forbid_other_pets: false,
-  forbid_children: false,
-  require_return_visit: true,
-}
-
-const parseAdoptionPreferences = (raw: unknown) => {
-  if (!raw) return { ...defaultAdoptionPreferences }
-  try {
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-    return { ...defaultAdoptionPreferences, ...(parsed as Record<string, unknown>) }
-  } catch {
-    return { ...defaultAdoptionPreferences }
-  }
-}
+// --- 状态管理 ---
+const applyStep = ref(0) // 0: 档案, 1: AI 追问, 2: 提交
+const applicationForm = ref({ monthly_budget: 800, has_pet_experience: true })
+const smartQuestions = ref<any[]>([])
+const questionAnswers = ref<Record<string, string>>({})
+const isLoadingQuestions = ref(false)
+const isSubmittingApplication = ref(false)
 
 const pets = ref<any[]>([])
 const engineRecommendations = ref<any[]>([])
 const isLoading = ref(true)
 const isEngineLoading = ref(false)
-const needsColdStart = ref(false)
-const showIntentionForm = ref(false)
-const intentionForm = ref({
-  housing_type: '公寓',
-  experience_level: 0,
-  available_time: 2,
-  budget_level: '中',
-  has_children: 0,
-})
-const isSubmittingIntention = ref(false)
 const searchQuery = ref('')
 const activeFilter = ref('全部')
 const selectedPet = ref<any>(null)
+const showDetailModal = ref(false)
 
-const submitIntention = async () => {
-  isSubmittingIntention.value = true
+// 针对选中宠物的推荐分
+const getRecommendationForPet = (petId: number) => engineRecommendations.value.find(item => Number(item.pet_id) === Number(petId))
+
+// 点击宠物卡片：开启弹窗并加载深度数据
+const handlePetSelect = async (pet: any) => {
+  selectedPet.value = pet
+  showDetailModal.value = true
+  applyStep.value = 0
+  questionAnswers.value = {}
+
+  if (!authStore.isLoggedIn) return
+
+  isLoadingQuestions.value = true
   try {
-    // 复用更新画像接口，补全核心推荐维度
-    await axios.post('/api/user/update-profile', {
-      ...intentionForm.value,
-      pet_experience: intentionForm.value.experience_level > 0 ? '有经验' : '无',
-    })
-    showIntentionForm.value = false
-    await fetchEngineRecommendations() // 重新拉取精准推荐
-    window.alert('画像补全成功！AI 已为您生成精准匹配列表。')
+    // 拉取 AI 针对性问题
+    const res = await axios.get(`/api/ai/adoption-questions/${pet.id}`)
+    smartQuestions.value = res.data.questions || []
   } catch (err) {
-    window.alert('提交失败，请重试')
+    console.error('加载追问失败', err)
   } finally {
-    isSubmittingIntention.value = false
+    isLoadingQuestions.value = false
+  }
+}
+
+const submitApplication = async () => {
+  if (!selectedPet.value) return
+  isSubmittingApplication.value = true
+  try {
+    const answerSummary = smartQuestions.value
+      .filter(q => questionAnswers.value[q.key])
+      .map(q => `${q.question}: ${q.options.find((o:any)=>o.value===questionAnswers.value[q.key])?.label || questionAnswers.value[q.key]}`)
+      .join('\n')
+
+    const payload = {
+      pet_id: selectedPet.value.id,
+      application_reason: answerSummary || '通过智能评估提交',
+      monthly_budget: Number(applicationForm.value.monthly_budget),
+      has_pet_experience: applicationForm.value.has_pet_experience,
+      smart_answers: questionAnswers.value,
+    }
+    await axios.post('/api/user/applications', payload)
+    window.alert(`申请已提交！系统正在进行智能审计，请前往“个人中心”查看报告。`)
+    showDetailModal.value = false
+    router.push('/profile')
+  } catch (err: any) {
+    alert(err.response?.data?.detail || '提交失败')
+  } finally {
+    isSubmittingApplication.value = false
   }
 }
 
@@ -71,305 +85,194 @@ const fetchPets = async () => {
   isLoading.value = true
   try {
     const res = await axios.get('/api/pets')
-    pets.value = Array.isArray(res.data)
-      ? res.data.map((p: any) => ({
-          ...p,
-          id: Number(p.id),
-          img: p.image_url || p.post_image_url || `https://images.unsplash.com/photo-1543466835-00a7907e9de1?sig=${p.id}`,
-          desc: p.description || p.post_content || '暂无详细介绍',
-          adoption_preferences: parseAdoptionPreferences(p.adoption_preferences),
-          tags: p.tags ? (typeof p.tags === 'string' ? JSON.parse(p.tags) : p.tags) : [],
-        }))
-      : []
-  } catch (err) {
-    console.error('获取宠物列表失败', err)
-  } finally {
-    isLoading.value = false
-  }
+    pets.value = res.data.map((p: any) => ({
+      ...p,
+      img: p.image_url || `https://images.unsplash.com/photo-1543466835-00a7907e9de1?sig=${p.id}`
+    }))
+  } catch (err) { console.error(err) }
+  finally { isLoading.value = false }
 }
 
 const fetchEngineRecommendations = async () => {
-  if (!authStore.isLoggedIn || !authStore.user?.id) return
+  if (!authStore.isLoggedIn) return
   isEngineLoading.value = true
   try {
     const res = await axios.get(`/api/recommendation/pets/${authStore.user.id}`)
-    // 适配新后端返回结构
-    engineRecommendations.value = Array.isArray(res.data.results) ? res.data.results : []
-    needsColdStart.value = !!res.data.needs_cold_start
-  } catch (err) {
-    console.error('获取推荐结果失败', err)
-  } finally {
-    isEngineLoading.value = false
-  }
+    engineRecommendations.value = res.data.results || []
+  } catch (err) { console.error(err) }
+  finally { isEngineLoading.value = false }
 }
 
 const filteredPets = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
-  return pets.value.filter((pet) => {
-    const matchesKeyword = !keyword || pet.name?.toLowerCase().includes(keyword) || pet.species?.toLowerCase().includes(keyword)
-    const matchesType = activeFilter.value === '全部' || pet.species === activeFilter.value
-    return matchesKeyword && matchesType
+  return pets.value.filter(p => {
+    const mK = !keyword || p.name?.toLowerCase().includes(keyword) || p.type?.toLowerCase().includes(keyword)
+    const mT = activeFilter.value === '全部' || p.species === activeFilter.value
+    return mK && mT
   })
 })
 
-const getRecommendationForPet = (petId: number) => {
-  return engineRecommendations.value.find((item) => Number(item.pet_id) === Number(petId))
-}
+const isAnalysisActive = ref(false)
+const handleStartAnalysis = () => { isAnalysisActive.value = true; fetchEngineRecommendations(); }
 
-const displayConstraintTags = (pet: any) => {
-  const prefs = pet.adoption_preferences || defaultAdoptionPreferences
-  const tags: string[] = []
-  if (!prefs.allow_novice) tags.push('需一定经验')
-  if (prefs.required_housing_type) tags.push(`住房要求：${prefs.required_housing_type}`)
-  if (prefs.min_companion_hours) tags.push(`陪伴要求 ${prefs.min_companion_hours}h/天`)
-  if (prefs.forbid_other_pets) tags.push('不接受多宠家庭')
-  if (prefs.forbid_children) tags.push('不接受有儿童家庭')
-  return tags.slice(0, 4)
-}
-
-onMounted(() => {
-  fetchPets()
-  fetchEngineRecommendations()
-})
+onMounted(fetchPets)
 </script>
 
 <template>
-  <div class="space-y-10 pb-20 px-4 max-w-[1500px] mx-auto text-gray-900 dark:text-white">
-    <section class="relative py-10 md:py-16 text-center space-y-6 overflow-hidden rounded-[2.5rem] bg-gradient-to-b from-orange-500/10 to-transparent border border-gray-200 dark:border-white/5 shadow-2xl">
-      <div class="space-y-4 px-4">
-        <h2 class="text-3xl sm:text-4xl md:text-6xl font-black italic tracking-tighter uppercase text-orange-500 leading-tight">
-          领养推荐主流程
-        </h2>
-        <p class="text-sm md:text-base text-gray-500 dark:text-gray-400 font-black">
-          用户画像与领养需求采集 → 候选宠物生成 → 约束过滤 → 多维评分 → 推荐排序 → 申请审核联动
-        </p>
-        <div class="max-w-3xl mx-auto flex items-center justify-center gap-3 text-xs md:text-sm text-gray-500 dark:text-gray-400">
-          <Wand2 class="text-orange-500" :size="16" />
-          <span>推荐模块已插入领养主流程，后续审核阶段将继续复用排序结果与风险维度。</span>
+  <div class="space-y-8 pb-20 px-4 max-w-6xl mx-auto text-gray-900 dark:text-white">
+    <!-- 头部：搜索与 AI 开关 -->
+    <section class="flex flex-col gap-6 pt-10">
+      <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4">
+        <div class="relative">
+          <Search class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" :size="20" />
+          <input v-model="searchQuery" placeholder="搜索宠物名字、品种..." class="w-full pl-14 pr-6 py-4 bg-gray-50 dark:bg-white/5 rounded-2xl outline-none font-bold shadow-sm" />
         </div>
+        <div class="flex gap-2">
+          <button v-for="f in ['全部', '猫', '狗']" :key="f" @click="activeFilter = f" :class="activeFilter === f ? 'bg-orange-500 text-white shadow-lg' : 'bg-gray-100 dark:bg-white/5'" class="px-6 py-4 rounded-xl text-xs font-black transition-all">{{ f }}</button>
+        </div>
+      </div>
+
+      <div v-if="authStore.isLoggedIn" class="p-4 bg-orange-500/5 border-2 border-dashed border-orange-500/20 rounded-2xl flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <Sparkles class="text-orange-500" :size="24" />
+          <div class="hidden md:block"><p class="text-sm font-black">AI 智能匹配分析</p><p class="text-[10px] text-gray-400">一键扫描全库，获取专家点评与推荐分</p></div>
+        </div>
+        <button @click="handleStartAnalysis" :disabled="isEngineLoading" class="px-6 py-3 bg-orange-500 text-white rounded-xl font-bold text-xs flex items-center gap-2">
+          <Loader2 v-if="isEngineLoading" class="animate-spin" :size="14" /> {{ isEngineLoading ? '分析中...' : '开启智能筛选' }}
+        </button>
       </div>
     </section>
 
-    <section v-if="authStore.isLoggedIn" class="space-y-5">
-      <!-- 冷启动引导横幅 -->
-      <div v-if="needsColdStart" class="relative overflow-hidden rounded-[2rem] bg-orange-500 p-6 md:p-10 text-white shadow-xl animate-in fade-in slide-in-from-top-4 duration-700">
-        <Sparkles class="absolute -right-4 -top-4 h-32 w-32 opacity-20" />
-        <div class="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div class="space-y-2 text-center md:text-left">
-            <h3 class="text-2xl md:text-3xl font-black italic">开启您的个性化匹配</h3>
-            <p class="text-sm md:text-base font-bold text-white/90">当前系统缺乏您的结构化画像，补全意向问卷后，AI 专家将为您执行“约束感知”的精准筛选。</p>
+    <!-- 宠物列表网格 -->
+    <div v-if="isLoading" class="py-20 flex justify-center"><Loader2 class="animate-spin text-orange-500" :size="40" /></div>
+    <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+      <div v-for="pet in filteredPets" :key="pet.id" @click="handlePetSelect(pet)" class="bg-white dark:bg-[#111] rounded-2xl overflow-hidden border border-gray-100 dark:border-white/5 shadow-sm hover:shadow-xl transition-all cursor-pointer group">
+        <div class="aspect-square relative">
+          <img :src="pet.img" class="w-full h-full object-cover group-hover:scale-105 transition-all duration-500" />
+          <div v-if="isAnalysisActive && getRecommendationForPet(pet.id)" class="absolute bottom-2 right-2 bg-orange-500 text-white px-2 py-1 rounded-lg font-black text-xs shadow-lg animate-in zoom-in-50">
+            {{ getRecommendationForPet(pet.id)?.score }}
           </div>
-          <button @click="showIntentionForm = true" class="px-8 py-4 rounded-2xl bg-white text-orange-600 font-black shadow-lg hover:scale-105 transition-transform">
-            立即完善领养画像
-          </button>
+          <div class="absolute top-2 left-2 px-2 py-0.5 bg-black/40 backdrop-blur-md text-white text-[9px] font-bold rounded">{{ pet.location }}</div>
+        </div>
+        <div class="p-4">
+          <h4 class="font-black text-base">{{ pet.name }}</h4>
+          <p class="text-[11px] text-gray-400 mt-1 line-clamp-1 italic">{{ pet.type }}</p>
         </div>
       </div>
-
-      <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div class="space-y-1">
-          <h3 class="text-2xl font-black text-gray-900 dark:text-white flex items-center gap-2">
-            多阶段推荐结果 <span class="px-2 py-0.5 bg-orange-500/10 text-orange-500 text-[10px] rounded uppercase">Engine v4.0</span>
-          </h3>
-          <!-- [演示增强]：展示推荐漏斗数据 -->
-          <div v-if="engineRecommendations.length" class="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-            <span>召回: {{ Math.max(engineRecommendations.length + 5, 12) }}</span>
-            <ChevronRight :size="10" />
-            <span class="text-orange-500">约束过滤后: {{ engineRecommendations.length }}</span>
-            <ChevronRight :size="10" />
-            <span>精排输出: 前 {{ Math.min(engineRecommendations.length, 6) }} 名</span>
-          </div>
-        </div>
-        <button @click="fetchEngineRecommendations" class="px-4 py-2 rounded-xl bg-orange-500 text-white font-black text-sm active:scale-95 transition-all shadow-lg shadow-orange-500/20">
-          刷新推荐引擎
-        </button>
-      </div>
-
-      <div v-if="isEngineLoading" class="py-16 flex justify-center">
-        <Loader2 class="animate-spin text-orange-500" :size="40" />
-      </div>
-
-      <div v-else-if="engineRecommendations.length" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <BaseCard v-for="(rec, idx) in engineRecommendations.slice(0, 6)" :key="rec.pet_id" class="p-6 space-y-5 border-orange-500/10 hover:border-orange-500 transition-colors group relative">
-          <!-- [演示增强]：排名第一的特殊标记 -->
-          <div v-if="idx === 0" class="absolute -top-3 -left-3 px-4 py-1.5 bg-orange-600 text-white text-[10px] font-black rounded-xl shadow-lg z-10 animate-bounce">
-            AI 首席优选
-          </div>
-
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <p class="text-xs font-black uppercase tracking-widest text-orange-500">匹配排名 {{ rec.rank }}</p>
-              <h4 class="text-2xl font-black text-gray-900 dark:text-white mt-2">{{ rec.pet_name }}</h4>
-              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ rec.species }}</p>
-            </div>
-            <div class="text-right">
-              <p class="text-[10px] font-black uppercase tracking-widest text-gray-400">综合匹配分</p>
-              <p class="text-4xl font-black text-orange-500">{{ rec.score }}</p>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div v-for="(value, key) in rec.sub_scores" :key="key" class="rounded-2xl border border-gray-100 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-4">
-              <p class="text-[10px] font-black uppercase tracking-widest text-gray-400">
-                {{ key === 'condition' ? '居住契合' : key === 'preference' ? '偏好对齐' : key === 'experience' ? '经验适配' : '风险抵扣' }}
-              </p>
-              <p :class="key === 'penalty' ? 'text-red-500' : 'text-gray-900 dark:text-white'" class="text-2xl font-black mt-2">
-                {{ key === 'penalty' ? '-' : '' }}{{ value }}
-              </p>
-            </div>
-          </div>
-
-          <div v-if="rec.reasons?.length" class="space-y-2">
-            <p class="text-xs font-black uppercase tracking-widest text-green-500">推荐理由</p>
-            <div class="flex flex-wrap gap-2">
-              <span v-for="reason in rec.reasons" :key="reason" class="px-3 py-2 rounded-full bg-green-500/10 text-green-700 dark:text-green-300 text-xs font-bold">{{ reason }}</span>
-            </div>
-          </div>
-
-          <div v-if="rec.risk_flags?.length" class="space-y-2">
-            <p class="text-xs font-black uppercase tracking-widest text-red-400 flex items-center gap-2"><AlertTriangle :size="14" /> 风险维度</p>
-            <div class="flex flex-wrap gap-2">
-              <span v-for="flag in rec.risk_flags" :key="flag" class="px-3 py-2 rounded-full bg-red-500/10 text-red-600 dark:text-red-300 text-xs font-bold">{{ flag }}</span>
-            </div>
-          </div>
-
-          <button @click="selectedPet = pets.find((pet) => Number(pet.id) === Number(rec.pet_id)) || null" class="w-full py-4 rounded-2xl bg-gray-900 dark:bg-white text-white dark:text-black font-black">
-            查看候选详情
-          </button>
-        </BaseCard>
-      </div>
-
-      <BaseCard v-else class="p-8 text-center text-gray-500 dark:text-gray-400">
-        完成画像填写后，这里会展示“候选生成 → 约束过滤 → 多维评分”后的推荐结果。
-      </BaseCard>
-    </section>
-
-    <!-- 领养意向采集模态框 -->
-    <div v-if="showIntentionForm" class="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
-      <BaseCard class="w-full max-w-2xl p-8 space-y-8 animate-in zoom-in-95 duration-300">
-        <div class="flex items-center justify-between">
-          <h3 class="text-2xl font-black italic">领养意向结构化采集</h3>
-          <button @click="showIntentionForm = false" class="text-gray-400 hover:text-gray-600"><Search class="rotate-45" /></button>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div class="space-y-2">
-            <label class="text-sm font-black text-gray-500 uppercase tracking-widest">住房类型</label>
-            <select v-model="intentionForm.housing_type" class="w-full rounded-xl bg-gray-100 dark:bg-white/5 border-none p-4 font-bold outline-none">
-              <option value="公寓">公寓</option>
-              <option value="别墅">别墅</option>
-              <option value="平房">平房</option>
-            </select>
-          </div>
-          <div class="space-y-2">
-            <label class="text-sm font-black text-gray-500 uppercase tracking-widest">养宠经验</label>
-            <select v-model.number="intentionForm.experience_level" class="w-full rounded-xl bg-gray-100 dark:bg-white/5 border-none p-4 font-bold outline-none">
-              <option :value="0">新手 (首次养宠)</option>
-              <option :value="1">有经验 (1-3年)</option>
-              <option :value="2">专家 (3年以上)</option>
-            </select>
-          </div>
-          <div class="space-y-2">
-            <label class="text-sm font-black text-gray-500 uppercase tracking-widest">每日陪伴时长 (h)</label>
-            <input v-model.number="intentionForm.available_time" type="number" step="0.5" class="w-full rounded-xl bg-gray-100 dark:bg-white/5 border-none p-4 font-bold outline-none" />
-          </div>
-          <div class="space-y-2">
-            <label class="text-sm font-black text-gray-500 uppercase tracking-widest">经济预算水平</label>
-            <select v-model="intentionForm.budget_level" class="w-full rounded-xl bg-gray-100 dark:bg-white/5 border-none p-4 font-bold outline-none">
-              <option value="低">基础保证型 (100-300元/月)</option>
-              <option value="中">标准养护型 (300-800元/月)</option>
-              <option value="高">优越生活型 (800元+/月)</option>
-            </select>
-          </div>
-        </div>
-
-        <button @click="submitIntention" :disabled="isSubmittingIntention" class="w-full py-5 rounded-[2rem] bg-orange-500 text-white font-black text-lg shadow-xl shadow-orange-500/20 flex items-center justify-center gap-3 active:scale-95 transition-all">
-          <Loader2 v-if="isSubmittingIntention" class="animate-spin" />
-          <Wand2 v-else />
-          完成采集并生成 AI 推荐列表
-        </button>
-      </BaseCard>
     </div>
 
-    <section class="space-y-5">
-      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div class="flex items-center gap-2 bg-gray-100 dark:bg-white/5 p-1.5 rounded-2xl shadow-inner overflow-x-auto">
-          <button v-for="cat in ['全部', '猫', '狗', '兔']" :key="cat" @click="activeFilter = cat" :class="activeFilter === cat ? 'bg-orange-500 text-white shadow-lg' : 'text-gray-500 dark:text-gray-400'" class="px-5 py-3 rounded-xl font-bold transition-all text-sm whitespace-nowrap">
-            {{ cat }}
-          </button>
-        </div>
-        <div class="relative w-full md:w-96">
-          <Search class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" :size="18" />
-          <input v-model="searchQuery" type="text" placeholder="搜索待领养宠物..." class="w-full bg-gray-100 dark:bg-white/5 rounded-2xl py-4 pl-14 pr-6 outline-none font-black" />
-        </div>
-      </div>
-
-      <div v-if="isLoading" class="py-24 flex justify-center">
-        <Loader2 class="animate-spin text-orange-500" :size="48" />
-      </div>
-
-      <div v-else class="grid grid-cols-1 xl:grid-cols-[1.5fr_1fr] gap-8">
-        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
-          <div v-for="pet in filteredPets" :key="pet.id" @click="selectedPet = pet" class="bg-white dark:bg-[#1a1a1a] rounded-[2rem] overflow-hidden border border-gray-100 dark:border-white/5 transition-all group cursor-pointer shadow-sm hover:shadow-2xl relative flex flex-col hover:-translate-y-2 duration-500">
-            <div class="relative aspect-square">
-              <img :src="pet.img" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" />
-              <div class="absolute inset-x-0 bottom-0 p-5 bg-gradient-to-t from-black/70 to-transparent">
-                <h4 class="font-black text-2xl text-white">{{ pet.name }}</h4>
-                <p class="text-white/70 text-sm">{{ pet.species }}</p>
-              </div>
-            </div>
-            <div class="p-5 space-y-4">
-              <p class="text-sm text-gray-600 dark:text-gray-300 leading-6 line-clamp-2 min-h-[3rem]">{{ pet.desc }}</p>
-              <div v-if="getRecommendationForPet(pet.id)" class="flex items-center justify-between rounded-2xl bg-orange-500/10 px-4 py-3">
-                <div>
-                  <p class="text-[10px] uppercase tracking-widest font-black text-orange-500">推荐支持分</p>
-                  <p class="text-lg font-black text-orange-600">{{ getRecommendationForPet(pet.id)?.score }}</p>
+    <!-- 深度档案弹窗 (Modal) -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="showDetailModal && selectedPet" class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 backdrop-blur-md p-4" @click.self="showDetailModal = false">
+          <BaseCard class="w-full max-w-2xl p-0 !bg-white dark:!bg-[#0f0f0f] rounded-[2.5rem] overflow-hidden shadow-2xl border-none">
+            <div class="h-1.5 w-full bg-gradient-to-r from-orange-500 to-pink-500"></div>
+            <div class="p-6 md:p-10 space-y-6 max-h-[90vh] overflow-y-auto custom-scrollbar">
+              
+              <!-- 头部 -->
+              <div class="flex justify-between items-start">
+                <div class="space-y-1">
+                  <div class="flex items-center gap-2 text-orange-500 font-bold text-xs"><MapPin :size="14" /> {{ selectedPet.location }}</div>
+                  <h3 class="text-4xl font-black italic tracking-tighter">{{ selectedPet.name }} <span class="text-sm font-bold text-gray-400 not-italic">· {{ selectedPet.age }}岁</span></h3>
                 </div>
-                <ShieldCheck class="text-orange-500" :size="18" />
+                <button @click="showDetailModal = false" class="p-2.5 bg-gray-100 dark:bg-white/5 rounded-full text-gray-400 hover:text-red-500 transition-colors"><X :size="24" /></button>
               </div>
-              <div class="flex items-center justify-between text-gray-400 font-bold uppercase tracking-widest">
-                <span class="text-sm text-gray-700 dark:text-gray-200">{{ pet.species }}</span>
-                <ChevronRight class="text-orange-500 group-hover:translate-x-1 transition-transform" :size="16" />
+
+              <!-- 宠物背景与送养原因 -->
+              <div class="grid grid-cols-2 gap-4">
+                <div class="p-5 bg-gray-50 dark:bg-white/5 rounded-3xl space-y-1">
+                  <p class="text-[10px] font-black text-gray-400 uppercase">身世来源</p>
+                  <p class="text-sm font-bold">{{ selectedPet.origin || '救助站收容' }}</p>
+                </div>
+                <div class="p-5 bg-gray-50 dark:bg-white/5 rounded-3xl space-y-1">
+                  <p class="text-[10px] font-black text-gray-400 uppercase">送养原因</p>
+                  <p class="text-sm font-bold">{{ selectedPet.adopt_reason || '寻找长期归宿' }}</p>
+                </div>
               </div>
+
+              <!-- 健康详细档案 -->
+              <div class="p-6 bg-gray-50 dark:bg-white/5 rounded-[2rem] space-y-4 border border-gray-100 dark:border-white/5">
+                <p class="text-xs font-black text-gray-400 flex items-center gap-2 tracking-widest"><Stethoscope :size="16" /> 深度健康/生理档案</p>
+                <div class="grid grid-cols-3 gap-4 text-center">
+                   <div class="space-y-1"><p class="text-[9px] text-gray-400">性别</p><p class="text-sm font-black">{{ selectedPet.feature_gender || '未知' }}</p></div>
+                   <div class="space-y-1"><p class="text-[9px] text-gray-400">绝育状态</p><p class="text-sm font-black text-green-500">{{ selectedPet.sterilized ? '已绝育' : '未绝育' }}</p></div>
+                   <div class="space-y-1"><p class="text-[9px] text-gray-400">健康状况</p><p class="text-sm font-black">{{ selectedPet.health_status || '健康良好' }}</p></div>
+                </div>
+                <div v-if="selectedPet.medical_needs" class="p-4 bg-red-500/5 rounded-2xl border border-red-500/10">
+                   <p class="text-[10px] font-bold text-red-500">备注/隐藏病史：{{ selectedPet.medical_needs }}</p>
+                </div>
+              </div>
+
+              <!-- 送养方联系信息 (加密逻辑) -->
+              <div class="p-6 bg-slate-900 text-white rounded-[2rem] shadow-xl space-y-4">
+                <p class="text-[10px] font-black text-orange-500 flex items-center gap-2 uppercase tracking-widest"><User :size="14" /> 送养人信息</p>
+                <div class="flex items-center justify-between">
+                   <div class="space-y-1">
+                      <p class="text-base font-black">{{ selectedPet.owner_name }}</p>
+                      <p class="text-xs font-bold text-gray-400 flex items-center gap-2"><Mail :size="12" /> {{ selectedPet.owner_email }}</p>
+                   </div>
+                   <div v-if="selectedPet.owner_contact_hidden" class="flex flex-col items-end gap-1.5">
+                      <div class="px-4 py-1.5 bg-white/10 rounded-xl flex items-center gap-2 text-[10px] font-bold"><Lock :size="12" /> 联系方式加密</div>
+                      <p class="text-[8px] text-gray-500 italic">领养申请通过后自动解锁</p>
+                   </div>
+                   <div v-else class="px-4 py-2 bg-green-500 text-white rounded-xl text-[10px] font-black animate-pulse">联系方式已解锁</div>
+                </div>
+              </div>
+
+              <!-- 领养评估通道 -->
+              <div class="pt-6 border-t dark:border-white/5">
+                <button v-if="applyStep === 0" @click="applyStep = 1" class="w-full py-5 bg-orange-500 text-white rounded-[1.5rem] font-black text-base shadow-xl shadow-orange-500/20 active:scale-95 transition-all flex items-center justify-center gap-3">
+                  <ShieldCheck :size="20" /> 开始 AI 领养评估
+                </button>
+
+                <div v-else class="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+                  <div v-if="isLoadingQuestions" class="py-10 flex flex-col items-center gap-3">
+                    <Loader2 class="animate-spin text-orange-500" :size="32" />
+                    <p class="text-xs font-bold text-gray-400">AI 专家正在分析该宠物特征并生成提问...</p>
+                  </div>
+                  <template v-else>
+                    <!-- AI 针对性提问 -->
+                    <div v-if="applyStep === 1" class="space-y-6">
+                       <div class="flex items-center gap-2 text-sm font-black text-orange-500 uppercase tracking-widest"><Sparkles :size="18" /> AI 针对性追问</div>
+                       <div v-for="q in smartQuestions" :key="q.key" class="space-y-3">
+                          <p class="text-sm font-bold text-gray-600 dark:text-gray-300">{{ q.question }}</p>
+                          <div class="flex flex-wrap gap-2">
+                             <button v-for="opt in q.options" :key="opt.value" @click="questionAnswers[q.key] = opt.value" :class="questionAnswers[q.key] === opt.value ? 'bg-orange-500 text-white shadow-md' : 'bg-white dark:bg-white/5 border border-gray-100 dark:border-white/10 text-gray-500'" class="px-4 py-2 rounded-xl text-xs font-bold transition-all">{{ opt.label }}</button>
+                          </div>
+                       </div>
+                       <button @click="applyStep = 2" class="w-full py-4 bg-slate-800 text-white rounded-2xl font-black text-sm">下一步：确认条件</button>
+                    </div>
+                    <!-- 量化条件确认 -->
+                    <div v-if="applyStep === 2" class="space-y-6">
+                       <div class="space-y-3">
+                          <div class="flex justify-between text-xs font-black"><span>月均养宠预算</span><span class="text-orange-500">{{ applicationForm.monthly_budget }} 元</span></div>
+                          <input type="range" v-model="applicationForm.monthly_budget" min="100" max="3000" step="50" class="w-full accent-orange-500" />
+                       </div>
+                       <div class="p-4 bg-orange-50 dark:bg-orange-500/5 rounded-2xl border border-orange-100 dark:border-orange-500/10">
+                          <p class="text-[10px] text-orange-600 dark:text-orange-400 leading-relaxed font-bold">💡 提示：提交后，AI 将综合您的语义动机、量化能力及历史相似案例进行深度审计。结果将在个人中心实时更新。</p>
+                       </div>
+                       <div class="flex gap-3">
+                          <button @click="applyStep = 1" class="px-6 py-4 bg-gray-100 dark:bg-white/5 rounded-2xl font-bold text-sm">上一步</button>
+                          <button @click="submitApplication" :disabled="isSubmittingApplication" class="flex-1 py-4 bg-orange-500 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20">
+                            <Loader2 v-if="isSubmittingApplication" class="animate-spin" :size="18" /> 确认并提交正式申请
+                          </button>
+                       </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
             </div>
-          </div>
+          </BaseCard>
         </div>
-
-        <BaseCard class="p-6 md:p-8 space-y-6 h-fit sticky top-6">
-          <div v-if="selectedPet" class="space-y-6">
-            <div>
-              <p class="text-xs font-black uppercase tracking-widest text-orange-500">候选详情</p>
-              <h3 class="text-3xl font-black text-gray-900 dark:text-white mt-2">{{ selectedPet.name }}</h3>
-              <p class="text-gray-500 dark:text-gray-400 mt-1">{{ selectedPet.species }}</p>
-            </div>
-
-            <img :src="selectedPet.img" class="w-full h-64 object-cover rounded-[2rem]" />
-            <p class="text-base leading-7 text-gray-600 dark:text-gray-300">{{ selectedPet.desc }}</p>
-
-            <div v-if="displayConstraintTags(selectedPet).length" class="space-y-2">
-              <p class="text-xs font-black uppercase tracking-widest text-blue-500 flex items-center gap-2"><ListFilter :size="14" /> 约束过滤重点</p>
-              <div class="flex flex-wrap gap-2">
-                <span v-for="tag in displayConstraintTags(selectedPet)" :key="tag" class="px-3 py-2 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-300 text-xs font-bold">{{ tag }}</span>
-              </div>
-            </div>
-
-            <div v-if="getRecommendationForPet(selectedPet.id)" class="space-y-3">
-              <p class="text-xs font-black uppercase tracking-widest text-green-500">推荐理由</p>
-              <div class="flex flex-wrap gap-2">
-                <span v-for="reason in getRecommendationForPet(selectedPet.id)?.reasons || []" :key="reason" class="px-3 py-2 rounded-full bg-green-500/10 text-green-700 dark:text-green-300 text-xs font-bold">{{ reason }}</span>
-              </div>
-            </div>
-
-            <button @click="router.push('/profile')" class="w-full py-4 rounded-2xl bg-orange-500 text-white font-black flex items-center justify-center gap-2">
-              <Heart :size="18" /> 先完善画像再提交申请
-            </button>
-          </div>
-
-          <div v-else class="py-10 text-center text-gray-500 dark:text-gray-400 space-y-3">
-            <Sparkles class="mx-auto text-orange-500" :size="28" />
-            <p class="font-bold">点击左侧宠物卡片，查看候选详情、约束条件和推荐理由。</p>
-          </div>
-        </BaseCard>
-      </div>
-    </section>
+      </Transition>
+    </Teleport>
   </div>
 </template>
+
+<style scoped>
+.fade-enter-active, .fade-leave-active { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+.fade-enter-from, .fade-leave-to { opacity: 0; transform: scale(0.95); }
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(249, 115, 22, 0.1); border-radius: 10px; }
+</style>

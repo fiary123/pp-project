@@ -52,13 +52,13 @@ export const useAuthStore = defineStore('auth', {
   state: () => readStoredSession(),
 
   getters: {
-    // 判断是否为管理员
-    isAdmin: (state) => state.isLoggedIn && ['admin'].includes(state.user?.role),
-    // 获取当前角色名（中文显示）
+    // 判断是否具备管理权限 (论文语义：系统审计员)
+    isAdmin: (state) => state.isLoggedIn && state.user?.role === 'admin',
+    // 获取当前角色名（论文视角展示）
     roleName: (state) => {
       const roles: Record<string, string> = {
-        'user': '爱宠人士',
-        'admin': '系统管理员',
+        'user': '爱宠人士 / 领养申请人',
+        'admin': '系统审计员 / 机构管理员',
       }
       return roles[state.user?.role] || '游客'
     }

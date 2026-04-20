@@ -32,7 +32,7 @@ def ensure_tables(conn: sqlite3.Connection):
         username TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
         password TEXT NOT NULL,
-        role TEXT DEFAULT 'individual',
+        role TEXT DEFAULT 'user',
         status TEXT DEFAULT 'active',   -- active, muted, banned
         occupation TEXT,
         contact TEXT,
@@ -77,6 +77,10 @@ def ensure_tables(conn: sqlite3.Connection):
         pass
     try:
         cur.execute('ALTER TABLE pets ADD COLUMN source_post_id INTEGER')
+    except Exception:
+        pass
+    try:
+        cur.execute('ALTER TABLE pets ADD COLUMN location TEXT')
     except Exception:
         pass
 
@@ -553,6 +557,7 @@ def ensure_tables(conn: sqlite3.Connection):
         pet_id INTEGER UNIQUE NOT NULL REFERENCES pets(id) ON DELETE CASCADE,
         species TEXT,
         age_stage TEXT,
+        gender TEXT,
         size_level TEXT,
         health_status TEXT,
         sterilized INTEGER DEFAULT 0,
@@ -572,6 +577,7 @@ def ensure_tables(conn: sqlite3.Connection):
     for col, definition in [
         ('species', 'TEXT'),
         ('age_stage', 'TEXT'),
+        ('gender', 'TEXT'),
         ('size_level', 'TEXT'),
         ('health_status', 'TEXT'),
         ('sterilized', 'INTEGER DEFAULT 0'),
