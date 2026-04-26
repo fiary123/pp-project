@@ -79,13 +79,14 @@ def get_application_detail(application_id: int, current_user: dict = Depends(get
         review = cursor.fetchone()
         if review:
             review_dict = dict(review)
+            # 深度解析三阶段数据，确保前端渲染无碍
             for json_key in ('agent_outputs_json', 'consensus_result_json', 'route_decision'):
                 val = review_dict.get(json_key)
                 if val and isinstance(val, str):
                     try:
                         review_dict[json_key] = json.loads(val)
                     except Exception:
-                        pass
+                        review_dict[json_key] = {}
             app_dict['ai_review'] = review_dict
         else:
             app_dict['ai_review'] = None
@@ -113,6 +114,7 @@ def get_application_detail(application_id: int, current_user: dict = Depends(get
 async def update_owner_decision(
     application_id: int,
     request: OwnerApplicationDecisionRequest,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -202,6 +204,23 @@ async def update_owner_decision(
         except Exception as e:
             print(f"Failed to send notification: {e}")
 
+        # --- [新增] 隐性偏好学习逻辑 (Memory Upgrade) ---
+        try:
+            if request.status in ['approved', 'rejected']:
+                # 获取当时领养人的结构化特征
+                cursor.execute("SELECT assessment_payload FROM applications WHERE id = ?", (application_id,))
+                app_payload_row = cursor.fetchone()
+                if app_payload_row:
+                    applicant_features = json.loads(app_payload_row[0])
+                    from src.web.services.adoption_memory import update_publisher_implicit_prefs
+                    update_publisher_implicit_prefs(
+                        publisher_id=current_user['id'],
+                        applicant_features=applicant_features,
+                        decision=request.status
+                    )
+        except Exception as e:
+            print(f"Implicit preference learning failed: {e}")
+
         conn.commit()
         return {"status": "success", "next_flow_status": next_flow_status}
 
@@ -269,7 +288,11 @@ async def submit_application_feedback(
         from src.web.services.adoption_memory import update_signal_weights_from_feedback
         update_signal_weights_from_feedback(
             application_id=application_id,
-            overall_satisfaction=request.overall_satisfaction
+            overall_satisfaction=request.overall_satisfaction,
+            would_recommend=request.would_recommend,
+            # 这里的 followup_questions 如果表单有提供可以传入
+            # 暂时从 request 结构中尝试获取可选字段
+            followup_questions=getattr(request, 'followup_questions', None)
         )
 
         # 3. 更新流程状态

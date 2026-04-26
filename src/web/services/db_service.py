@@ -172,6 +172,8 @@ def ensure_tables(conn: sqlite3.Connection):
         ('decision_time', 'DATETIME'),
         ('accept_return_visit', 'INTEGER DEFAULT 0'),
         ('application_reason', 'TEXT'),
+        ('assessment_tier', 'TEXT'),
+        ('route_reasons', 'TEXT'),
     ]:
         try:
             cur.execute(f'ALTER TABLE applications ADD COLUMN {col} {definition}')
@@ -213,6 +215,7 @@ def ensure_tables(conn: sqlite3.Connection):
     cur.execute('''CREATE TABLE IF NOT EXISTS agent_trace_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         trace_id TEXT NOT NULL,
+        user_id INTEGER,
         endpoint TEXT,
         agent_name TEXT,
         tool_name TEXT,
@@ -222,6 +225,10 @@ def ensure_tables(conn: sqlite3.Connection):
         output_msg TEXT,
         create_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
+    try:
+        cur.execute('ALTER TABLE agent_trace_logs ADD COLUMN user_id INTEGER')
+    except Exception:
+        pass
 
     # ── nutrition_plans ────────────────────────────────────────────────────
     cur.execute('''CREATE TABLE IF NOT EXISTS nutrition_plans (
@@ -303,12 +310,19 @@ def ensure_tables(conn: sqlite3.Connection):
         agent_outputs_json TEXT DEFAULT '[]',
         consensus_result_json TEXT DEFAULT '{}',
         route_decision TEXT DEFAULT '',
+        ai_readiness_score REAL,
+        ai_summary TEXT,
         overall_score REAL,
         consensus_score REAL,
         disagreement_score REAL,
         risk_level TEXT DEFAULT 'Medium',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
+    for col, definition in [('ai_readiness_score', 'REAL'), ('ai_summary', 'TEXT')]:
+        try:
+            cur.execute(f'ALTER TABLE adoption_ai_reviews ADD COLUMN {col} {definition}')
+        except Exception:
+            pass
 
     # ── adoption_followups ─────────────────────────────────────────────────
     cur.execute('''CREATE TABLE IF NOT EXISTS adoption_followups (
@@ -330,6 +344,7 @@ def ensure_tables(conn: sqlite3.Connection):
         decision_result TEXT DEFAULT '',
         owner_followed_ai INTEGER,
         followup_outcome TEXT DEFAULT '',
+        feature_snapshot_json TEXT DEFAULT '{}',
         risk_tags_json TEXT DEFAULT '[]',
         feedback_id INTEGER,
         embedding_status TEXT DEFAULT 'pending',
@@ -350,7 +365,17 @@ def ensure_tables(conn: sqlite3.Connection):
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
 
-    # ── adoption_signal_weights ────────────────────────────────────────────
+    # ── publisher_implicit_preferences ────────────────────────────────────
+    cur.execute('''CREATE TABLE IF NOT EXISTS publisher_implicit_preferences (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        publisher_id INTEGER NOT NULL,
+        signal_key TEXT NOT NULL,      -- 特征信号，如 'has_pet_experience'
+        positive_count INTEGER DEFAULT 0,
+        negative_count INTEGER DEFAULT 0,
+        current_weight REAL DEFAULT 1.0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(publisher_id, signal_key)
+    )''')
     cur.execute('''CREATE TABLE IF NOT EXISTS adoption_signal_weights (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         signal_type TEXT NOT NULL,

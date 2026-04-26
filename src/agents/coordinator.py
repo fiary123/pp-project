@@ -150,39 +150,54 @@ class CoordinatorAgent:
                 logger.warning(f"run_knowledge_expert failed: {e}")
                 reply_text = "知识库查询中，请稍候... 如急需帮助，可直接联系我们的客服。"
 
-        # ── 领养资质评估（五层架构 CrewAI）──────────────────────────
+        # ── 领养资质评估（统一分级路由架构）──────────────────────────
         elif intent == "adoption_audit":
             new_context["current_stage"] = "auditing"
             target_pet = context.get("target_pet", "")
             try:
-                from src.agents.agents import run_adoption_assessment
-                # 从会话上下文中取已收集到的信息
+                from src.web.services.assessment_service import AdoptionAssessmentService
+                
+                # 构造符合 T1 路由协议的申请数据
                 prefs = context.get("preferences", {})
-                result = run_adoption_assessment(
-                    applicant_info=message,
-                    target_species=context.get("target_species", "cat"),
-                    target_pet_name=target_pet or "未指定",
-                    monthly_budget=float(prefs.get("monthly_budget", 0)),
-                    daily_companion_hours=float(prefs.get("daily_companion_hours", 0)),
-                    has_pet_experience=bool(prefs.get("has_pet_experience", False)),
-                    housing_type=prefs.get("housing_type", "apartment"),
-                    existing_pets=prefs.get("existing_pets", ""),
-                )
+                applicant_data = {
+                    "applicant_info": message,
+                    "target_species": context.get("target_species", "cat"),
+                    "target_pet_name": target_pet or "未指定",
+                    "monthly_budget": float(prefs.get("monthly_budget", 0)),
+                    "daily_companion_hours": float(prefs.get("daily_companion_hours", 0)),
+                    "has_pet_experience": bool(prefs.get("has_pet_experience", False)),
+                    "housing_type": prefs.get("housing_type", "apartment"),
+                    "existing_pets": prefs.get("existing_pets", ""),
+                    "application_reason": message
+                }
+
+                # 调用统一服务（集成 T0 硬拦截、T1 分诊路由、T2 判例锚定及对抗辩论）
+                service = AdoptionAssessmentService()
+                result = await service.run_full_assessment(user_id=user_id, applicant_data=applicant_data)
+
                 score = result.get("readiness_score", 0)
-                decision = result.get("decision", "review_required")
-                decision_text = {
-                    "pass": "✅ 初步评估通过",
-                    "conditional_pass": "⚠️ 条件通过（需补充材料）",
-                    "review_required": "📋 需要人工复核",
-                    "reject": "❌ 暂不建议领养"
-                }.get(decision, "📋 需要人工复核")
+                tier = result.get("triage_tier", "DEEP_REVIEW")
+                
+                # 构造符合学术叙事的响应
+                tier_label = {
+                    "HARD_REJECT": "🚫 硬性拦截",
+                    "FAST_TRACK": "⚡ 快速评估通道",
+                    "DEEP_REVIEW": "🏛️ 专家委员会深度审议"
+                }.get(tier, "🏛️ 专家委员会评审")
+
                 reply_text = (
-                    f"**领养资质评估结果**\n\n"
-                    f"准备度评分：**{score}/100**\n"
-                    f"评估结论：{decision_text}\n\n"
+                    f"**领养资质评估完成**\n"
+                    f"评估路径：{tier_label}\n"
+                    f"准备度评分：**{score}/100**\n\n"
+                    f"{result.get('summary', '评估结论已生成')}\n\n"
                     f"{result.get('final_summary', '')}"
                 )
                 new_context["current_stage"] = "audit_done"
+                ui_actions.append({"type": "show_assessment_result", "data": result})
+                new_context["last_score"] = score
+            except Exception as e:
+                logger.error(f"Coordinator audit logic failed: {e}")
+                reply_text = "评估系统繁忙，请稍后再试或前往个人中心查看历史报告。"
                 new_context["last_assessment"] = {"score": score, "decision": decision}
                 ui_actions.append({"type": "show_assessment_result", "data": result})
             except Exception as e:

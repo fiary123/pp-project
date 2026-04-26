@@ -25,22 +25,47 @@
 
 ---
 
-## 2. 快速启动
+## 2. 启动说明 (前后端分别启动)
 
-### 2.1 后端启动
-在项目根目录下运行：
-```powershell
-./start.ps1
-```
-*该脚本将自动初始化数据库并启动 FastAPI 服务（默认端口 8000）。*
+### 2.1 后端服务 (Backend)
 
-### 2.2 前端启动
-进入 `pet-frontend` 目录并运行：
-```bash
-npm install
-npm run dev
-```
-*访问浏览器：`http://localhost:5173`*
+后端采用 FastAPI 框架，请按照以下步骤启动：
+
+1. **环境激活** (可选):
+   确保您已进入虚拟环境（如 Conda 或 venv）。
+
+2. **数据库初始化**:
+   如果是首次运行，或需要重置测试数据，请在项目根目录下执行：
+   ```bash
+   python src/database/init_db.py
+   ```
+
+3. **启动 FastAPI 服务**:
+   在项目根目录下运行以下命令（默认端口 8000）：
+   ```bash
+   python -m uvicorn src.web.app:app --host 127.0.0.1 --port 8000 --reload
+   ```
+   *服务启动后，可通过 `http://127.0.0.1:8000/docs` 查看 API 文档。*
+
+### 2.2 前端服务 (Frontend)
+
+前端采用 Vue 3 + Vite 架构，请按照以下步骤启动：
+
+1. **进入前端目录**:
+   ```bash
+   cd pet-frontend
+   ```
+
+2. **安装依赖** (首次运行需执行):
+   ```bash
+   npm install
+   ```
+
+3. **启动开发服务器**:
+   ```bash
+   npm run dev
+   ```
+   *访问浏览器：`http://localhost:5173`。前端已配置代理，将自动转发 `/api` 请求至后端 8000 端口。*
 
 ---
 

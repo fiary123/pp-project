@@ -68,44 +68,29 @@ class ApplicationService:
             assessment_payload = json.dumps(applicant_data, ensure_ascii=False)
             
             # 插入申请
+            # 插入申请 (状态统一初始化为 evaluating)
             cursor.execute(
                 """
                 INSERT INTO applications 
                 (user_id, pet_id, pet_owner_id, apply_reason, assessment_payload, status, flow_status)
-                VALUES (?, ?, ?, ?, ?, 'pending', 'submitted')
+                VALUES (?, ?, ?, ?, ?, 'evaluating', 'evaluating')
                 """,
                 (user_id, pet_id, pet_owner_id, apply_reason, assessment_payload)
             )
             application_id = cursor.lastrowid
-            
+
             # 记录流程事件: submitted
             flow_engine.append_event(
                 conn,
                 application_id=application_id,
                 event_type="SUBMIT_APPLICATION",
                 from_status=None,
-                to_status="submitted",
+                to_status="evaluating",
                 actor_role="applicant",
                 actor_id=user_id,
                 payload=applicant_data
             )
-            
-            # 记录流程事件: submitted -> evaluating
-            flow_engine.append_event(
-                conn,
-                application_id=application_id,
-                event_type="START_EVALUATION",
-                from_status="submitted",
-                to_status="evaluating",
-                actor_role="system",
-                payload={"info": "系统自动启动评估"}
-            )
-            
-            # 更新申请表的流程状态为 evaluating
-            cursor.execute(
-                "UPDATE applications SET flow_status = 'evaluating' WHERE id = ?",
-                (application_id,)
-            )
-            
+
             conn.commit()
             return application_id
+

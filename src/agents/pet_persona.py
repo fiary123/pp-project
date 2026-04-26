@@ -12,3 +12,16 @@ def get_pet_persona_agent(llm, pet_name, pet_species, pet_desc):
         verbose=True,
         allow_delegation=False
     )
+
+def _build_local_pet_reply(user_msg: str, pet_name: str, pet_species: str, pet_desc: str, observer_profile: dict) -> str:
+    """当 LLM 故障时的本地兜底回复逻辑"""
+    prefix = "喵~ " if pet_species == "猫" else "汪！"
+    return f"{prefix}你好呀，我是{pet_name}。虽然我现在还没法思考太深奥的问题，但我能感觉到你是个有爱心的人。我的愿望是：{pet_desc[:30]}..."
+
+async def generate_edge_voice(text: str, species: str) -> bytes:
+    """
+    语音合成兜底函数。
+    如需集成真实 TTS (如 Edge-TTS)，可在此处扩展。
+    目前返回空字节以保证链路不中断。
+    """
+    return b""

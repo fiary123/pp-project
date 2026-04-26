@@ -23,8 +23,8 @@ def get_pets(location: Optional[str] = Query(None, description="按地区筛选"
                 f.temperament_tags, f.good_with_children, f.good_with_other_pets,
                 f.medical_needs, f.companionship_need, f.budget_need_level, f.special_care_flag,
                 r.allow_beginner, r.min_budget_level, r.min_companion_hours, r.required_housing_type,
-                r.forbid_other_pets, r.forbid_children,
-                r.require_stable_housing, r.require_return_visit, r.special_notes
+                r.forbid_other_pets, r.forbid_children, r.require_experience,
+                r.require_stable_housing, r.require_return_visit, r.region_limit, r.special_notes
             FROM pets p
             JOIN users u ON p.owner_id = u.id
             LEFT JOIN pet_features f ON p.id = f.pet_id
@@ -44,15 +44,20 @@ def get_pets(location: Optional[str] = Query(None, description="按地区筛选"
         # 处理联系方式可见性
         if current_user:
             uid = current_user['id']
-            # 查询该用户已通过的申请
-            cursor.execute("SELECT pet_id FROM applications WHERE user_id = ? AND status IN ('approved', 'adopted', 'followup_completed')", (uid,))
+            # 查询该用户已通过的申请 (状态必须是 approved 或后续状态)
+            cursor.execute("""
+                SELECT pet_id FROM applications 
+                WHERE user_id = ? AND status IN ('approved', 'adopted', 'followup_completed')
+            """, (uid,))
             approved_pet_ids = {row[0] for row in cursor.fetchall()}
             
             for p in results:
-                # 如果不是本人且申请未通过，则隐藏关键联系信息
+                # 只有宠物主人或已通过审核的申请人能看联系方式
                 if p['owner_id'] != uid and p['id'] not in approved_pet_ids:
                     p['owner_contact_hidden'] = True
-                    p['owner_email'] = p['owner_email'][0] + "***@" + p['owner_email'].split('@')[-1]
+                    # 强力遮写敏感邮箱
+                    email_parts = p['owner_email'].split('@')
+                    p['owner_email'] = f"{email_parts[0][0]}***@{email_parts[1]}"
                 else:
                     p['owner_contact_hidden'] = False
         else:

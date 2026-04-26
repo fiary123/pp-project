@@ -79,3 +79,17 @@
 7. **AI Service** -> **agent_trace_logs**: 记录执行路径、耗时及 fallback_used
 8. **AI Service** -> **nutrition_plans**: 持久化新方案，标记旧方案为历史状态
 9. **AI API** -> **用户**: 返回带”置信度”评分的全新营养报告
+
+---
+
+## 4. 领养评估生命周期架构 (Adoption Review Lifecycle)
+
+该模块实现了基于 **AI 委员会评审 (AI Committee Review)** 架构的深度审计流程，形成了“申请 -> 委员会审计 -> 决策 -> 后验学习”的完整闭环。
+
+- **核心机制**：通过 **多智能体共识 (Multi-Agent Consensus)** 机制执行。
+- **三阶段评估流**：
+    1. **Phase 1 (独立评审)**：画像专家、环境专家、品种专家根据不同维度生成 Agent Contracts。
+    2. **Phase 2 (共识表决)**：汇总专家意见，计算一致性水平，生成审计摘要。
+    3. **Phase 3 (冲突仲裁)**：针对高分歧点，由高级仲裁官输出决定性意见。
+- **核心产出**：结构化 **AI 审计报告**（含 Readiness Score、风险标签云及建议追问项）。
+- **后验反馈闭环**：基于人类最终的领养结局反馈，通过 RLHF 思想动态修正 `adoption_signal_weights` 表中的风险特征权重，实现系统的持续进化。

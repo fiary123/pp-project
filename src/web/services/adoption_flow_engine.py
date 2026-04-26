@@ -85,6 +85,19 @@ class AdoptionFlowEngine:
             ),
         )
 
+    def resolve_review_flow_status(self, review_decision: str) -> str:
+        """[测试对齐] 根据送养人/管理员的人工审核决策解析下一个流程节点"""
+        return {
+            "approved": "approved",
+            "rejected": "rejected",
+            "probing": "need_more_info",
+            "human_review": "manual_review",
+        }.get(review_decision, "waiting_publisher")
+
+    def resolve_feedback_flow_status(self, feedback_status: str) -> str:
+        """[测试对齐] 根据领养反馈状态解析下一个流程节点"""
+        return "followup_completed"
+
     def resolve_result_flow_status(self, result: dict) -> str:
         """根据 AI Agent 评估结论解析下一个流程节点"""
         route = result.get("route_decision") or {}

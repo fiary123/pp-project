@@ -35,37 +35,63 @@ def collect_posterior_signal_weights(
     route_decision: str,
     risk_tags: List[str],
     followup_questions: List[str],
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
-    兼容 assessment_service 的后验信号权重入口。
+    [后验驱动评估]：从数据库加载经过真实反馈修正后的动态权重。
     """
-    risk_penalties = {
-        "hard_rule_block": -0.8,
-        "budget_risk": -0.45,
-        "time_risk": -0.45,
-        "housing_risk": -0.35,
-        "medical_risk": -0.3,
-        "fallback_response": -0.2,
-        "information_gap": -0.15,
+    # 基础硬编码兜底
+    base_penalties = {
+        "hard_rule_block": -0.8, "budget_risk": -0.45, "time_risk": -0.45,
+        "housing_risk": -0.35, "medical_risk": -0.3, "information_gap": -0.15,
     }
-    route_weights = {
-        "reject_candidate": -0.8,
-        "manual_review": -0.4,
-        "followup": 0.25,
-        "publisher_review": 0.1,
+    base_routes = {
+        "reject_candidate": -0.8, "manual_review": -0.4, "followup": 0.25, "publisher_review": 0.1,
     }
 
-    risk_values = [risk_penalties.get(str(tag), 0.0) for tag in (risk_tags or [])]
-    average_risk_weight = round(sum(risk_values) / len(risk_values), 3) if risk_values else 0.0
-
-    followup_count = len(followup_questions or [])
-    average_followup_weight = round(min(0.6, followup_count * 0.15), 3) if followup_count else 0.0
-
-    return {
-        "average_risk_weight": average_risk_weight,
-        "average_followup_weight": average_followup_weight,
-        "route_weight": round(route_weights.get(route_decision or "", 0.0), 3),
+    dynamic_weights: Dict[str, Dict[str, float]] = {
+        "risk_tag": {}, "route_decision": {}, "followup_question": {}
     }
+
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            # 加载所有已学习的修正信号 (Layer 4: Self-correction)
+            cursor.execute("SELECT signal_type, signal_key, positive_count, negative_count FROM adoption_signal_weights")
+            for row in cursor.fetchall():
+                stype, skey, pos, neg = row
+                if stype in dynamic_weights:
+                    # 计算偏移量：每个负面反馈降低权重，每个正面反馈提升权重
+                    # 加大负面惩罚力度 (0.2) 以确保闭环纠偏灵敏度
+                    offset = (pos * 0.05) - (neg * 0.2)
+                    dynamic_weights[stype][skey] = offset
+
+            # 1. 计算决策路径得分
+            route_val = base_routes.get(route_decision, 0.0)
+            route_val += dynamic_weights["route_decision"].get(route_decision, 0.0)
+
+            # 2. 计算风险标签总分 (平均值)
+            risk_vals = []
+            for tag in (risk_tags or []):
+                val = base_penalties.get(tag, 0.0)
+                val += dynamic_weights["risk_tag"].get(tag, 0.0)
+                risk_vals.append(val)
+            
+            # 3. 计算追问项权重
+            follow_vals = {}
+            for q in (followup_questions or []):
+                val = 0.15 # 基础贡献度
+                val += dynamic_weights["followup_question"].get(q, 0.0)
+                follow_vals[q] = round(val, 3)
+
+            return {
+                "route_weight": round(route_val, 3),
+                "average_risk_weight": round(sum(risk_vals)/len(risk_vals), 3) if risk_vals else 0.0,
+                "risk_tag_weights": {t: (base_penalties.get(t,0.0) + dynamic_weights["risk_tag"].get(t,0.0)) for t in (risk_tags or [])},
+                "followup_weights": follow_vals
+            }
+    except Exception as exc:
+        logger.error(f"collect_posterior_signal_weights failed: {exc}")
+        return {"route_weight": 0.0, "average_risk_weight": 0.0, "risk_tag_weights": {}, "followup_weights": {}}
 
 
 def build_closed_loop_stats() -> Dict[str, Any]:
@@ -136,10 +162,10 @@ class AdoptionMemoryService:
             with get_db() as conn:
                 cursor = conn.cursor()
                 # 1. 获取候选集 (召回最近的活跃案例)
-                # 修复：移除不存在的 user_id 和 feature_snapshot_json 字段
+                # 统一字段名：增加 feature_snapshot_json 以支持结构化特征匹配
                 cursor.execute("""
                     SELECT id, application_id, case_summary, decision_result, 
-                           owner_followed_ai, risk_tags_json
+                           owner_followed_ai, risk_tags_json, feature_snapshot_json
                     FROM adoption_case_memory 
                     ORDER BY id DESC LIMIT 50
                 """)
@@ -166,30 +192,79 @@ class AdoptionMemoryService:
             return []
 
     def _calculate_hybrid_similarity(self, current: Dict[str, Any], case: Dict[str, Any]) -> float:
-        """混合相似度算法：0.6 * 结构化分 + 0.4 * 文本语义分"""
-        
-        # A. 结构化特征分 (Numerical Similarity)
-        # 暂时由于 feature_snapshot_json 字段缺失，我们主要依赖文本相似度和风险标签重合度
-        risk_tags = json.loads(case.get("risk_tags_json") or "[]")
-        
-        # 基础分
-        struct_score = 0.5
-        
-        # B. 文本语义分 (Keyword Overlap)
-        text_current = set(str(current.get("application_reason", "") + current.get("applicant_info", "")))
-        text_case = set(case.get("case_summary", ""))
-        
-        if not text_current or not text_case:
-            text_score = 0.0
-        else:
-            intersection = text_current.intersection(text_case)
-            union = text_current.union(text_case)
-            text_score = len(intersection) / len(union)
+        """
+        [创新点：混合相似度算法]：
+        计算 (结构化特征分 * 0.4) + (风险标签分 * 0.3) + (语义关键词分 * 0.3)
+        """
+        # 1. 结构化特征分 (0.4)
+        struct_score = 0.0
+        try:
+            hist_feats = json.loads(case.get("feature_snapshot_json") or "{}")
+            if hist_feats:
+                # 预算相似度 (归一化距离)
+                curr_b = float(current.get("monthly_budget", 500))
+                hist_b = float(hist_feats.get("monthly_budget", 500))
+                budget_sim = 1.0 - min(1.0, abs(curr_b - hist_b) / max(curr_b, hist_b, 1))
+                
+                # 经验相似度 (布尔匹配)
+                curr_e = bool(current.get("has_pet_experience", False))
+                hist_e = bool(hist_feats.get("has_pet_experience", False))
+                exp_sim = 1.0 if curr_e == hist_e else 0.5
+                
+                # 陪伴时间相似度
+                curr_t = float(current.get("daily_companion_hours", 2))
+                hist_t = float(hist_feats.get("daily_companion_hours", 2))
+                time_sim = 1.0 - min(1.0, abs(curr_t - hist_t) / max(curr_t, hist_t, 1))
+                
+                struct_score = (budget_sim + exp_sim + time_sim) / 3.0
+            else:
+                struct_score = 0.5
+        except: 
+            struct_score = 0.5
 
-        # C. 决策价值加权
+        # 2. 风险标签分 (0.3) - Jaccard Similarity
+        tag_score = 0.0
+        try:
+            # 尝试从当前数据中获取初步识别的风险 (如果有)
+            curr_tags = set(current.get("risk_tags", []))
+            hist_tags = set(json.loads(case.get("risk_tags_json") or "[]"))
+            if not curr_tags and not hist_tags:
+                tag_score = 1.0
+            elif not curr_tags or not hist_tags:
+                tag_score = 0.4
+            else:
+                intersection = curr_tags.intersection(hist_tags)
+                union = curr_tags.union(hist_tags)
+                tag_score = len(intersection) / len(union)
+        except: 
+            tag_score = 0.0
+
+        # 3. 语义关键词分 (0.3)
+        text_score = 0.0
+        try:
+            text_current = str(current.get("application_reason", "")).lower()
+            text_case = str(case.get("case_summary", "")).lower()
+            
+            # 简单关键词提取模拟 (过滤短词)
+            kw_curr = set([w for w in text_current.replace("，", " ").split() if len(w) > 1])
+            kw_case = set([w for w in text_case.replace("，", " ").split() if len(w) > 1])
+            
+            if kw_curr and kw_case:
+                text_score = len(kw_curr.intersection(kw_case)) / len(kw_curr.union(kw_case))
+            else:
+                # 降级到字符级匹配
+                c_curr, c_case = set(text_current), set(text_case)
+                if c_curr and c_case:
+                    text_score = len(c_curr.intersection(c_case)) / len(c_curr.union(c_case))
+        except: 
+            text_score = 0.0
+
+        # 4. 决策价值加权
+        # 送养人采纳了 AI 建议的案例具备更高参考价值
         val_weight = 1.2 if case.get("owner_followed_ai") == 1 else 1.0
 
-        return (0.6 * struct_score + 0.4 * text_score) * val_weight
+        final_score = (0.4 * struct_score + 0.3 * tag_score + 0.3 * text_score) * val_weight
+        return round(min(1.0, final_score), 4)
 
     def upsert_case_memory(self, application_id: int, **kwargs):
         """存入评估快照与特征向量(模拟)"""
@@ -227,6 +302,65 @@ memory_service = AdoptionMemoryService()
 # ==========================================
 # 3. 外部导出入口
 # ==========================================
+
+def build_case_anchor_context(similar_cases: List[Dict[str, Any]], memory_signal: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    [核心增强] 构建判例锚点上下文。
+    将相似案例转化为具有“判例效力”的文本，强制 AI 基于历史事实进行决策。
+    """
+    if not similar_cases:
+        return {
+            "case_anchor_text": "暂无相似历史判例参考，请基于专业知识进行独立评估。",
+            "case_signal": {
+                "positive_count": 0,
+                "negative_count": 0,
+                "average_similarity": 0,
+                "signal_summary": "无锚点参考"
+            }
+        }
+
+    # 计算平均相似度
+    sim_scores = [float(c.get('similarity_score', 0)) for c in similar_cases]
+    avg_sim = sum(sim_scores) / len(sim_scores) if sim_scores else 0
+    
+    pos_count = memory_signal.get("positive_count", 0)
+    neg_count = memory_signal.get("negative_count", 0)
+    
+    header = (
+        f"【历史判例锚点 (Case-based Anchoring)】\n"
+        f"共检索到 {len(similar_cases)} 个历史相似案例，平均相似度 {avg_sim:.2f}。\n"
+        f"其中正向结果 (Approved/Success) {pos_count} 个，负向结果 (Rejected/Failed) {neg_count} 个。\n\n"
+    )
+    
+    case_details = []
+    for i, case in enumerate(similar_cases, 1):
+        outcome = case.get('decision_result', 'pending')
+        sim = float(case.get('similarity_score', 0))
+        summary = case.get('case_summary', '无摘要')[:100]
+        case_details.append(
+            f"案例 {i}：相似度 {sim:.2f}，结果 {outcome}\n"
+            f"   摘要：{summary}..."
+        )
+    
+    footer = (
+        "\n请对比当前申请与上述案例的关键差异：\n"
+        "1. 是否具备成功案例中的核心特质？\n"
+        "2. 是否重蹈了失败案例中的覆辙？\n"
+        "不得仅凭主观印象给分，必须基于上述锚点进行逻辑推演。"
+    )
+    
+    anchor_text = header + "\n".join(case_details) + footer
+    
+    return {
+        "case_anchor_text": anchor_text,
+        "case_signal": {
+            "positive_count": pos_count,
+            "negative_count": neg_count,
+            "average_similarity": round(avg_sim, 2),
+            "signal_summary": memory_signal.get("signal_summary", "")
+        }
+    }
+
 
 def retrieve_similar_case_memories(current_data: Dict[str, Any], limit: int = 3) -> List[Dict[str, Any]]:
     """
@@ -374,17 +508,65 @@ def persist_followup_records(application_id: int, followups: Optional[List[Dict[
         logger.warning("persist_followup_records failed: %s", exc)
 
 
+def update_publisher_implicit_prefs(
+    publisher_id: int,
+    applicant_features: Dict[str, Any],
+    decision: str  # 'approved' or 'rejected'
+):
+    """
+    [创新点：隐性偏好学习] 从送养人的历史决策中学习其真实的“审美”偏好。
+    """
+    is_positive = decision == 'approved'
+    delta = 0.1 if is_positive else -0.1
+    
+    # 提取核心信号
+    signals = []
+    if applicant_features.get("pet_experience") and applicant_features["pet_experience"] != "无":
+        signals.append("has_pet_experience")
+    if applicant_features.get("housing_type") == "自有住房":
+        signals.append("housing_stability")
+    if float(applicant_features.get("available_time", 0)) >= 4:
+        signals.append("high_companionship")
+    if applicant_features.get("budget_level") == "高":
+        signals.append("financial_strength")
+
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            for signal in signals:
+                # 记录信号频率并更新权重
+                cursor.execute("""
+                    INSERT INTO publisher_implicit_preferences (publisher_id, signal_key, positive_count, negative_count, current_weight)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(publisher_id, signal_key) DO UPDATE SET
+                        positive_count = positive_count + ?,
+                        negative_count = negative_count + ?,
+                        current_weight = MAX(0.5, MIN(2.0, current_weight + ?)),
+                        updated_at = CURRENT_TIMESTAMP
+                """, (
+                    publisher_id, signal, 1 if is_positive else 0, 0 if is_positive else 1, 1.0 + delta,
+                    1 if is_positive else 0, 0 if is_positive else 1, delta
+                ))
+            conn.commit()
+            logger.info(f"Implicit preferences updated for Publisher:{publisher_id}")
+    except Exception as e:
+        logger.error(f"update_publisher_implicit_prefs failed: {e}")
+
+
 def update_signal_weights_from_feedback(
     application_id: int,
     overall_satisfaction: int,
     route_decision: str = "",
     risk_tags: Optional[List[str]] = None,
+    would_recommend: bool = True,
+    followup_questions: Optional[List[str]] = None,
 ):
     """
     [后验学习核心] 根据真实回访结果，动态修正模型对风险信号的权重认知。
-    满意度 >= 4 视为正向案例，<= 2 视为负向案例。
+    - 满意度 >= 4 且 愿意推荐 视为显著正向案例。
+    - 满意度 <= 2 视为显著负向案例。
     """
-    is_positive = overall_satisfaction >= 4
+    is_positive = overall_satisfaction >= 4 and would_recommend
     is_negative = overall_satisfaction <= 2
     
     if not is_positive and not is_negative:
@@ -397,22 +579,26 @@ def update_signal_weights_from_feedback(
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # 1. 如果未传入 tags，自动从 ai_review 快照中补齐
-            if risk_tags is None:
+            # 1. 如果未传入 tags 或 decision，自动从 ai_review 快照中补齐
+            if risk_tags is None or not route_decision:
                 cursor.execute(
-                    "SELECT consensus_result_json FROM adoption_ai_reviews WHERE application_id = ? ORDER BY id DESC LIMIT 1",
+                    "SELECT agent_outputs_json FROM adoption_ai_reviews WHERE application_id = ? ORDER BY id DESC LIMIT 1",
                     (application_id,)
                 )
                 row = cursor.fetchone()
                 if row:
                     try:
                         res = json.loads(row[0])
-                        risk_tags = res.get("risk_tags", [])
+                        if risk_tags is None:
+                            # 尝试从 risk_factors 中提取标签
+                            factors = res.get("risk_factors", [])
+                            risk_tags = [f.get("dimension") for f in factors if isinstance(f, dict)] if factors else []
                         if not route_decision:
-                            route_decision = res.get("next_action", "")
-                    except: risk_tags = []
+                            route_decision = res.get("decision", "")
+                    except: 
+                        risk_tags = risk_tags or []
 
-            # 2. 更新路径决策的后验表现
+            # 2. 更新路径决策的后验表现 (例如：通过、人工复核等决策的可靠性)
             if route_decision:
                 cursor.execute("""
                     INSERT INTO adoption_signal_weights (signal_type, signal_key, positive_count, negative_count, updated_at)
@@ -426,6 +612,7 @@ def update_signal_weights_from_feedback(
             # 3. 更新各个风险标签的真实风险抵扣度
             if risk_tags:
                 for tag in risk_tags:
+                    if not tag: continue
                     cursor.execute("""
                         INSERT INTO adoption_signal_weights (signal_type, signal_key, positive_count, negative_count, updated_at)
                         VALUES ('risk_tag', ?, ?, ?, CURRENT_TIMESTAMP)
@@ -435,7 +622,20 @@ def update_signal_weights_from_feedback(
                             updated_at = CURRENT_TIMESTAMP
                     """, (tag, delta_pos, delta_neg))
 
-            # 4. 同步更新案例记忆库结局
+            # 4. 更新追问项的有效性 (如果有补充)
+            if followup_questions:
+                for q in followup_questions:
+                    if not q: continue
+                    cursor.execute("""
+                        INSERT INTO adoption_signal_weights (signal_type, signal_key, positive_count, negative_count, updated_at)
+                        VALUES ('followup_question', ?, ?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(signal_type, signal_key) DO UPDATE SET
+                            positive_count = positive_count + excluded.positive_count,
+                            negative_count = negative_count + excluded.negative_count,
+                            updated_at = CURRENT_TIMESTAMP
+                    """, (q, delta_pos, delta_neg))
+
+            # 5. 同步更新案例记忆库结局
             cursor.execute("""
                 UPDATE adoption_case_memory 
                 SET decision_result = ?, 

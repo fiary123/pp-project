@@ -79,7 +79,7 @@ async def create_post(req: PostCreate, current_user: dict = Depends(get_current_
                 ),
             )
 
-            # pet_requirements (从 adoption_preferences 解析)
+            # pet_requirements (深度对齐评估引擎要求)
             prefs = req.adoption_preferences or {}
             cursor.execute(
                 """INSERT INTO pet_requirements
@@ -90,14 +90,14 @@ async def create_post(req: PostCreate, current_user: dict = Depends(get_current_
                 (
                     pet_id,
                     1 if prefs.get('allow_novice', True) else 0,
-                    '中' if prefs.get('require_financial_capacity') else None,
-                    2.0 if prefs.get('focus_companionship') else 0,
-                    None,
-                    0,
-                    0,
+                    prefs.get('min_budget_level', '中'),
+                    float(prefs.get('min_companion_hours', 2.0)),
+                    prefs.get('required_housing_type', '公寓'),
+                    1 if prefs.get('forbid_other_pets') else 0,
+                    1 if prefs.get('forbid_children') else 0,
                     1 if prefs.get('require_stable_housing') else 0,
                     1 if prefs.get('require_followup_updates', True) else 0,
-                    None,
+                    prefs.get('special_notes', '')
                 ),
             )
 
